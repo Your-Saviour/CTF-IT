@@ -45,7 +45,7 @@ Vulnerability modules typically include a shell script that introduces a misconf
 
 ## Verification Types
 
-The `verification` field defines how `collect.py` checks whether the user has completed the task.
+The `verification` field defines how the server checks whether the user has completed the task. The in-container `audit.py` collects a broad system snapshot, and the server matches it against the module's verification spec.
 
 ### `file_permissions`
 
@@ -165,8 +165,8 @@ id: world_writable_shadow
 name: World-writable /etc/shadow
 description: The /etc/shadow file has incorrect permissions, allowing any user to read or modify password hashes.
 type: vulnerability
-difficulty: easy
-points: 100
+difficulty: medium
+points: 200
 category: filesystem
 tags: [permissions, shadow, authentication]
 conflicts: []

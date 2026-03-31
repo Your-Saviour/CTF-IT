@@ -156,11 +156,11 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
 
 | Module | Points | Verification Type |
 |--------|--------|-------------------|
-| `world_writable_shadow` | 100 | `file_permissions` |
+| `world_writable_shadow` | 200 | `file_permissions` |
 | `suid_find` | 100 | `file_permissions` |
 | `writable_cron_script` | 200 | `file_permissions` |
 | `nopasswd_sudo` | 200 | `file_not_contains` |
-| `unauthorized_ssh_key` | 300 | `file_not_contains` |
+| `unauthorized_ssh_key` | 200 | `file_not_contains` |
 | `disable_ssh_root_login` | 100 | `file_contains` |
 | `change_root_password` | 100 | `password_changed` |
 | `install_fail2ban` | 200 | `service_running` |

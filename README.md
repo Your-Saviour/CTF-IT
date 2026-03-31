@@ -7,7 +7,6 @@ A CTF training platform where each user gets a uniquely generated Docker contain
 ### Prerequisites
 
 - Docker with Docker Compose
-- Python 3.12+
 
 ### 1. Build the base image
 
@@ -49,7 +48,7 @@ Built images are automatically pushed to the local registry. Users pull images w
 3. The image is pushed to the local Docker registry
 4. User pulls and runs their container from the registry
 5. User fixes vulnerabilities and implements hardening tasks inside the container
-6. User runs `collect.py` inside the container to gather system state
+6. User runs `audit.py` inside the container to gather system state
 7. Results are submitted to `/api/verify` for scoring
 
 ## Project Structure
@@ -74,7 +73,7 @@ CTF-IT/
     Dockerfile.j2       # Jinja2 template for user images
   frontend/
     templates/          # Jinja2 HTML templates
-  collect.py            # In-container verification script
+  audit.py              # In-container audit script (broad system snapshot)
   docker-compose.yml    # Production deployment
   requirements.txt      # Python dependencies
 ```
