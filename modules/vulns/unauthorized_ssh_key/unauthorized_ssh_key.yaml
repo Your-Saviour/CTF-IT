@@ -1,0 +1,21 @@
+id: unauthorized_ssh_key
+name: Unauthorized SSH key in root authorized_keys
+description: A rogue SSH public key has been planted in root's authorized_keys file, allowing an attacker to log in as root without a password.
+type: vulnerability
+difficulty: hard
+points: 300
+category: authentication
+tags: [ssh, backdoor, persistence, authentication]
+conflicts: []
+requires: []
+script: unauthorized_ssh_key.sh
+verification:
+  type: file_not_contains
+  path: /root/.ssh/authorized_keys
+  pattern: "rogue@backdoor"
+  expected: true
+suggested_fix: "Remove the line containing 'rogue@backdoor' from /root/.ssh/authorized_keys"
+hints:
+  - "Check for unauthorized access methods configured for privileged accounts"
+  - "Examine SSH configuration and key files in /root/.ssh/"
+  - "Look for suspicious entries in authorized_keys — not all keys belong there"

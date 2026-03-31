@@ -1,0 +1,18 @@
+id: install_fail2ban
+name: Install and enable fail2ban
+description: fail2ban is not installed. It should be installed and running to protect against brute-force attacks.
+type: hardening
+difficulty: medium
+points: 200
+category: services
+tags: [brute-force, authentication, network]
+conflicts: []
+requires: []
+script: null
+verification:
+  type: service_running
+  service: fail2ban
+  expected: active
+suggested_fix: "apt-get update && apt-get install -y fail2ban && systemctl start fail2ban && systemctl enable fail2ban"
+hints:
+  - "Look into intrusion prevention tools available via apt"

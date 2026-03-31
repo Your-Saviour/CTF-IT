@@ -1,0 +1,21 @@
+id: disable_ssh_root_login
+name: Disable SSH root login
+description: SSH is configured to allow direct root login. This should be disabled to reduce the attack surface and force the use of unprivileged accounts.
+type: hardening
+difficulty: easy
+points: 100
+category: network
+tags: [ssh, authentication, access-control]
+conflicts: []
+requires: []
+script: null
+verification:
+  type: file_contains
+  path: /etc/ssh/sshd_config
+  pattern: "PermitRootLogin no"
+  expected: true
+suggested_fix: "sed -i 's/^#\\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && systemctl restart sshd"
+hints:
+  - "Check the SSH server configuration for dangerous access settings"
+  - "Look at /etc/ssh/sshd_config for login-related directives"
+  - "Set PermitRootLogin to no and restart the SSH service"

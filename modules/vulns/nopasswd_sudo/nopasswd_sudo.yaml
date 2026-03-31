@@ -1,0 +1,21 @@
+id: nopasswd_sudo
+name: NOPASSWD sudo entry
+description: A sudoers drop-in file grants a user unrestricted passwordless sudo access, allowing full privilege escalation without authentication.
+type: vulnerability
+difficulty: medium
+points: 200
+category: authentication
+tags: [sudo, privilege-escalation, misconfiguration]
+conflicts: []
+requires: []
+script: nopasswd_sudo.sh
+verification:
+  type: file_not_contains
+  path: /etc/sudoers.d/backdoor
+  pattern: "NOPASSWD"
+  expected: true
+suggested_fix: "rm /etc/sudoers.d/backdoor"
+hints:
+  - "Check what sudo privileges are configured on the system"
+  - "Look at files in /etc/sudoers.d/ for suspicious entries"
+  - "Remove or fix any sudoers rules that bypass password requirements"

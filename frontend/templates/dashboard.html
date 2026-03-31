@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - CTF Platform{% endblock %}
+{% block content %}
+<h1>Welcome, {{ user.username }}</h1>
+
+<!-- Build Status -->
+<div class="card" id="build-status-card">
+    <h3>Environment Status</h3>
+    {% if image %}
+        <p>Status: <span id="build-status" class="status-{{ image.status }}">{{ image.status }}</span></p>
+        <div id="commands-section" style="{% if image.status != 'ready' %}display:none{% endif %}">
+            <p style="margin: 1rem 0 0.5rem; color: #8b949e;">Run your container:</p>
+            <div class="copy-box" onclick="copyText(this)" id="run-cmd">docker run -it {{ image.image_tag or '...' }}</div>
+
+            <p style="margin: 1rem 0 0.5rem; color: #8b949e;">Verify your fixes (run inside the container):</p>
+            <div class="copy-box" onclick="copyText(this)">curl -s http://host.docker.internal:8000/api/verify -H "Content-Type: application/json" -d "$(python3 /opt/ctf/collect.py)"</div>
+        </div>
+    {% else %}
+        <p style="color: #8b949e;">No environment found.</p>
+    {% endif %}
+</div>
+
+<!-- Points -->
+<div class="card">
+    <h3>Total Points: <span style="color: #58a6ff;">{{ total_points }}</span></h3>
+</div>
+
+<!-- Module List -->
+<div class="card">
+    <h3>Tasks</h3>
+    {% if modules %}
+    <table>
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Name</th>
+                <th>Difficulty</th>
+                <th>Points</th>
+                <th>Hints</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for m in modules %}
+            <tr>
+                <td>
+                    {% if m.completed %}
+                        <span class="check">&#10003;</span>
+                    {% else %}
+                        <span class="cross">&#10007;</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <strong>{{ m.name }}</strong>
+                    <br><small style="color: #8b949e;">{{ m.description }}</small>
+                </td>
+                <td><span class="badge badge-{{ m.difficulty }}">{{ m.difficulty }}</span></td>
+                <td>{{ m.points }}</td>
+                <td>
+                    {% if m.hints %}
+                        {% for hint in m.hints %}
+                            <button class="btn btn-sm" onclick="this.nextElementSibling.style.display='block'; this.style.display='none';">
+                                Hint {{ loop.index }}
+                            </button>
+                            <span style="display:none; color: #d29922;">{{ hint }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span style="color: #8b949e;">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p style="color: #8b949e;">Building your environment... tasks will appear when ready.</p>
+    {% endif %}
+</div>
+
+<script>
+function copyText(el) {
+    navigator.clipboard.writeText(el.textContent);
+    const orig = el.style.borderColor;
+    el.style.borderColor = '#238636';
+    setTimeout(() => el.style.borderColor = orig, 1000);
+}
+
+{% if image and image.status != 'ready' and image.status != 'failed' %}
+(function pollStatus() {
+    fetch('/api/images/status')
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('build-status');
+            el.textContent = data.status;
+            el.className = 'status-' + data.status;
+            if (data.status === 'ready') {
+                location.reload();
+            } else if (data.status !== 'failed') {
+                setTimeout(pollStatus, 3000);
+            }
+        })
+        .catch(() => setTimeout(pollStatus, 5000));
+})();
+{% endif %}
+</script>
+{% endblock %}

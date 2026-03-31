@@ -1,0 +1,21 @@
+id: setup_ssh_key_auth
+name: Set up SSH key-based authentication
+description: SSH is using password authentication, which is vulnerable to brute-force attacks. Configure key-based authentication and disable password login.
+type: hardening
+difficulty: medium
+points: 200
+category: authentication
+tags: [ssh, keys, authentication, access-control]
+conflicts: []
+requires: []
+script: null
+verification:
+  type: file_contains
+  path: /etc/ssh/sshd_config
+  pattern: "PasswordAuthentication no"
+  expected: true
+suggested_fix: "ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N '' && cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && sed -i 's/^#\\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl restart sshd"
+hints:
+  - "Key-based authentication is more secure than passwords for SSH"
+  - "Generate an SSH key pair and add the public key to authorized_keys"
+  - "Disable PasswordAuthentication in /etc/ssh/sshd_config and restart sshd"

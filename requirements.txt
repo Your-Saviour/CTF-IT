@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]
+jinja2
+python-multipart
+sqlalchemy>=2.0
+bcrypt
+itsdangerous
+pyyaml
+docker
+pydantic>=2.0

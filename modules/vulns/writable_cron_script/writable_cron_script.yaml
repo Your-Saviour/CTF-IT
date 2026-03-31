@@ -1,0 +1,20 @@
+id: writable_cron_script
+name: World-writable cron script
+description: A maintenance script executed by root's crontab is world-writable, allowing any user to inject commands that run as root.
+type: vulnerability
+difficulty: medium
+points: 200
+category: filesystem
+tags: [cron, permissions, privilege-escalation]
+conflicts: []
+requires: []
+script: writable_cron_script.sh
+verification:
+  type: file_permissions
+  path: /opt/maintenance.sh
+  expected: "750"
+suggested_fix: "chmod 750 /opt/maintenance.sh"
+hints:
+  - "Examine scheduled tasks and the scripts they execute"
+  - "Check crontab entries with: crontab -l && ls -la /etc/cron.*"
+  - "Look for scripts with overly permissive write access"

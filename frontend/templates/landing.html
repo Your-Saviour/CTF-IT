@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}CTF Platform - Login{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: center; margin-top: 3rem;">
+    <div class="card" style="width: 100%; max-width: 400px;">
+        <h2 id="form-title">Login</h2>
+        {% if error == "invalid_credentials" %}
+            <div class="flash">Invalid username or password.</div>
+        {% elif error == "username_taken" %}
+            <div class="flash">Username already taken.</div>
+        {% endif %}
+        <form id="auth-form" method="POST" action="/auth/login">
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">Username</label>
+                <input type="text" name="username" required>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">Password</label>
+                <input type="password" name="password" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="submit-btn" style="width: 100%;">Login</button>
+        </form>
+        <p style="margin-top: 1rem; text-align: center; color: #8b949e;">
+            <span id="toggle-text">Don't have an account?</span>
+            <a href="#" id="toggle-link" style="color: #58a6ff;" onclick="toggleMode(event)">Register</a>
+        </p>
+    </div>
+</div>
+
+<script>
+let isLogin = true;
+function toggleMode(e) {
+    e.preventDefault();
+    isLogin = !isLogin;
+    document.getElementById('form-title').textContent = isLogin ? 'Login' : 'Register';
+    document.getElementById('submit-btn').textContent = isLogin ? 'Login' : 'Register';
+    document.getElementById('auth-form').action = isLogin ? '/auth/login' : '/auth/register';
+    document.getElementById('toggle-text').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+    document.getElementById('toggle-link').textContent = isLogin ? 'Register' : 'Login';
+}
+{% if error == "username_taken" %}toggleMode({preventDefault:()=>{}});{% endif %}
+</script>
+{% endblock %}

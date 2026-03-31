@@ -1,0 +1,19 @@
+id: world_writable_shadow
+name: World-writable /etc/shadow
+description: The /etc/shadow file has incorrect permissions, allowing any user to read or modify password hashes.
+type: vulnerability
+difficulty: easy
+points: 100
+category: filesystem
+tags: [permissions, shadow, authentication]
+conflicts: []
+requires: []
+script: world_writable_shadow.sh
+verification:
+  type: file_permissions
+  path: /etc/shadow
+  expected: "640"
+suggested_fix: "chmod 640 /etc/shadow && chown root:shadow /etc/shadow"
+hints:
+  - "Check the permissions on sensitive authentication files"
+  - "Use chmod and chown to correct /etc/shadow"

@@ -1,0 +1,19 @@
+id: suid_find
+name: SUID bit on /usr/bin/find
+description: The find command has the SUID bit set, allowing any user to execute it with root privileges. This is a classic privilege escalation vector via find -exec.
+type: vulnerability
+difficulty: easy
+points: 100
+category: filesystem
+tags: [suid, permissions, privilege-escalation]
+conflicts: []
+requires: []
+script: suid_find.sh
+verification:
+  type: file_permissions
+  path: /usr/bin/find
+  expected: "755"
+suggested_fix: "chmod 755 /usr/bin/find"
+hints:
+  - "Look for binaries with unusual permission bits"
+  - "Check for SUID bits on common system utilities using: find / -perm -4000 -type f"

@@ -1,0 +1,10 @@
+ctf.db
+__pycache__/
+.env
+base/.env
+*.pyc
+build_contexts/
+.env.test
+*.egg-info/
+dist/
+.venv/

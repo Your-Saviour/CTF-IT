@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Scoreboard - CTF Platform{% endblock %}
+{% block content %}
+<h1>Scoreboard</h1>
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Username</th>
+                <th>Points</th>
+                <th>Tasks Completed</th>
+            </tr>
+        </thead>
+        <tbody id="scoreboard-body">
+            <tr><td colspan="4" style="color: #8b949e; text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+function loadScoreboard() {
+    fetch('/api/scoreboard')
+        .then(r => r.json())
+        .then(data => {
+            const body = document.getElementById('scoreboard-body');
+            if (data.length === 0) {
+                body.innerHTML = '<tr><td colspan="4" style="color: #8b949e; text-align: center;">No players yet.</td></tr>';
+                return;
+            }
+            body.innerHTML = data.map(e =>
+                `<tr>
+                    <td style="color: #58a6ff; font-weight: bold;">#${e.rank}</td>
+                    <td>${e.username}</td>
+                    <td>${e.total_points}</td>
+                    <td>${e.modules_completed}</td>
+                </tr>`
+            ).join('');
+        });
+}
+loadScoreboard();
+setInterval(loadScoreboard, 30000);
+</script>
+{% endblock %}
