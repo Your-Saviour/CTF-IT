@@ -25,24 +25,32 @@ Create a `.env` file in the project root:
 SECRET_KEY=your-secret-key
 DATABASE_URL=sqlite:///ctf.db
 EVENT_QUOTA={"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}
+REGISTRY_HOST=localhost:5050
 ```
+
+For LAN deployments, set `REGISTRY_HOST` to the server's LAN IP (e.g. `192.168.1.50:5050`).
 
 ### 3. Start the platform
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-The API will be available at `http://localhost:8000`.
+This starts two services:
+- **API** at `http://localhost:8000`
+- **Docker Registry** at `http://localhost:5050`
+
+Built images are automatically pushed to the local registry. Users pull images with `docker pull localhost:5050/ctf-<uuid>`.
 
 ## How It Works
 
 1. User registers on the platform
 2. A Docker image is built in the background with randomly selected modules based on the event quota
-3. User pulls and runs their container
-4. User fixes vulnerabilities and implements hardening tasks inside the container
-5. User runs `collect.py` inside the container to gather system state
-6. Results are submitted to `/api/verify` for scoring
+3. The image is pushed to the local Docker registry
+4. User pulls and runs their container from the registry
+5. User fixes vulnerabilities and implements hardening tasks inside the container
+6. User runs `collect.py` inside the container to gather system state
+7. Results are submitted to `/api/verify` for scoring
 
 ## Project Structure
 
@@ -57,6 +65,7 @@ CTF-IT/
     main.py             # Build entry point
     selector.py         # Module selection with quota/conflicts/deps
     renderer.py         # Dockerfile + manifest generation
+    registry.py         # Image tagging, push to local registry
     module_loader.py    # YAML module parsing
   modules/              # Module definitions
     vulns/              # Vulnerability modules (one folder per module)
@@ -107,14 +116,16 @@ modules/
 
 ## Running a User Container
 
-User containers require specific Docker flags for systemd support:
+Pull your image from the local registry, then run with systemd flags:
 
 ```bash
+docker pull localhost:5050/ctf-<uuid>
+
 docker run -d \
   --cap-add SYS_ADMIN --cap-add NET_ADMIN --cgroupns=private \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
-  -p 2222:22 <image-tag>
+  -p 2222:22 localhost:5050/ctf-<uuid>
 ```
 
 Connect via SSH:
@@ -123,11 +134,31 @@ Connect via SSH:
 ssh root@localhost -p 2222
 ```
 
+### Remote Users (LAN Setup)
+
+If users are pulling from a different machine on the LAN, they must add the registry to Docker's insecure registries. Edit `/etc/docker/daemon.json` on each user's machine:
+
+```json
+{
+  "insecure-registries": ["192.168.1.50:5050"]
+}
+```
+
+Then restart Docker (`sudo systemctl restart docker` or restart Docker Desktop). Replace the IP with the server's actual LAN address.
+
 ## Key Design Decisions
 
 - **Deterministic flags**: `HMAC(SECRET_KEY, user_id)` ensures the same user always gets the same flag, enabling rebuilds without storing flags separately
 - **Stateless verification**: the flag in the payload proves container legitimacy, no session required
 - **Modular content**: adding a new module is typically just a YAML file and optional shell script — no code changes needed unless introducing a new verification type
+
+## Registry
+
+The platform includes a local Docker Registry (`registry:2`) running on port 5050. Built images are automatically pushed to this registry after each build, and local copies are cleaned up to save disk space.
+
+- **Registry catalog**: `curl http://localhost:5050/v2/_catalog`
+- **Image tags**: `curl http://localhost:5050/v2/ctf-<uuid>/tags/list`
+- **Data persistence**: registry data is stored in the `registry_data` Docker volume and survives restarts
 
 ## Testing
 

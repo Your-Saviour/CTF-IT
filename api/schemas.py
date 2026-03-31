@@ -11,11 +11,13 @@ class UserLogin(BaseModel):
     password: str
 
 
-class ModuleResult(BaseModel):
-    module_id: str
-    collected: dict
-
-
-class VerifyPayload(BaseModel):
+class SnapshotPayload(BaseModel):
     user_id: str
-    results: list[ModuleResult]
+    flag: str
+    build_state: dict
+    file_permissions: dict
+    file_contents: dict
+    services: dict
+    packages: list[str]
+    listening_ports: list[int]
+    shadow_hashes: dict

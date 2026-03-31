@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -15,7 +15,7 @@ async def scoreboard(db: Session = Depends(get_db)):
             User.username,
             func.coalesce(
                 func.sum(
-                    func.case(
+                    case(
                         (UserModule.completed == True, UserModule.points),
                         else_=0,
                     )
@@ -24,7 +24,7 @@ async def scoreboard(db: Session = Depends(get_db)):
             ).label("total_points"),
             func.coalesce(
                 func.sum(
-                    func.case(
+                    case(
                         (UserModule.completed == True, 1),
                         else_=0,
                     )
@@ -35,7 +35,7 @@ async def scoreboard(db: Session = Depends(get_db)):
         .outerjoin(UserModule, User.id == UserModule.user_id)
         .group_by(User.id)
         .order_by(func.sum(
-            func.case(
+            case(
                 (UserModule.completed == True, UserModule.points),
                 else_=0,
             )

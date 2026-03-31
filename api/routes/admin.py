@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import Event, User, UserImage, UserModule
 from api.routes.auth import get_current_user
+
+REGISTRY_INTERNAL = os.environ.get("REGISTRY_INTERNAL", "http://registry:5000")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -105,6 +108,51 @@ async def list_modules(request: Request, db: Session = Depends(get_db)):
         }
         for m in modules
     ]
+
+
+@router.get("/registry")
+async def list_registry_images(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            catalog_resp = await client.get(f"{REGISTRY_INTERNAL}/v2/_catalog")
+            catalog_resp.raise_for_status()
+            repos = catalog_resp.json().get("repositories", [])
+
+            images = []
+            for repo in repos:
+                tags_resp = await client.get(
+                    f"{REGISTRY_INTERNAL}/v2/{repo}/tags/list"
+                )
+                tags = tags_resp.json().get("tags", []) if tags_resp.status_code == 200 else []
+                for tag in tags:
+                    # Get manifest for size/digest info
+                    digest = None
+                    created = None
+                    try:
+                        manifest_resp = await client.get(
+                            f"{REGISTRY_INTERNAL}/v2/{repo}/manifests/{tag}",
+                            headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json"},
+                        )
+                        if manifest_resp.status_code == 200:
+                            digest = manifest_resp.headers.get("Docker-Content-Digest", "")
+                    except Exception:
+                        pass
+                    images.append({
+                        "repository": repo,
+                        "tag": tag,
+                        "full_ref": f"{repo}:{tag}",
+                        "digest": digest[:19] + "…" if digest and len(digest) > 19 else digest,
+                    })
+
+            return images
+    except httpx.ConnectError:
+        return JSONResponse({"error": "Cannot connect to registry"}, status_code=502)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.put("/event")

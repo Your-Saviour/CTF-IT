@@ -2,8 +2,8 @@ id: world_writable_shadow
 name: World-writable /etc/shadow
 description: The /etc/shadow file has incorrect permissions, allowing any user to read or modify password hashes.
 type: vulnerability
-difficulty: easy
-points: 100
+difficulty: medium
+points: 200
 category: filesystem
 tags: [permissions, shadow, authentication]
 conflicts: []

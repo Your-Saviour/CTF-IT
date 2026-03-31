@@ -2,8 +2,8 @@ id: unauthorized_ssh_key
 name: Unauthorized SSH key in root authorized_keys
 description: A rogue SSH public key has been planted in root's authorized_keys file, allowing an attacker to log in as root without a password.
 type: vulnerability
-difficulty: hard
-points: 300
+difficulty: medium
+points: 200
 category: authentication
 tags: [ssh, backdoor, persistence, authentication]
 conflicts: []

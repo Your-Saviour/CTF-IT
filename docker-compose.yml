@@ -5,5 +5,28 @@ services:
       - "8000:8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - api_data:/app/data
     env_file: .env
+    environment:
+      - DATABASE_URL=sqlite:///data/ctf.db
+    depends_on:
+      registry:
+        condition: service_healthy
     restart: unless-stopped
+
+  registry:
+    image: registry:2
+    ports:
+      - "5050:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/v2/"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  api_data:
+  registry_data:

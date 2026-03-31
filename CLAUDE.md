@@ -16,7 +16,7 @@ pip install -r requirements.txt
 uvicorn api.main:app --reload
 
 # Run with Docker Compose (production)
-docker-compose up -d
+docker compose up -d
 
 # Build base image (required before user images can be built)
 docker build -t ctf-base:latest base/
@@ -35,21 +35,23 @@ See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test.
 - `SECRET_KEY` — used for session signing and deterministic flag generation (HMAC)
 - `DATABASE_URL` — defaults to `sqlite:///ctf.db`, use postgres URI for production
 - `EVENT_QUOTA` — JSON defining module selection counts per type/difficulty, e.g. `{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}`
+- `REGISTRY_HOST` — user-facing address for the Docker registry (default `localhost:5050`). Set to LAN IP for remote access (e.g. `192.168.1.50:5050`)
+- `REGISTRY_PUSH_HOST` — address the Docker daemon uses to push to the registry (default `localhost:5050`). Only change if running DinD instead of socket-mounted
 
 ## Architecture
 
 ### Request Flow
 
-User registers → async background task builds Docker image with selected modules → dashboard polls `/api/images/status` until ready → user pulls/runs container → fixes vulns → runs `collect.py` inside container → POSTs results to `/api/verify` → backend validates against expected state → awards points.
+User registers → async background task builds Docker image with selected modules → image pushed to local Docker registry → dashboard polls `/api/images/status` until ready → user pulls image from registry and runs container → fixes vulns → runs `audit.py` inside container → POSTs broad system snapshot to `/api/verify` → backend matches snapshot against user's assigned modules (server-side) → awards points.
 
 ### Key Components
 
 - **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`.
-- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, returns image tag + flag.
+- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`) and hardening tasks (`hardening/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
-- **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and manifest.
+- **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`base/`** — Base Docker image (Ubuntu 22.04 + common tools). All user images inherit from `ctf-base:latest`.
-- **`collect.py`** — Runs inside user containers. Reads `/opt/ctf/manifest.json`, collects system state per module verification spec, outputs JSON for submission.
+- **`audit.py`** — Runs inside user containers. Performs a broad security audit (file permissions, configs, services, packages, ports, shadow hashes) and outputs a JSON system snapshot. Contains no module-specific logic — the server matches the snapshot against the user's assigned modules.
 - **`frontend/templates/`** — Jinja2 HTML templates. Dark theme, client-side polling for build status.
 
 ### Module System
@@ -63,9 +65,11 @@ The selector (`builder/selector.py`) respects conflict exclusions and auto-resol
 ### Key Design Decisions
 
 - **Deterministic flags**: `HMAC(secret_key, user_id)` — same user always gets same flag, enables rebuilds without storing flags separately.
+- **Opaque collection**: the container ships only a broad `audit.py` and a minimal `state.json` (user_id + build-time snapshots). No module names, verification specs, or expected values are exposed to the user. The server knows which modules are assigned via the `UserModule` table and extracts relevant data from the broad snapshot.
 - **Stateless verification**: flag in payload proves container legitimacy; no session required for verify endpoint.
 - **In-process async builds**: uses `asyncio.create_task` (not a separate worker). Production spec calls for RQ + Redis but this is not yet implemented.
-- **Docker socket required**: builder needs `/var/run/docker.sock` mounted to build images.
+- **Local Docker registry**: a `registry:2` sidecar in docker-compose serves built images on port 5050. After build, images are tagged and pushed to the registry, then cleaned from the local daemon. Users `docker pull` from the registry. The push target is `localhost:5050` (not the compose service name) because the Docker daemon runs on the host via socket mount.
+- **Docker socket required**: builder needs `/var/run/docker.sock` mounted to build images and push to the registry.
 
 ### Database Models (api/models.py)
 

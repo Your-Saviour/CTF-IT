@@ -1,7 +1,99 @@
 {% extends "base.html" %}
 {% block title %}Scoreboard - CTF Platform{% endblock %}
+{% block extra_style %}
+.scoreboard-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+}
+
+.scoreboard-header h1 { margin-bottom: 0; }
+
+.refresh-indicator {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Podium */
+.podium {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.podium-empty { display: none; }
+
+.podium-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    text-align: center;
+    animation: fade-in-up 0.4s ease-out backwards;
+    transition: box-shadow 0.3s;
+}
+
+.podium-card:nth-child(1) { animation-delay: 0.1s; }
+.podium-card:nth-child(2) { animation-delay: 0.2s; }
+.podium-card:nth-child(3) { animation-delay: 0.3s; }
+
+.podium-card.gold {
+    border-color: rgba(255, 179, 0, 0.4);
+    box-shadow: 0 0 25px var(--amber-glow), inset 0 0 15px rgba(255, 179, 0, 0.05);
+}
+.podium-card.silver {
+    border-color: rgba(158, 158, 158, 0.4);
+    box-shadow: 0 0 20px rgba(158, 158, 158, 0.15);
+}
+.podium-card.bronze {
+    border-color: rgba(205, 127, 50, 0.4);
+    box-shadow: 0 0 20px rgba(205, 127, 50, 0.15);
+}
+
+.podium-rank {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+}
+
+.podium-rank.gold   { color: var(--amber); text-shadow: 0 0 15px var(--amber-glow); }
+.podium-rank.silver  { color: #bdbdbd; text-shadow: 0 0 15px rgba(158,158,158,0.3); }
+.podium-rank.bronze  { color: #cd7f32; text-shadow: 0 0 15px rgba(205,127,50,0.3); }
+
+.podium-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.podium-score {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.rank-gold   { color: var(--amber) !important; font-weight: 700; text-shadow: 0 0 8px var(--amber-glow); }
+.rank-silver { color: #bdbdbd !important; font-weight: 700; }
+.rank-bronze { color: #cd7f32 !important; font-weight: 700; }
+
+@media (max-width: 768px) {
+    .podium { grid-template-columns: 1fr; }
+}
+{% endblock %}
+
 {% block content %}
-<h1>Scoreboard</h1>
+<div class="scoreboard-header">
+    <h1>Scoreboard</h1>
+    <span class="refresh-indicator" id="refresh-timer"></span>
+</div>
+
+<div class="podium podium-empty" id="podium"></div>
+
 <div class="card">
     <table>
         <thead>
@@ -13,32 +105,69 @@
             </tr>
         </thead>
         <tbody id="scoreboard-body">
-            <tr><td colspan="4" style="color: #8b949e; text-align: center;">Loading...</td></tr>
+            <tr><td colspan="4" style="color: var(--text-secondary); text-align: center;">Loading...</td></tr>
         </tbody>
     </table>
 </div>
+{% endblock %}
 
+{% block extra_script %}
 <script>
+var refreshCountdown = 30;
+
 function loadScoreboard() {
+    refreshCountdown = 30;
     fetch('/api/scoreboard')
         .then(r => r.json())
         .then(data => {
-            const body = document.getElementById('scoreboard-body');
+            // Podium
+            var podiumEl = document.getElementById('podium');
+            if (data.length > 0) {
+                podiumEl.classList.remove('podium-empty');
+                var tiers = ['gold', 'silver', 'bronze'];
+                var html = '';
+                for (var i = 0; i < Math.min(3, data.length); i++) {
+                    html += '<div class="podium-card ' + tiers[i] + '">' +
+                        '<div class="podium-rank ' + tiers[i] + '">#' + data[i].rank + '</div>' +
+                        '<div class="podium-name">' + data[i].username + '</div>' +
+                        '<div class="podium-score">' + data[i].total_points + ' pts &middot; ' + data[i].modules_completed + ' tasks</div>' +
+                    '</div>';
+                }
+                podiumEl.innerHTML = html;
+            } else {
+                podiumEl.classList.add('podium-empty');
+                podiumEl.innerHTML = '';
+            }
+
+            // Table
+            var body = document.getElementById('scoreboard-body');
             if (data.length === 0) {
-                body.innerHTML = '<tr><td colspan="4" style="color: #8b949e; text-align: center;">No players yet.</td></tr>';
+                body.innerHTML = '<tr><td colspan="4" style="color: var(--text-secondary); text-align: center;">No players yet.</td></tr>';
                 return;
             }
-            body.innerHTML = data.map(e =>
-                `<tr>
-                    <td style="color: #58a6ff; font-weight: bold;">#${e.rank}</td>
-                    <td>${e.username}</td>
-                    <td>${e.total_points}</td>
-                    <td>${e.modules_completed}</td>
-                </tr>`
-            ).join('');
+            body.innerHTML = data.map(function(e) {
+                var rankClass = '';
+                if (e.rank === 1) rankClass = 'rank-gold';
+                else if (e.rank === 2) rankClass = 'rank-silver';
+                else if (e.rank === 3) rankClass = 'rank-bronze';
+                return '<tr>' +
+                    '<td class="' + rankClass + '">#' + e.rank + '</td>' +
+                    '<td>' + e.username + '</td>' +
+                    '<td>' + e.total_points + '</td>' +
+                    '<td>' + e.modules_completed + '</td>' +
+                '</tr>';
+            }).join('');
         });
 }
+
 loadScoreboard();
 setInterval(loadScoreboard, 30000);
+
+// Countdown timer
+setInterval(function() {
+    refreshCountdown--;
+    if (refreshCountdown < 0) refreshCountdown = 30;
+    document.getElementById('refresh-timer').textContent = 'refreshes in ' + refreshCountdown + 's';
+}, 1000);
 </script>
 {% endblock %}

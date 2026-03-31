@@ -12,9 +12,10 @@ RUN chmod +x /tmp/scripts/*.sh \
 ARG FLAG
 RUN echo "$FLAG" > /root/flag.txt && chmod 400 /root/flag.txt
 
-COPY manifest.json /opt/ctf/manifest.json
-COPY collect.py /opt/ctf/collect.py
+COPY state.json /opt/ctf/state.json
+COPY audit.py /opt/ctf/audit.py
 
-# Enrich manifest with build-time system state (e.g. original password hashes)
+# Capture build-time system state (e.g. original password hashes)
 COPY build_snapshot.py /tmp/build_snapshot.py
-RUN python3 /tmp/build_snapshot.py && rm /tmp/build_snapshot.py
+RUN python3 /tmp/build_snapshot.py && rm /tmp/build_snapshot.py \
+  && chmod 400 /opt/ctf/state.json

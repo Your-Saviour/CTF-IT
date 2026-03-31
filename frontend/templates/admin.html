@@ -7,22 +7,22 @@
 <div class="card">
     <h3>Event Configuration</h3>
     <form id="event-form">
-        <div style="margin-bottom: 1rem;">
-            <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">Event Name</label>
+        <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="event-name">Event Name</label>
             <input type="text" id="event-name" value="{{ event.name if event else 'CTF Event' }}">
         </div>
         <div style="margin-bottom: 1rem;">
-            <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">
-                <input type="checkbox" id="event-open" {% if not event or event.open %}checked{% endif %}>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; text-transform: none; letter-spacing: normal;">
+                <input type="checkbox" id="event-open" {% if not event or event.open %}checked{% endif %}
+                       style="width: auto; accent-color: var(--cyan);">
                 Event Open
             </label>
         </div>
-        <div style="margin-bottom: 1rem;">
-            <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">Quota (JSON)</label>
+        <div class="form-group" style="margin-bottom: 1rem;">
+            <label for="event-quota">Quota (JSON)</label>
             <textarea id="event-quota" rows="6">{{ event_quota | tojson(indent=2) }}</textarea>
         </div>
         <button type="submit" class="btn btn-primary">Save</button>
-        <span id="event-status" style="margin-left: 1rem; color: #238636;"></span>
     </form>
 </div>
 
@@ -39,7 +39,27 @@
             </tr>
         </thead>
         <tbody id="users-body">
-            <tr><td colspan="4" style="color: #8b949e;">Loading...</td></tr>
+            <tr><td colspan="4" style="color: var(--text-secondary);">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Registry -->
+<div class="card">
+    <h3>Container Registry</h3>
+    <div id="registry-status" style="margin-bottom: 1rem;">
+        <span class="progress-label" id="registry-count"></span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Repository</th>
+                <th>Tag</th>
+                <th>Digest</th>
+            </tr>
+        </thead>
+        <tbody id="registry-body">
+            <tr><td colspan="3" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
 </div>
@@ -59,20 +79,22 @@
             </tr>
         </thead>
         <tbody id="modules-body">
-            <tr><td colspan="6" style="color: #8b949e;">Loading...</td></tr>
+            <tr><td colspan="6" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
 </div>
+{% endblock %}
 
+{% block extra_script %}
 <script>
 // Event form
 document.getElementById('event-form').addEventListener('submit', function(e) {
     e.preventDefault();
-    let quota;
+    var quota;
     try {
         quota = JSON.parse(document.getElementById('event-quota').value);
-    } catch {
-        alert('Invalid JSON in quota field');
+    } catch(err) {
+        showToast('Invalid JSON in quota field');
         return;
     }
     fetch('/admin/event', {
@@ -83,9 +105,8 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
             open: document.getElementById('event-open').checked,
             quota: quota
         })
-    }).then(() => {
-        document.getElementById('event-status').textContent = 'Saved!';
-        setTimeout(() => document.getElementById('event-status').textContent = '', 2000);
+    }).then(function() {
+        showToast('Event configuration saved');
     });
 });
 
@@ -93,37 +114,69 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
 fetch('/admin/users')
     .then(r => r.json())
     .then(data => {
-        const body = document.getElementById('users-body');
+        var body = document.getElementById('users-body');
         body.innerHTML = data.map(u =>
-            `<tr>
-                <td>${u.username} ${u.is_admin ? '(admin)' : ''}</td>
-                <td><span class="status-${u.build_status}">${u.build_status}</span></td>
-                <td>${u.total_points}</td>
-                <td><button class="btn btn-sm btn-danger" onclick="rebuild(${u.id})">Rebuild</button></td>
-            </tr>`
+            '<tr>' +
+                '<td>' + u.username + (u.is_admin ? ' <span style="color: var(--cyan); font-size: 0.75rem;">(admin)</span>' : '') + '</td>' +
+                '<td><span class="status-' + u.build_status + '" style="font-weight: 600; text-transform: uppercase;">' + u.build_status + '</span></td>' +
+                '<td>' + u.total_points + '</td>' +
+                '<td><button class="btn btn-sm btn-danger" onclick="rebuild(' + u.id + ')">Rebuild</button></td>' +
+            '</tr>'
         ).join('');
     });
 
 function rebuild(userId) {
     if (!confirm('Rebuild image for this user? This will reset their progress.')) return;
-    fetch(`/admin/rebuild/${userId}`, { method: 'POST' })
-        .then(() => location.reload());
+    fetch('/admin/rebuild/' + userId, { method: 'POST' })
+        .then(function() {
+            showToast('Rebuild triggered');
+            setTimeout(function() { location.reload(); }, 1200);
+        });
 }
+
+// Load registry images
+fetch('/admin/registry')
+    .then(r => r.json())
+    .then(data => {
+        var body = document.getElementById('registry-body');
+        var countEl = document.getElementById('registry-count');
+        if (data.error) {
+            body.innerHTML = '<tr><td colspan="3" style="color: var(--red);">' + data.error + '</td></tr>';
+            countEl.textContent = 'Registry unavailable';
+            return;
+        }
+        countEl.textContent = data.length + ' image' + (data.length !== 1 ? 's' : '') + ' in registry';
+        if (data.length === 0) {
+            body.innerHTML = '<tr><td colspan="3" style="color: var(--text-secondary);">No images in registry.</td></tr>';
+            return;
+        }
+        body.innerHTML = data.map(img =>
+            '<tr>' +
+                '<td><strong>' + img.repository + '</strong></td>' +
+                '<td>' + img.tag + '</td>' +
+                '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + (img.digest || '—') + '</td>' +
+            '</tr>'
+        ).join('');
+    })
+    .catch(function() {
+        document.getElementById('registry-body').innerHTML =
+            '<tr><td colspan="3" style="color: var(--red);">Failed to load registry data.</td></tr>';
+    });
 
 // Load modules
 fetch('/admin/modules')
     .then(r => r.json())
     .then(data => {
-        const body = document.getElementById('modules-body');
+        var body = document.getElementById('modules-body');
         body.innerHTML = data.map(m =>
-            `<tr>
-                <td>${m.id}</td>
-                <td>${m.name}</td>
-                <td>${m.type}</td>
-                <td><span class="badge badge-${m.difficulty}">${m.difficulty}</span></td>
-                <td>${m.points}</td>
-                <td>${m.category}</td>
-            </tr>`
+            '<tr>' +
+                '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + m.id + '</td>' +
+                '<td><strong>' + m.name + '</strong></td>' +
+                '<td>' + m.type + '</td>' +
+                '<td><span class="badge badge-' + m.difficulty + '">' + m.difficulty + '</span></td>' +
+                '<td>' + m.points + '</td>' +
+                '<td>' + m.category + '</td>' +
+            '</tr>'
         ).join('');
     });
 </script>

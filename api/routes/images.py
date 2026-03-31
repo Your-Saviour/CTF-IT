@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -6,6 +8,8 @@ from api.database import get_db
 from api.routes.auth import get_current_user
 
 router = APIRouter(prefix="/api/images", tags=["images"])
+
+REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5000")
 
 
 @router.get("/status")
@@ -54,6 +58,8 @@ async def pull_command(
     if not image or image.status != "ready":
         return JSONResponse({"error": "Image not ready"}, status_code=400)
 
+    full_image = f"{REGISTRY_HOST}/{image.image_tag}"
     return JSONResponse({
-        "run_command": f"docker run -it {image.image_tag}",
+        "pull_command": f"docker pull {full_image}",
+        "run_command": f"docker run -it {full_image}",
     })

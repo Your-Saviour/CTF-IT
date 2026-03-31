@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -7,52 +8,73 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import User, UserImage, UserModule
 from api.routes.auth import get_current_user
-from api.schemas import VerifyPayload
+from api.schemas import SnapshotPayload
 from builder.module_loader import load_all_modules
 
 router = APIRouter(tags=["verify"])
 
 
-def check_module(verification: dict, collected: dict) -> bool:
+def extract_and_check(
+    verification: dict,
+    snapshot: SnapshotPayload,
+    stored_flag: str,
+    server_build_state: dict,
+) -> bool:
+    """Check a single module's verification against the broad system snapshot.
+
+    server_build_state is loaded from the DB (trusted), NOT from the client payload.
+    """
     vtype = verification.get("type")
 
     if vtype == "file_permissions":
-        return collected.get("permissions") == verification["expected"]
+        path = verification["path"]
+        info = snapshot.file_permissions.get(path, {})
+        return info.get("permissions") == verification["expected"]
 
     if vtype == "file_contains":
-        content = collected.get("content", "")
+        path = verification["path"]
+        content = snapshot.file_contents.get(path, "")
         return verification["pattern"] in content
 
     if vtype == "file_not_contains":
-        content = collected.get("content", "")
+        path = verification["path"]
+        content = snapshot.file_contents.get(path, "")
         return verification["pattern"] not in content
 
     if vtype == "service_running":
-        return collected.get("status") == verification["expected"]
+        service = verification["service"]
+        return snapshot.services.get(service) == verification["expected"]
 
     if vtype == "package_installed":
-        return collected.get("installed") is True
+        package = verification["package"]
+        return package in snapshot.packages
 
     if vtype == "port_closed":
-        return collected.get("listening") is False
+        port = verification["port"]
+        return port not in snapshot.listening_ports
 
     if vtype == "flag_contents":
-        return False  # validated separately via stored flag
+        return snapshot.flag == stored_flag
 
     if vtype == "password_not_default":
-        return collected.get("is_default") is False
+        user = verification["user"]
+        hash_val = snapshot.shadow_hashes.get(user, "")
+        return hash_val not in ("", "!", "*", "!!", "!*")
 
     if vtype == "password_changed":
-        current = collected.get("current_hash", "")
-        original = collected.get("original_hash", "")
-        return current != "" and original != "" and current != original
+        user = verification["user"]
+        current_hash = snapshot.shadow_hashes.get(user, "")
+        original_hash = (
+            server_build_state.get("shadow_hashes", {}).get(user, "")
+        )
+        return current_hash != "" and original_hash != "" and current_hash != original_hash
 
     return False
 
 
 @router.post("/api/verify")
 async def verify(
-    payload: VerifyPayload,
+    payload: SnapshotPayload,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -61,7 +83,7 @@ async def verify(
     if not user:
         return JSONResponse({"error": "User not found"}, status_code=404)
 
-    # Verify the request includes the flag as proof it comes from a valid container
+    # Find the user's ready image
     image = (
         db.query(UserImage)
         .filter(UserImage.user_id == user.id, UserImage.status == "ready")
@@ -76,65 +98,53 @@ async def verify(
     # Authenticate: accept session cookie OR valid flag in payload
     session_user = get_current_user(request, db)
     if not session_user or session_user.id != user.id:
-        has_valid_flag = any(
-            r.collected.get("contents") == stored_flag
-            for r in payload.results
-        )
-        if not has_valid_flag:
+        if payload.flag != stored_flag:
             return JSONResponse(
                 {"error": "Unauthorized: invalid flag or session"}, status_code=403
             )
 
+    # Load server-side build state (trusted, not from client)
+    server_build_state = json.loads(image.build_state) if image.build_state else {}
+
     # Load module library for verification specs
     library = {m.id: m for m in load_all_modules()}
 
+    # Iterate over the user's assigned modules (server-side, not client-sent)
+    user_modules = (
+        db.query(UserModule).filter(UserModule.user_id == user.id).all()
+    )
+
     results = []
-    for result in payload.results:
-        module = library.get(result.module_id)
+    for um in user_modules:
+        module = library.get(um.module_id)
         if not module:
             results.append({
-                "module_id": result.module_id,
+                "module_id": um.module_id,
+                "name": um.module_id,
                 "passed": False,
                 "points_awarded": 0,
-                "error": "Unknown module",
             })
             continue
 
-        # Handle flag_contents specially
-        if module.verification.get("type") == "flag_contents":
-            passed = result.collected.get("contents") == stored_flag
-        else:
-            passed = check_module(module.verification, result.collected)
+        passed = extract_and_check(
+            module.verification, payload, stored_flag, server_build_state
+        )
 
         points_awarded = 0
-        if passed:
-            user_module = (
-                db.query(UserModule)
-                .filter(
-                    UserModule.user_id == user.id,
-                    UserModule.module_id == result.module_id,
-                )
-                .first()
-            )
-            if user_module and not user_module.completed:
-                user_module.completed = True
-                user_module.completed_at = datetime.now(timezone.utc)
-                points_awarded = user_module.points
+        if passed and not um.completed:
+            um.completed = True
+            um.completed_at = datetime.now(timezone.utc)
+            points_awarded = um.points
 
         results.append({
-            "module_id": result.module_id,
+            "module_id": um.module_id,
+            "name": module.name,
             "passed": passed,
             "points_awarded": points_awarded,
         })
 
     db.commit()
 
-    total_points = (
-        db.query(UserModule)
-        .filter(UserModule.user_id == user.id, UserModule.completed == True)
-        .with_entities(UserModule.points)
-        .all()
-    )
-    total = sum(p[0] for p in total_points)
+    total_points = sum(um.points for um in user_modules if um.completed)
 
-    return {"results": results, "total_points": total}
+    return {"results": results, "total_points": total_points}

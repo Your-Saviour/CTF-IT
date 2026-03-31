@@ -1,7 +1,10 @@
 import hashlib
 import hmac
+import io
+import json
 import os
 import shutil
+import tarfile
 
 import docker
 
@@ -15,6 +18,20 @@ def generate_flag(secret_key: str, user_id: str) -> str:
     return hmac.HMAC(
         secret_key.encode(), user_id.encode(), hashlib.sha256
     ).hexdigest()
+
+
+def _extract_build_state(client, image_tag: str) -> dict:
+    """Extract /opt/ctf/state.json from a built image to store server-side."""
+    container = client.containers.create(image_tag)
+    try:
+        bits, _ = container.get_archive("/opt/ctf/state.json")
+        raw = b"".join(bits)
+        tar = tarfile.open(fileobj=io.BytesIO(raw))
+        member = tar.getmembers()[0]
+        f = tar.extractfile(member)
+        return json.loads(f.read())
+    finally:
+        container.remove()
 
 
 def build_image_for_user(user_id: str, quota: dict) -> dict:
@@ -35,6 +52,10 @@ def build_image_for_user(user_id: str, quota: dict) -> dict:
             buildargs={"FLAG": flag},
             rm=True,
         )
+
+        # Extract build-time state before pushing
+        build_state = _extract_build_state(client, image_tag)
+
         push_image(image_tag)
     finally:
         shutil.rmtree(context_dir, ignore_errors=True)
@@ -43,4 +64,5 @@ def build_image_for_user(user_id: str, quota: dict) -> dict:
         "image_tag": image_tag,
         "modules": selected,
         "flag": flag,
+        "build_state": json.dumps(build_state.get("snapshots", {})),
     }

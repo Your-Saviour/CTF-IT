@@ -12,6 +12,9 @@ from api.models import Event, UserImage, UserModule
 from api.routes import admin, auth, images, scoreboard, verify
 from api.routes.auth import get_current_user
 
+REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5000")
+ROOT_PASSWORD = os.environ.get("ROOT_PASSWORD", "changeme123")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,7 +49,10 @@ app.include_router(admin.router)
 
 
 @app.get("/", response_class=HTMLResponse)
-async def landing(request: Request):
+async def landing(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if user:
+        return RedirectResponse("/dashboard", status_code=303)
     error = request.query_params.get("error")
     return templates.TemplateResponse(request, "landing.html", {
         "error": error,
@@ -78,16 +84,15 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
 
     modules_with_details = []
     for um in user_modules:
-        mod = library.get(um.module_id)
-        modules_with_details.append({
-            "id": um.module_id,
-            "name": mod.name if mod else um.module_id,
-            "description": mod.description if mod else "",
-            "difficulty": um.difficulty,
-            "points": um.points,
-            "completed": um.completed,
-            "hints": mod.hints if mod else [],
-        })
+        if um.completed:
+            mod = library.get(um.module_id)
+            modules_with_details.append({
+                "id": um.module_id,
+                "name": mod.name if mod else um.module_id,
+                "difficulty": um.difficulty,
+                "points": um.points,
+                "completed": True,
+            })
 
     total_points = sum(um.points for um in user_modules if um.completed)
 
@@ -95,7 +100,11 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "user": user,
         "image": image,
         "modules": modules_with_details,
+        "module_count": len(user_modules),
+        "completed_count": len(modules_with_details),
         "total_points": total_points,
+        "registry_host": REGISTRY_HOST,
+        "root_password": ROOT_PASSWORD,
     })
 
 

@@ -50,6 +50,7 @@ async def _run_build(user_id: int, username: str, quota: dict):
             if image:
                 image.image_tag = result["image_tag"]
                 image.flag = result["flag"]
+                image.build_state = result["build_state"]
                 image.status = "ready"
 
             for m in result["modules"]:

@@ -1,32 +1,198 @@
 {% extends "base.html" %}
 {% block title %}CTF Platform - Login{% endblock %}
+{% block extra_style %}
+.landing-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: calc(100vh - 52px);
+    margin: -2rem auto 0;
+    padding: 0;
+    max-width: none;
+}
+
+.landing-hero {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4rem;
+    position: relative;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 30% 50%, var(--cyan-glow), transparent 70%);
+}
+
+.landing-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(135deg, rgba(0, 229, 255, 0.03) 25%, transparent 25%),
+        linear-gradient(225deg, rgba(0, 229, 255, 0.03) 25%, transparent 25%),
+        linear-gradient(315deg, rgba(0, 229, 255, 0.03) 25%, transparent 25%),
+        linear-gradient(45deg, rgba(0, 229, 255, 0.03) 25%, transparent 25%);
+    background-size: 40px 40px;
+    opacity: 0.5;
+}
+
+.hero-content {
+    position: relative;
+    z-index: 1;
+}
+
+.hero-brand {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 2.8rem;
+    color: var(--cyan);
+    margin-bottom: 1rem;
+    text-shadow: 0 0 30px var(--cyan-glow);
+    line-height: 1.2;
+}
+
+.hero-tagline {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin-bottom: 2.5rem;
+    min-height: 1.65em;
+}
+
+.hero-tagline .cursor {
+    animation: blink-cursor 1s step-end infinite;
+    color: var(--cyan);
+}
+
+.hero-ascii {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    line-height: 1.3;
+    color: var(--cyan-dim);
+    opacity: 0.35;
+    white-space: pre;
+    user-select: none;
+}
+
+.landing-form-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border);
+}
+
+.landing-card {
+    width: 100%;
+    max-width: 380px;
+    animation: fade-in-up 0.5s ease-out;
+}
+
+.landing-card h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: var(--cyan);
+}
+
+.form-group {
+    margin-bottom: 1.25rem;
+}
+
+.landing-card .btn-primary {
+    width: 100%;
+    padding: 0.65rem;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.toggle-text {
+    margin-top: 1.5rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.toggle-text a {
+    color: var(--cyan);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.25s;
+}
+
+.toggle-text a:hover {
+    border-bottom-color: var(--cyan);
+}
+
+@media (max-width: 768px) {
+    .landing-grid {
+        grid-template-columns: 1fr;
+        min-height: auto;
+    }
+    .landing-hero {
+        padding: 2.5rem 1.5rem 1.5rem;
+    }
+    .hero-brand { font-size: 1.8rem; }
+    .hero-ascii { display: none; }
+    .landing-form-panel {
+        border-left: none;
+        border-top: 1px solid var(--border);
+        padding: 2rem 1.5rem;
+    }
+}
+{% endblock %}
+
 {% block content %}
-<div style="display: flex; justify-content: center; margin-top: 3rem;">
-    <div class="card" style="width: 100%; max-width: 400px;">
-        <h2 id="form-title">Login</h2>
-        {% if error == "invalid_credentials" %}
-            <div class="flash">Invalid username or password.</div>
-        {% elif error == "username_taken" %}
-            <div class="flash">Username already taken.</div>
-        {% endif %}
-        <form id="auth-form" method="POST" action="/auth/login">
-            <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">Username</label>
-                <input type="text" name="username" required>
+</div><!-- close .container from base -->
+<div class="landing-grid">
+    <div class="landing-hero">
+        <div class="hero-content">
+            <div class="hero-brand">&gt;_ CTF<br>Platform</div>
+            <div class="hero-tagline">
+                <span id="typed-text"></span><span class="cursor">|</span>
             </div>
-            <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.25rem; color: #8b949e;">Password</label>
-                <input type="password" name="password" required>
-            </div>
-            <button type="submit" class="btn btn-primary" id="submit-btn" style="width: 100%;">Login</button>
-        </form>
-        <p style="margin-top: 1rem; text-align: center; color: #8b949e;">
-            <span id="toggle-text">Don't have an account?</span>
-            <a href="#" id="toggle-link" style="color: #58a6ff;" onclick="toggleMode(event)">Register</a>
-        </p>
+            <div class="hero-ascii">
+ ┌──────────────────────────────────────┐
+ │  ██████╗████████╗███████╗           │
+ │ ██╔════╝╚══██╔══╝██╔════╝           │
+ │ ██║        ██║   █████╗             │
+ │ ██║        ██║   ██╔══╝             │
+ │ ╚██████╗   ██║   ██║                │
+ │  ╚═════╝   ╚═╝   ╚═╝                │
+ │                                      │
+ │  Find vulnerabilities.               │
+ │  Harden systems.                     │
+ │  Prove your skills.                  │
+ └──────────────────────────────────────┘</div>
+        </div>
+    </div>
+    <div class="landing-form-panel">
+        <div class="landing-card">
+            <h2 id="form-title">Login</h2>
+            {% if error == "invalid_credentials" %}
+                <div class="flash">Invalid username or password.</div>
+            {% elif error == "username_taken" %}
+                <div class="flash">Username already taken.</div>
+            {% endif %}
+            <form id="auth-form" method="POST" action="/auth/login">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" name="username" id="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" name="password" id="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary" id="submit-btn">Login</button>
+            </form>
+            <p class="toggle-text">
+                <span id="toggle-text">Don't have an account?</span>
+                <a href="#" id="toggle-link" onclick="toggleMode(event)">Register</a>
+            </p>
+        </div>
     </div>
 </div>
+<div><!-- re-open a div so base.html's closing </div> is valid -->
+{% endblock %}
 
+{% block extra_script %}
 <script>
 let isLogin = true;
 function toggleMode(e) {
@@ -38,6 +204,27 @@ function toggleMode(e) {
     document.getElementById('toggle-text').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
     document.getElementById('toggle-link').textContent = isLogin ? 'Register' : 'Login';
 }
-{% if error == "username_taken" %}toggleMode({preventDefault:()=>{}});{% endif %}
+{% if error == "username_taken" %}toggleMode({preventDefault:function(){}});{% endif %}
+
+// Typing animation
+(function() {
+    var phrases = [
+        'Identify. Exploit. Remediate.',
+        'Your sandbox. Your rules.',
+        'Harden the system. Capture the flag.',
+        'Real vulnerabilities. Real learning.'
+    ];
+    var phrase = phrases[Math.floor(Math.random() * phrases.length)];
+    var el = document.getElementById('typed-text');
+    var i = 0;
+    function type() {
+        if (i <= phrase.length) {
+            el.textContent = phrase.substring(0, i);
+            i++;
+            setTimeout(type, 45);
+        }
+    }
+    setTimeout(type, 600);
+})();
 </script>
 {% endblock %}

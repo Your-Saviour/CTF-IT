@@ -30,6 +30,7 @@ class UserImage(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     image_tag: Mapped[str] = mapped_column(String(256), nullable=True)
     flag: Mapped[str] = mapped_column(String(128), nullable=True)
+    build_state: Mapped[str] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="queued")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

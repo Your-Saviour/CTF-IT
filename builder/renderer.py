@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 MODULES_DIR = PROJECT_ROOT / "modules"
 BUILD_CONTEXTS_DIR = PROJECT_ROOT / "build_contexts"
-COLLECT_SCRIPT = PROJECT_ROOT / "collect.py"
+AUDIT_SCRIPT = PROJECT_ROOT / "audit.py"
 BUILD_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent / "build_snapshot.py"
 
 
@@ -21,20 +21,11 @@ def render_dockerfile(modules: list[Module]) -> str:
     return template.render(vuln_scripts=vuln_scripts)
 
 
-def generate_manifest(user_id: str, modules: list[Module]) -> dict:
+def generate_state_file(user_id: str) -> dict:
+    """Minimal opaque state file — no module info."""
     return {
         "user_id": user_id,
-        "modules": [
-            {
-                "id": m.id,
-                "name": m.name,
-                "type": m.type,
-                "difficulty": m.difficulty,
-                "points": m.points,
-                "verification": m.verification,
-            }
-            for m in modules
-        ],
+        "snapshots": {},
     }
 
 
@@ -56,15 +47,15 @@ def prepare_build_context(
             src = MODULES_DIR / "vulns" / m.id / m.script
             shutil.copy2(src, scripts_dir / m.script)
 
-    # Write manifest
-    manifest = generate_manifest(user_id, modules)
-    (context_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    # Write opaque state file (no module info)
+    state = generate_state_file(user_id)
+    (context_dir / "state.json").write_text(json.dumps(state, indent=2))
 
-    # Copy collect.py
-    if COLLECT_SCRIPT.exists():
-        shutil.copy2(COLLECT_SCRIPT, context_dir / "collect.py")
+    # Copy audit script
+    if AUDIT_SCRIPT.exists():
+        shutil.copy2(AUDIT_SCRIPT, context_dir / "audit.py")
 
-    # Copy build_snapshot.py for build-time manifest enrichment
+    # Copy build_snapshot.py for build-time state capture
     if BUILD_SNAPSHOT_SCRIPT.exists():
         shutil.copy2(BUILD_SNAPSHOT_SCRIPT, context_dir / "build_snapshot.py")
 
