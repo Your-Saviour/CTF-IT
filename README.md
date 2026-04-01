@@ -23,11 +23,21 @@ See the `.env.example` files for documentation on each variable. For LAN deploym
 docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
 
-If users will run containers on a different architecture (e.g. building on AMD64 but users are on Apple Silicon), set `DOCKER_PLATFORM` in `.env` and pass `--platform` to the base build:
+**Cross-architecture builds (e.g. AMD64 server → Apple Silicon users):**
+
+If the server and user machines have different CPU architectures, you need to register QEMU emulation first (one-time setup):
+
+```bash
+docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+```
+
+Then build with `--platform` targeting the users' architecture:
 
 ```bash
 docker build --platform linux/arm64 --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
+
+Also set `DOCKER_PLATFORM=linux/arm64` in `.env` so the builder generates user images for the same architecture. This is only needed when building for a different architecture — skip this if the server and users are on the same platform.
 
 ### 3. Start the platform
 
