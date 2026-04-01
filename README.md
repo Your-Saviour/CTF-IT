@@ -8,26 +8,20 @@ A CTF training platform where each user gets a uniquely generated Docker contain
 
 - Docker with Docker Compose
 
-### 1. Build the base image
+### 1. Configure environment variables
 
 ```bash
-cd base
-source .env
-docker build --build-arg ROOT_PASSWORD=$ROOT_PASSWORD -t ctf-base:latest .
+cp .env.example .env        # edit .env — at minimum change SECRET_KEY
+cp base/.env.example base/.env  # edit if you want a different root password
 ```
 
-### 2. Set environment variables
+See the `.env.example` files for documentation on each variable. For LAN deployments, set `REGISTRY_HOST` to the server's LAN IP (e.g. `192.168.1.50:5050`).
 
-Create a `.env` file in the project root:
+### 2. Build the base image
 
+```bash
+docker build --build-arg $(cat base/.env) -t ctf-base:latest base/
 ```
-SECRET_KEY=your-secret-key
-DATABASE_URL=sqlite:///ctf.db
-EVENT_QUOTA={"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}
-REGISTRY_HOST=localhost:5050
-```
-
-For LAN deployments, set `REGISTRY_HOST` to the server's LAN IP (e.g. `192.168.1.50:5050`).
 
 ### 3. Start the platform
 

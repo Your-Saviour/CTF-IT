@@ -15,11 +15,11 @@ Ubuntu 22.04 image with systemd as PID 1, designed to feel like a standard Linux
 ## Build
 
 ```bash
-source .env
-docker build --build-arg ROOT_PASSWORD=$ROOT_PASSWORD -t ctf-base:latest .
+cp .env.example .env   # edit if you want a different root password
+docker build --build-arg $(cat .env) -t ctf-base:latest .
 ```
 
-The `.env` file contains `ROOT_PASSWORD` used for the root account.
+The `.env` file contains `ROOT_PASSWORD` used for the root account. See `.env.example` for the default.
 
 ## Run
 
