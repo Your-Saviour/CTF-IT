@@ -12,7 +12,7 @@ A CTF training platform where each user gets a uniquely generated Docker contain
 
 ```bash
 cp .env.example .env        # edit .env — at minimum change SECRET_KEY
-cp base/.env.example base/.env  # edit if you want a different root password
+echo "ROOT_PASSWORD=changeme123" > base/.env  # change the password if you like
 ```
 
 See the `.env.example` files for documentation on each variable. For LAN deployments, set `REGISTRY_HOST` to the server's LAN IP (e.g. `192.168.1.50:5050`).
@@ -20,7 +20,13 @@ See the `.env.example` files for documentation on each variable. For LAN deploym
 ### 2. Build the base image
 
 ```bash
-docker build --build-arg $(cat base/.env) -t ctf-base:latest base/
+docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/
+```
+
+If users will run containers on a different architecture (e.g. building on AMD64 but users are on Apple Silicon), set `DOCKER_PLATFORM` in `.env` and pass `--platform` to the base build:
+
+```bash
+docker build --platform linux/arm64 --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
 
 ### 3. Start the platform
@@ -127,9 +133,19 @@ Connect via SSH:
 ssh root@localhost -p 2222
 ```
 
-### Remote Users (LAN Setup)
+### Insecure Registry (HTTP without TLS)
 
-If users are pulling from a different machine on the LAN, they must add the registry to Docker's insecure registries. Edit `/etc/docker/daemon.json` on each user's machine:
+The local registry runs over plain HTTP. Docker requires you to explicitly allow this, otherwise pulls and pushes will fail with a TLS error.
+
+Edit `/etc/docker/daemon.json` (create it if it doesn't exist):
+
+```json
+{
+  "insecure-registries": ["localhost:5050"]
+}
+```
+
+For LAN deployments where users pull from a different machine, use the server's IP instead:
 
 ```json
 {
@@ -137,7 +153,17 @@ If users are pulling from a different machine on the LAN, they must add the regi
 }
 ```
 
-Then restart Docker (`sudo systemctl restart docker` or restart Docker Desktop). Replace the IP with the server's actual LAN address.
+Then restart Docker:
+
+```bash
+# Linux
+sudo systemctl restart docker
+
+# macOS / Windows
+# Restart Docker Desktop
+```
+
+This must be done on **every machine** that pulls or pushes images (the server and all user machines).
 
 ## Key Design Decisions
 

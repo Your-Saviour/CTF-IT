@@ -14,6 +14,7 @@ from api.routes.auth import get_current_user
 
 REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5000")
 ROOT_PASSWORD = os.environ.get("ROOT_PASSWORD", "changeme123")
+API_HOST = os.environ.get("API_HOST", "host.docker.internal:8000")
 
 
 @asynccontextmanager
@@ -105,6 +106,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "total_points": total_points,
         "registry_host": REGISTRY_HOST,
         "root_password": ROOT_PASSWORD,
+        "api_host": API_HOST,
     })
 
 

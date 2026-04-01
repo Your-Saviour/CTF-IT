@@ -20,9 +20,12 @@ def generate_flag(secret_key: str, user_id: str) -> str:
     ).hexdigest()
 
 
-def _extract_build_state(client, image_tag: str) -> dict:
+def _extract_build_state(client, image_tag: str, platform: str = None) -> dict:
     """Extract /opt/ctf/state.json from a built image to store server-side."""
-    container = client.containers.create(image_tag)
+    create_kwargs = {"image": image_tag}
+    if platform:
+        create_kwargs["platform"] = platform
+    container = client.containers.create(**create_kwargs)
     try:
         bits, _ = container.get_archive("/opt/ctf/state.json")
         raw = b"".join(bits)
@@ -46,15 +49,19 @@ def build_image_for_user(user_id: str, quota: dict) -> dict:
 
     try:
         client = docker.from_env()
-        client.images.build(
+        platform = os.environ.get("DOCKER_PLATFORM")
+        build_kwargs = dict(
             path=str(context_dir),
             tag=image_tag,
             buildargs={"FLAG": flag},
             rm=True,
         )
+        if platform:
+            build_kwargs["platform"] = platform
+        client.images.build(**build_kwargs)
 
         # Extract build-time state before pushing
-        build_state = _extract_build_state(client, image_tag)
+        build_state = _extract_build_state(client, image_tag, platform)
 
         push_image(image_tag)
     finally:

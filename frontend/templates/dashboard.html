@@ -33,7 +33,7 @@
                 <div class="copy-box" onclick="copyText(this)">ssh root@localhost -p 2222</div>
 
                 <label style="margin-top: 1rem;">Verify your fixes (run inside the container):</label>
-                <div class="copy-box" onclick="copyText(this)">curl -s http://host.docker.internal:8000/api/verify -H "Content-Type: application/json" -d "$(python3 /opt/ctf/audit.py)"</div>
+                <div class="copy-box" onclick="copyText(this)">curl -s http://{{ api_host }}/api/verify -H "Content-Type: application/json" -d "$(python3 /opt/ctf/audit.py)"</div>
             </div>
         {% else %}
             <p style="color: var(--text-secondary);">No environment found.</p>
@@ -76,8 +76,22 @@
 {% block extra_script %}
 <script>
 function copyText(el) {
-    navigator.clipboard.writeText(el.textContent);
-    showToast('Copied to clipboard');
+    var text = el.textContent;
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function() {
+            showToast('Copied to clipboard');
+        });
+    } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Copied to clipboard');
+    }
 }
 
 {% if image and image.status != 'ready' and image.status != 'failed' %}

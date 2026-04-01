@@ -8,7 +8,7 @@ End-to-end integration test for the CTF platform. Run this after modifying modul
 - Port 5050 available (macOS AirPlay Receiver uses 5000, so the registry uses 5050)
 - `.env.test` exists in project root (gitignored) with:
   - `SECRET_KEY`, `DATABASE_URL`, `EVENT_QUOTA`, `ROOT_PASSWORD`, `REGISTRY_HOST`
-- Base image built: `docker build --build-arg $(cat base/.env) -t ctf-base:latest base/`
+- Base image built: `docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/`
 
 ## Test Setup
 
