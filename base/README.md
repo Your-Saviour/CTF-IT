@@ -24,8 +24,7 @@ The `.env` file contains `ROOT_PASSWORD` used for the root account. See `.env.ex
 ## Run
 
 ```bash
-docker run -d --cap-add SYS_ADMIN --cap-add NET_ADMIN --cgroupns=private \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+docker run -d --privileged --cgroupns=private \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
   -p 2222:22 ctf-base:latest
 ```
@@ -34,10 +33,8 @@ docker run -d --cap-add SYS_ADMIN --cap-add NET_ADMIN --cgroupns=private \
 
 | Flag | Why |
 |------|-----|
-| `--cap-add SYS_ADMIN` | systemd needs this to manage cgroups and mounts |
-| `--cap-add NET_ADMIN` | Required for ufw/iptables firewall rules |
-| `--cgroupns=private` | Isolates the container's cgroup namespace from the host |
-| `-v /sys/fs/cgroup:...` | systemd needs read-write access to the cgroup filesystem |
+| `--privileged` | systemd needs read-write access to the cgroup filesystem, which Docker only grants in privileged mode |
+| `--cgroupns=private` | Isolates the container's cgroup namespace from the host, preventing container escape |
 | `--tmpfs /run /run/lock /tmp` | RAM-backed filesystems, same as a real Linux system |
 
 ## Connect

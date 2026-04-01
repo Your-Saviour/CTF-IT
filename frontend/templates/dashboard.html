@@ -27,7 +27,7 @@
                 <div class="copy-box" onclick="copyText(this)" id="pull-cmd">docker pull {{ registry_host }}/{{ image.image_tag or '...' }}</div>
 
                 <label style="margin-top: 1rem;">Run your container:</label>
-                <div class="copy-box" onclick="copyText(this)" id="run-cmd">docker run -d --name ctf-container --cap-add SYS_ADMIN --cap-add NET_ADMIN --cgroupns=private -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp -p 2222:22 {{ registry_host }}/{{ image.image_tag or '...' }}</div>
+                <div class="copy-box" onclick="copyText(this)" id="run-cmd">docker run -d --name ctf-container --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock --tmpfs /tmp -p 2222:22 {{ registry_host }}/{{ image.image_tag or '...' }}</div>
 
                 <label style="margin-top: 1rem;">Connect to your container (password: <code style="color: var(--cyan);">{{ root_password }}</code>):</label>
                 <div class="copy-box" onclick="copyText(this)">ssh root@localhost -p 2222</div>

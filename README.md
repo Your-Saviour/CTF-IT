@@ -120,12 +120,12 @@ Pull your image from the local registry, then run with systemd flags:
 ```bash
 docker pull localhost:5050/ctf-<uuid>
 
-docker run -d \
-  --cap-add SYS_ADMIN --cap-add NET_ADMIN --cgroupns=private \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+docker run -d --privileged --cgroupns=private \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
   -p 2222:22 localhost:5050/ctf-<uuid>
 ```
+
+> `--privileged` is required because systemd needs read-write access to the cgroup filesystem. `--cgroupns=private` isolates the container's cgroup namespace from the host to prevent container escape.
 
 Connect via SSH:
 

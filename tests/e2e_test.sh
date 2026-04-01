@@ -201,8 +201,7 @@ docker pull "localhost:5050/$IMAGE_TAG"
 pass "Image pulled from registry"
 
 docker run -d --name "$CONTAINER_NAME" \
-    --cap-add SYS_ADMIN --cap-add NET_ADMIN --cgroupns=private \
-    -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+    --privileged --cgroupns=private \
     --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
     "localhost:5050/$IMAGE_TAG"
 
