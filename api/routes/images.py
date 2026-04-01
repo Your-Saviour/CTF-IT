@@ -9,7 +9,7 @@ from api.routes.auth import get_current_user
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
-REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5000")
+REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5050")
 
 
 @router.get("/status")

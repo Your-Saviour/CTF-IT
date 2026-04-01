@@ -12,7 +12,7 @@ from api.models import Event, UserImage, UserModule
 from api.routes import admin, auth, images, scoreboard, verify
 from api.routes.auth import get_current_user
 
-REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5000")
+REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5050")
 ROOT_PASSWORD = os.environ.get("ROOT_PASSWORD", "changeme123")
 API_HOST = os.environ.get("API_HOST", "host.docker.internal:8000")
 

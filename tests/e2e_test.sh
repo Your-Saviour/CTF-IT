@@ -210,7 +210,14 @@ docker run -d --name "$CONTAINER_NAME" \
 sleep 5
 
 CONTAINER_RUNNING=$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || echo "false")
-assert_eq "Container is running" "true" "$CONTAINER_RUNNING"
+if [ "$CONTAINER_RUNNING" != "true" ]; then
+    fail "Container is running (expected='true', got='$CONTAINER_RUNNING')"
+    warn "Container logs:"
+    docker logs "$CONTAINER_NAME" 2>&1 | tail -20
+    warn "If systemd fails to start, try: docker run --privileged ..."
+else
+    pass "Container is running"
+fi
 
 # --- Step 4: Verify container state file -------------------------------------
 log "=== Step 4: Container State File ==="
