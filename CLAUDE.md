@@ -76,6 +76,7 @@ The selector (`builder/selector.py`) respects conflict exclusions and auto-resol
 
 - **Deterministic flags**: `HMAC(secret_key, user_id)` — same user always gets same flag, enables rebuilds without storing flags separately.
 - **Opaque collection**: the container ships only a broad `audit.py` and a minimal `state.json` (user_id + build-time snapshots). No module names, verification specs, or expected values are exposed to the user. The server knows which modules are assigned via the `UserModule` table and extracts relevant data from the broad snapshot.
+- **Opaque verify response**: `/api/verify` only returns details (module ID, name) for **completed** challenges. Unsolved modules are hidden — the response includes only summary counts (`completed`, `remaining`, `newly_completed`) to prevent leaking task names.
 - **Stateless verification**: flag in payload proves container legitimacy; no session required for verify endpoint.
 - **In-process async builds**: uses `asyncio.create_task` (not a separate worker). Production spec calls for RQ + Redis but this is not yet implemented.
 - **Local Docker registry**: a `registry:2` sidecar in docker-compose serves built images on port 5050. After build, images are tagged and pushed to the registry, then cleaned from the local daemon. Users `docker pull` from the registry. The push target is `localhost:5050` (not the compose service name) because the Docker daemon runs on the host via socket mount.
