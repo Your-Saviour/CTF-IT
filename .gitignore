@@ -4,7 +4,6 @@ __pycache__/
 base/.env
 *.pyc
 build_contexts/
-.env.test
 *.egg-info/
 dist/
 .venv/
