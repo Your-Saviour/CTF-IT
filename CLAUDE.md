@@ -19,24 +19,34 @@ uvicorn api.main:app --reload
 docker compose up -d
 
 # Build base image (required before user images can be built)
-docker build -t ctf-base:latest base/
+docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
 
 ### Testing
 
-See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test.
+See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test, or run the automated script:
 
-- `.env.test` has test credentials with a quota that selects all modules — copy it to `.env` before testing
+```bash
+docker compose down -v && tests/e2e_test.sh
+```
+
+- `.env.test` is checked into the repo with a quota that selects all 9 modules — the e2e script copies it to `.env` automatically
 - `ROOT_PASSWORD` in `base/.env` is `changeme123` — this is the known default the `password_changed` verification checks against
 - Always test via the API docker container (`docker compose`), not by importing Python modules directly — the builder needs Docker socket access
+- Containers require `--privileged --cgroupns=private` for systemd to start (Docker only grants rw cgroup access in privileged mode)
 
 ### Required Environment Variables
 
+See `.env.example` for full documentation. Key variables:
+
 - `SECRET_KEY` — used for session signing and deterministic flag generation (HMAC)
 - `DATABASE_URL` — defaults to `sqlite:///ctf.db`, use postgres URI for production
-- `EVENT_QUOTA` — JSON defining module selection counts per type/difficulty, e.g. `{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}`
-- `REGISTRY_HOST` — user-facing address for the Docker registry (default `localhost:5050`). Set to LAN IP for remote access (e.g. `192.168.1.50:5050`)
-- `REGISTRY_PUSH_HOST` — address the Docker daemon uses to push to the registry (default `localhost:5050`). Only change if running DinD instead of socket-mounted
+- `EVENT_QUOTA` — JSON defining module selection counts per type/difficulty
+- `REGISTRY_HOST` — user-facing address for the Docker registry (default `localhost:5050`). Set to LAN IP for remote access
+- `REGISTRY_PUSH_HOST` — address the Docker daemon uses to push to the registry (default `localhost:5050`). Only change if running DinD
+- `API_HOST` — address shown in the dashboard verify command (default `host.docker.internal:8000`). Set to server IP/domain for LAN/VPS
+- `API_PORT` — port the API is exposed on (default `8000`)
+- `DOCKER_PLATFORM` — target platform for image builds (e.g. `linux/arm64`). Set when build server and users have different architectures
 
 ## Architecture
 
