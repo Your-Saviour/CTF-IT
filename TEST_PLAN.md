@@ -109,7 +109,7 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
-**Expected:** Every module returns `"passed": false`, `"points_awarded": 0`, `"total_points": 0`.
+**Expected:** `"total_points": 0`, `"completed": 0`, `"remaining": 9`. The `results` array is empty — unsolved module names are not revealed.
 
 ## Step 6: Apply All Fixes
 
@@ -151,7 +151,7 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
-**Expected:** Every module returns `"passed": true` with correct points. Total should equal sum of all module points.
+**Expected:** `"completed": 9`, `"remaining": 0`, `"newly_completed": 9`. All 9 modules appear in `results` with `"passed": true` and correct points. Total should equal sum of all module points.
 
 | Module | Points | Verification Type |
 |--------|--------|-------------------|
@@ -174,7 +174,7 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
-**Expected:** All modules still `"passed": true` but `"points_awarded": 0` (already claimed). `"total_points"` unchanged.
+**Expected:** All modules still `"passed": true` but `"points_awarded": 0` (already claimed). `"total_points"` unchanged. `"newly_completed": 0`.
 
 ## Cleanup
 

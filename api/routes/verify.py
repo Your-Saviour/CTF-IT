@@ -115,16 +115,13 @@ async def verify(
     )
 
     results = []
+    newly_completed = 0
     for um in user_modules:
         module = library.get(um.module_id)
         if not module:
-            results.append({
-                "module_id": um.module_id,
-                "name": um.module_id,
-                "passed": False,
-                "points_awarded": 0,
-            })
             continue
+
+        was_already_completed = um.completed
 
         passed = extract_and_check(
             module.verification, payload, stored_flag, server_build_state
@@ -135,16 +132,28 @@ async def verify(
             um.completed = True
             um.completed_at = datetime.now(timezone.utc)
             points_awarded = um.points
+            newly_completed += 1
 
-        results.append({
-            "module_id": um.module_id,
-            "name": module.name,
-            "passed": passed,
-            "points_awarded": points_awarded,
-        })
+        # Only reveal module details for completed challenges
+        if um.completed:
+            results.append({
+                "module_id": um.module_id,
+                "name": module.name,
+                "passed": True,
+                "points_awarded": points_awarded,
+                "newly_completed": not was_already_completed and passed,
+            })
 
     db.commit()
 
     total_points = sum(um.points for um in user_modules if um.completed)
+    total_modules = len(user_modules)
+    completed_count = sum(1 for um in user_modules if um.completed)
 
-    return {"results": results, "total_points": total_points}
+    return {
+        "results": results,
+        "total_points": total_points,
+        "completed": completed_count,
+        "remaining": total_modules - completed_count,
+        "newly_completed": newly_completed,
+    }

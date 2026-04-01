@@ -241,16 +241,16 @@ UNFIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
 UNFIXED_TOTAL=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
 assert_eq "Unfixed: total_points=0" "0" "$UNFIXED_TOTAL"
 
-UNFIXED_ALL_FAIL=$(echo "$UNFIXED_RESP" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-print('true' if all(not r['passed'] for r in data['results']) else 'false')
-")
-assert_eq "Unfixed: all modules failed" "true" "$UNFIXED_ALL_FAIL"
+UNFIXED_REMAINING=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['remaining'])")
+assert_eq "Unfixed: 9 remaining" "9" "$UNFIXED_REMAINING"
 
-NUM_MODULES=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['results']))")
-assert_eq "9 modules assigned" "9" "$NUM_MODULES"
-log "Modules verified: $NUM_MODULES"
+UNFIXED_COMPLETED=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['completed'])")
+assert_eq "Unfixed: 0 completed" "0" "$UNFIXED_COMPLETED"
+
+# Results should be empty — no module names revealed for unsolved challenges
+UNFIXED_RESULTS_LEN=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['results']))")
+assert_eq "Unfixed: no results revealed" "0" "$UNFIXED_RESULTS_LEN"
+log "Modules remaining: $UNFIXED_REMAINING"
 
 # --- Step 6: Apply all fixes -------------------------------------------------
 log "=== Step 6: Apply All Fixes ==="
@@ -303,6 +303,15 @@ FIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
 FIXED_TOTAL=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
 assert_eq "Fixed: total_points=1500" "1500" "$FIXED_TOTAL"
 
+FIXED_COMPLETED=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['completed'])")
+assert_eq "Fixed: 9 completed" "9" "$FIXED_COMPLETED"
+
+FIXED_REMAINING=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['remaining'])")
+assert_eq "Fixed: 0 remaining" "0" "$FIXED_REMAINING"
+
+FIXED_NEWLY=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['newly_completed'])")
+assert_eq "Fixed: 9 newly completed" "9" "$FIXED_NEWLY"
+
 FIXED_ALL_PASS=$(echo "$FIXED_RESP" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -346,6 +355,9 @@ IDEM_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
 
 IDEM_TOTAL=$(echo "$IDEM_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
 assert_eq "Idempotent: total_points still 1500" "1500" "$IDEM_TOTAL"
+
+IDEM_NEWLY=$(echo "$IDEM_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['newly_completed'])")
+assert_eq "Idempotent: 0 newly completed" "0" "$IDEM_NEWLY"
 
 IDEM_ZERO_AWARDED=$(echo "$IDEM_RESP" | python3 -c "
 import sys, json
