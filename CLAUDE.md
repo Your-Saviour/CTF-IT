@@ -52,7 +52,7 @@ See `.env.example` for full documentation. Key variables:
 
 ### Request Flow
 
-User registers → async background task builds Docker image with selected modules → image pushed to local Docker registry → dashboard polls `/api/images/status` until ready → user pulls image from registry and runs container → fixes vulns → runs `audit.py` inside container → POSTs broad system snapshot to `/api/verify` → backend matches snapshot against user's assigned modules (server-side) → awards points.
+User selects an open event and registers → user is bound to that event (`User.event_id`) → async background task builds Docker image using the event's quota → image pushed to local Docker registry → dashboard polls `/api/images/status` until ready → user pulls image from registry and runs container → fixes vulns → runs `audit.py` inside container → POSTs broad system snapshot to `/api/verify` → backend matches snapshot against user's assigned modules (server-side) → awards points. Scoreboard is scoped per-event.
 
 ### Key Components
 
@@ -83,7 +83,20 @@ The selector (`builder/selector.py`) runs three phases: (1) type/difficulty quot
 - **In-process async builds**: uses `asyncio.create_task` (not a separate worker). Production spec calls for RQ + Redis but this is not yet implemented.
 - **Local Docker registry**: a `registry:2` sidecar in docker-compose serves built images on port 5050. After build, images are tagged and pushed to the registry, then cleaned from the local daemon. Users `docker pull` from the registry. The push target is `localhost:5050` (not the compose service name) because the Docker daemon runs on the host via socket mount.
 - **Docker socket required**: builder needs `/var/run/docker.sock` mounted to build images and push to the registry.
+- **Auto-admin bootstrap**: the first user to register on a fresh database is automatically granted `is_admin = True`. This removes the need to run `promote_admin.py` after initial deployment. Subsequent registrations are unaffected.
+
+### Multi-Event System
+
+The platform supports multiple concurrent events, each with independent settings and leaderboards.
+
+- **Event lifecycle**: `draft` → `open` → `stopped`. Draft events are invisible to users. Open events accept registration. Stopped events are archived with frozen leaderboards (verification blocked).
+- **One event per user**: each user is bound to exactly one event via `User.event_id`. The event's quota drives module selection at registration time.
+- **Event settings**: name, quota (JSON), description, welcome message, time limit (display-only; enforcement is manual via start/stop).
+- **Admin CRUD**: `POST/GET/PUT/DELETE /admin/events/{id}`, plus `/start` and `/stop` actions. Events with assigned users cannot be deleted.
+- **Public event listing**: `GET /api/events` returns open events (no auth required) for the registration form.
+- **Scoreboard scoping**: `GET /api/scoreboard?event_id=X` returns per-event rankings. `GET /api/scoreboard/events` lists all non-draft events for the selector dropdown.
+- **Legacy `open` column**: the `Event.open` boolean is kept in the schema for SQLite compatibility (no column drops) but superseded by the `status` field. All code uses `status`.
 
 ### Database Models (api/models.py)
 
-Four models: `User`, `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module), `Event` (global config with quota JSON).
+Four models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module), `Event` (name, quota JSON, status, description, welcome_message, time_limit_minutes). A default "open" event is created at startup if none exists.
