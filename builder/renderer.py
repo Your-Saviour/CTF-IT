@@ -17,7 +17,7 @@ BUILD_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent / "build_snapshot.py"
 def render_dockerfile(modules: list[Module]) -> str:
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
     template = env.get_template("Dockerfile.j2")
-    vuln_scripts = [m.script for m in modules if m.script]
+    vuln_scripts = [f"{m.id}__{m.script}" for m in modules if m.script]
     return template.render(vuln_scripts=vuln_scripts)
 
 
@@ -44,8 +44,8 @@ def prepare_build_context(
     scripts_dir.mkdir(exist_ok=True)
     for m in modules:
         if m.script:
-            src = MODULES_DIR / "vulns" / m.id / m.script
-            shutil.copy2(src, scripts_dir / m.script)
+            src = m.source_dir / m.script
+            shutil.copy2(src, scripts_dir / f"{m.id}__{m.script}")
 
     # Write opaque state file (no module info)
     state = generate_state_file(user_id)

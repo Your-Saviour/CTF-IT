@@ -105,6 +105,7 @@ async def list_modules(request: Request, db: Session = Depends(get_db)):
             "difficulty": m.difficulty,
             "points": m.points,
             "category": m.category,
+            "tags": m.tags,
         }
         for m in modules
     ]
@@ -165,6 +166,16 @@ async def update_event(
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     body = await request.json()
+
+    if "quota" in body:
+        from builder.quota_validation import validate_quota
+        errors = validate_quota(body["quota"])
+        if errors:
+            return JSONResponse(
+                {"error": "Invalid quota", "details": errors},
+                status_code=422,
+            )
+
     event = db.query(Event).first()
     if not event:
         event = Event(

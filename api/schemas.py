@@ -20,4 +20,6 @@ class SnapshotPayload(BaseModel):
     services: dict
     packages: list[str]
     listening_ports: list[int]
+    http_responses: dict = {}
+    processes: list[str] = []
     shadow_hashes: dict

@@ -1,0 +1,17 @@
+id: vulnerable_flask_app
+name: Vulnerable Flask Application
+description: A small Flask web app running as a systemd service on port 5000.
+type: application
+difficulty: easy
+points: 0
+category: web
+tags: [web, flask, python]
+conflicts: []
+requires: []
+script: install_flask_app.sh
+verification:
+  type: process_running
+  process: gunicorn
+  expected: running
+hints:
+  - "Check what services are running on common web ports"

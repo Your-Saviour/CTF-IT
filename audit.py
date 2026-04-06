@@ -178,6 +178,43 @@ def collect_listening_ports():
     return sorted(ports)
 
 
+def collect_http_responses(listening_ports):
+    """Probe all listening ports for HTTP responses.
+
+    Labels are formatted as "localhost_{port}" — this is the contract
+    that verification YAMLs reference via the "label" field.
+    """
+    result = {}
+    for port in listening_ports:
+        label = f"localhost_{port}"
+        url = f"http://localhost:{port}/"
+        # Single request: body followed by status code on the last line
+        raw, rc = run(
+            f"curl -s -w '\\n%{{http_code}}' --max-time 3 --max-filesize 65536 '{url}'"
+        )
+        if rc != 0:
+            continue
+        lines = raw.rsplit('\n', 1)
+        body = lines[0] if len(lines) == 2 else ""
+        status = lines[1] if len(lines) == 2 else lines[0]
+        result[label] = {
+            "status_code": int(status) if status.isdigit() else 0,
+            "body": body[:65536],
+        }
+    return result
+
+
+def collect_processes():
+    """Collect running process command strings."""
+    output, _ = run("ps aux --no-headers")
+    processes = []
+    for line in output.splitlines():
+        parts = line.split(None, 10)
+        if len(parts) >= 11:
+            processes.append(parts[10])
+    return processes
+
+
 def collect_shadow_hashes():
     hashes = {}
     try:
@@ -213,6 +250,7 @@ def read_state():
 
 def main():
     state = read_state()
+    ports = collect_listening_ports()
     snapshot = {
         "user_id": state.get("user_id", ""),
         "flag": read_flag(),
@@ -221,7 +259,9 @@ def main():
         "file_contents": collect_file_contents(),
         "services": collect_services(),
         "packages": collect_packages(),
-        "listening_ports": collect_listening_ports(),
+        "listening_ports": ports,
+        "http_responses": collect_http_responses(ports),
+        "processes": collect_processes(),
         "shadow_hashes": collect_shadow_hashes(),
     }
     print(json.dumps(snapshot))

@@ -1,0 +1,20 @@
+id: flask_defacement
+name: Defaced Flask Homepage
+description: The Flask app homepage has been defaced with attacker content. Remove the defacement.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [web, defacement, flask]
+conflicts: []
+requires: [vulnerable_flask_app]
+script: deface_flask.sh
+verification:
+  type: http_response
+  label: localhost_5000
+  status_code: 200
+  body_not_contains: "HACKED BY"
+hints:
+  - "Check the web app response at port 5000"
+  - "Look at the Flask app source files in /opt/flaskapp"
+suggested_fix: "Edit /opt/flaskapp/app.py to remove the defacement, then restart the flaskapp service"

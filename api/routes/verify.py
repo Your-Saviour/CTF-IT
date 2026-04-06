@@ -61,6 +61,28 @@ def extract_and_check(
         hash_val = snapshot.shadow_hashes.get(user, "")
         return hash_val not in ("", "!", "*", "!!", "!*")
 
+    if vtype == "http_response":
+        label = verification["label"]
+        info = snapshot.http_responses.get(label, {})
+        if not info:
+            return False
+        if "status_code" in verification:
+            if info.get("status_code") != verification["status_code"]:
+                return False
+        if "body_contains" in verification:
+            if verification["body_contains"] not in info.get("body", ""):
+                return False
+        if "body_not_contains" in verification:
+            if verification["body_not_contains"] in info.get("body", ""):
+                return False
+        return True
+
+    if vtype == "process_running":
+        pattern = verification["process"]
+        expected = verification.get("expected", "running")
+        match = any(pattern in p for p in snapshot.processes)
+        return match if expected == "running" else not match
+
     if vtype == "password_changed":
         user = verification["user"]
         current_hash = snapshot.shadow_hashes.get(user, "")

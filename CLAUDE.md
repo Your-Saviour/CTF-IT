@@ -58,19 +58,21 @@ User registers → async background task builds Docker image with selected modul
 
 - **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`.
 - **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag.
-- **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`) and hardening tasks (`hardening/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
+- **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), and applications (`application/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`base/`** — Base Docker image (Ubuntu 22.04 + common tools). All user images inherit from `ctf-base:latest`.
-- **`audit.py`** — Runs inside user containers. Performs a broad security audit (file permissions, configs, services, packages, ports, shadow hashes) and outputs a JSON system snapshot. Contains no module-specific logic — the server matches the snapshot against the user's assigned modules.
+- **`audit.py`** — Runs inside user containers. Performs a broad security audit (file permissions, configs, services, packages, ports, HTTP responses, processes, shadow hashes) and outputs a JSON system snapshot. Contains no module-specific logic — the server matches the snapshot against the user's assigned modules.
 - **`frontend/templates/`** — Jinja2 HTML templates. Dark theme, client-side polling for build status.
 
 ### Module System
 
-Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`.
+Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/application), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`.
 
-Verification types: `file_permissions`, `file_contains`, `file_not_contains`, `service_running`, `package_installed`, `port_closed`, `flag_contents`, `password_not_default`, `password_changed`.
+Application modules install infrastructure (web apps, services, CLI tools) that vulnerability modules can target via `requires`. They award 0 points and are selected via their own quota category (`"application"` key in `EVENT_QUOTA`).
 
-The selector (`builder/selector.py`) respects conflict exclusions and auto-resolves dependencies.
+Verification types: `file_permissions`, `file_contains`, `file_not_contains`, `service_running`, `package_installed`, `port_closed`, `flag_contents`, `password_not_default`, `password_changed`, `http_response`, `process_running`.
+
+The selector (`builder/selector.py`) respects conflict exclusions, auto-resolves dependencies, and counts dependency-pulled modules toward their type/difficulty quota.
 
 ### Key Design Decisions
 

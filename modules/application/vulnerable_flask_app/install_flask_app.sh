@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+pip3 install flask gunicorn
+
+mkdir -p /opt/flaskapp
+cat > /opt/flaskapp/app.py << 'PYEOF'
+from flask import Flask
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "<h1>Welcome to the CTF App</h1>"
+
+@app.route("/admin")
+def admin():
+    return "<h1>Admin Panel</h1><p>Nothing to see here.</p>"
+PYEOF
+
+cat > /etc/systemd/system/flaskapp.service << 'SVCEOF'
+[Unit]
+Description=CTF Flask Application
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/gunicorn --workers 2 --bind 0.0.0.0:5000 app:app
+WorkingDirectory=/opt/flaskapp
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+# Enable the service via symlink (systemctl not available during build)
+mkdir -p /etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/flaskapp.service /etc/systemd/system/multi-user.target.wants/flaskapp.service

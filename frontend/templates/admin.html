@@ -1,5 +1,150 @@
 {% extends "base.html" %}
 {% block title %}Admin - CTF Platform{% endblock %}
+{% block extra_style %}
+.quota-grid {
+    display: grid;
+    gap: 0.5rem;
+}
+.quota-grid .grid-header {
+    display: grid;
+    grid-template-columns: 140px repeat(3, 1fr);
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border);
+}
+.quota-grid .grid-row {
+    display: grid;
+    grid-template-columns: 140px repeat(3, 1fr);
+    gap: 0.5rem;
+    align-items: center;
+}
+.quota-grid .grid-row .type-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: capitalize;
+}
+.quota-grid input[type="number"] {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    width: 100%;
+    text-align: center;
+    transition: border-color 0.25s, box-shadow 0.25s;
+}
+.quota-grid input[type="number"]:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan-glow);
+}
+.collapsible-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    user-select: none;
+}
+.collapsible-header:hover { color: var(--cyan); }
+.collapsible-header .arrow {
+    transition: transform 0.2s;
+    font-size: 0.65rem;
+}
+.collapsible-header.open .arrow { transform: rotate(90deg); }
+.collapsible-body { display: none; }
+.collapsible-body.open { display: block; }
+.filter-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.filter-row select {
+    flex: 1;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+}
+.filter-row input[type="number"] {
+    width: 70px;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    text-align: center;
+}
+.filter-row input[type="number"]:focus,
+.filter-row select:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan-glow);
+}
+.btn-add {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-secondary);
+    padding: 0.3rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    transition: all 0.25s;
+}
+.btn-add:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.btn-remove {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0.2rem 0.4rem;
+    transition: color 0.2s;
+}
+.btn-remove:hover { color: var(--red); }
+.mode-toggle {
+    float: right;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: all 0.25s;
+}
+.mode-toggle:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+#structured-editor, #json-editor { display: none; }
+#structured-editor.active, #json-editor.active { display: block; }
+{% endblock %}
+
 {% block content %}
 <h1>Admin Panel</h1>
 
@@ -19,8 +164,39 @@
             </label>
         </div>
         <div class="form-group" style="margin-bottom: 1rem;">
-            <label for="event-quota">Quota (JSON)</label>
-            <textarea id="event-quota" rows="6">{{ event_quota | tojson(indent=2) }}</textarea>
+            <label>
+                Quota
+                <button type="button" class="mode-toggle" id="mode-toggle">Show Raw JSON</button>
+            </label>
+
+            <!-- Structured Editor -->
+            <div id="structured-editor" class="active">
+                <!-- Type/Difficulty Grid (populated by JS) -->
+                <div class="quota-grid" id="type-grid"></div>
+
+                <!-- Category Quotas -->
+                <div class="collapsible-header" id="cat-header">
+                    <span class="arrow">&#9654;</span> Category Quotas
+                </div>
+                <div class="collapsible-body" id="cat-body">
+                    <div id="cat-rows"></div>
+                    <button type="button" class="btn-add" id="add-cat">+ Add Category</button>
+                </div>
+
+                <!-- Tag Quotas -->
+                <div class="collapsible-header" id="tag-header">
+                    <span class="arrow">&#9654;</span> Tag Quotas
+                </div>
+                <div class="collapsible-body" id="tag-body">
+                    <div id="tag-rows"></div>
+                    <button type="button" class="btn-add" id="add-tag">+ Add Tag</button>
+                </div>
+            </div>
+
+            <!-- JSON Editor -->
+            <div id="json-editor">
+                <textarea id="event-quota" rows="10">{{ event_quota | tojson(indent=2) }}</textarea>
+            </div>
         </div>
         <button type="submit" class="btn btn-primary">Save</button>
     </form>
@@ -87,15 +263,214 @@
 
 {% block extra_script %}
 <script>
-// Event form
+var DIFFICULTIES = ['easy', 'medium', 'hard'];
+var currentQuota = {{ event_quota | tojson }};
+var allTypes = [];
+var allCategories = [];
+var allTags = [];
+var modulesData = [];
+var jsonMode = false;
+
+// ── Quota Form Logic ──
+
+function buildTypeGrid() {
+    var grid = document.getElementById('type-grid');
+    var html = '<div class="grid-header"><span></span>';
+    DIFFICULTIES.forEach(function(d) {
+        html += '<span>' + d + '</span>';
+    });
+    html += '</div>';
+
+    allTypes.forEach(function(type) {
+        html += '<div class="grid-row"><span class="type-label">' + type + '</span>';
+        DIFFICULTIES.forEach(function(d) {
+            var val = (currentQuota[type] && currentQuota[type][d]) || 0;
+            html += '<input type="number" min="0" id="q-' + type + '-' + d + '" value="' + val + '">';
+        });
+        html += '</div>';
+    });
+    grid.innerHTML = html;
+}
+
+function addFilterRow(containerId, options, key, value) {
+    var container = document.getElementById(containerId);
+    var row = document.createElement('div');
+    row.className = 'filter-row';
+
+    var sel = document.createElement('select');
+    var emptyOpt = document.createElement('option');
+    emptyOpt.value = '';
+    emptyOpt.textContent = '-- select --';
+    sel.appendChild(emptyOpt);
+    options.forEach(function(opt) {
+        var o = document.createElement('option');
+        o.value = opt;
+        o.textContent = opt;
+        if (opt === key) o.selected = true;
+        sel.appendChild(o);
+    });
+
+    var inp = document.createElement('input');
+    inp.type = 'number';
+    inp.min = '0';
+    inp.value = value || 0;
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-remove';
+    btn.innerHTML = '&#10005;';
+    btn.onclick = function() { row.remove(); };
+
+    row.appendChild(sel);
+    row.appendChild(inp);
+    row.appendChild(btn);
+    container.appendChild(row);
+}
+
+function loadCatRows() {
+    var cats = currentQuota.categories || {};
+    Object.keys(cats).forEach(function(k) {
+        addFilterRow('cat-rows', allCategories, k, cats[k]);
+    });
+}
+
+function loadTagRows() {
+    var tags = currentQuota.tags || {};
+    Object.keys(tags).forEach(function(k) {
+        addFilterRow('tag-rows', allTags, k, tags[k]);
+    });
+}
+
+function buildQuotaFromForm() {
+    var quota = {};
+
+    // Type/difficulty grid
+    allTypes.forEach(function(type) {
+        quota[type] = {};
+        DIFFICULTIES.forEach(function(d) {
+            var el = document.getElementById('q-' + type + '-' + d);
+            quota[type][d] = parseInt(el.value) || 0;
+        });
+    });
+
+    // Category rows
+    var catRows = document.querySelectorAll('#cat-rows .filter-row');
+    if (catRows.length > 0) {
+        var cats = {};
+        catRows.forEach(function(row) {
+            var key = row.querySelector('select').value;
+            var val = parseInt(row.querySelector('input').value) || 0;
+            if (key && val > 0) cats[key] = val;
+        });
+        if (Object.keys(cats).length > 0) quota.categories = cats;
+    }
+
+    // Tag rows
+    var tagRows = document.querySelectorAll('#tag-rows .filter-row');
+    if (tagRows.length > 0) {
+        var tags = {};
+        tagRows.forEach(function(row) {
+            var key = row.querySelector('select').value;
+            var val = parseInt(row.querySelector('input').value) || 0;
+            if (key && val > 0) tags[key] = val;
+        });
+        if (Object.keys(tags).length > 0) quota.tags = tags;
+    }
+
+    return quota;
+}
+
+function populateFormFromQuota(quota) {
+    currentQuota = quota;
+
+    // Discover types from quota that aren't in allTypes
+    Object.keys(quota).forEach(function(k) {
+        if (k !== 'categories' && k !== 'tags' && allTypes.indexOf(k) === -1) {
+            allTypes.push(k);
+        }
+    });
+
+    buildTypeGrid();
+    document.getElementById('cat-rows').innerHTML = '';
+    document.getElementById('tag-rows').innerHTML = '';
+    loadCatRows();
+    loadTagRows();
+
+    // Auto-open sections if they have data
+    if (quota.categories && Object.keys(quota.categories).length > 0) {
+        document.getElementById('cat-header').classList.add('open');
+        document.getElementById('cat-body').classList.add('open');
+    }
+    if (quota.tags && Object.keys(quota.tags).length > 0) {
+        document.getElementById('tag-header').classList.add('open');
+        document.getElementById('tag-body').classList.add('open');
+    }
+}
+
+// ── Mode Toggle ──
+
+document.getElementById('mode-toggle').addEventListener('click', function() {
+    jsonMode = !jsonMode;
+    var structEl = document.getElementById('structured-editor');
+    var jsonEl = document.getElementById('json-editor');
+    var btn = document.getElementById('mode-toggle');
+
+    if (jsonMode) {
+        // Sync form → JSON
+        var quota = buildQuotaFromForm();
+        document.getElementById('event-quota').value = JSON.stringify(quota, null, 2);
+        structEl.classList.remove('active');
+        jsonEl.classList.add('active');
+        btn.textContent = 'Show Form';
+    } else {
+        // Sync JSON → form
+        try {
+            var quota = JSON.parse(document.getElementById('event-quota').value);
+            populateFormFromQuota(quota);
+            jsonEl.classList.remove('active');
+            structEl.classList.add('active');
+            btn.textContent = 'Show Raw JSON';
+        } catch(err) {
+            showToast('Invalid JSON — fix before switching to form view');
+            jsonMode = true;
+        }
+    }
+});
+
+// ── Collapsible Sections ──
+
+function setupCollapsible(headerId, bodyId) {
+    document.getElementById(headerId).addEventListener('click', function() {
+        this.classList.toggle('open');
+        document.getElementById(bodyId).classList.toggle('open');
+    });
+}
+setupCollapsible('cat-header', 'cat-body');
+setupCollapsible('tag-header', 'tag-body');
+
+// ── Add Buttons ──
+
+document.getElementById('add-cat').addEventListener('click', function() {
+    addFilterRow('cat-rows', allCategories, '', 1);
+});
+document.getElementById('add-tag').addEventListener('click', function() {
+    addFilterRow('tag-rows', allTags, '', 1);
+});
+
+// ── Event Form Submit ──
+
 document.getElementById('event-form').addEventListener('submit', function(e) {
     e.preventDefault();
     var quota;
-    try {
-        quota = JSON.parse(document.getElementById('event-quota').value);
-    } catch(err) {
-        showToast('Invalid JSON in quota field');
-        return;
+    if (jsonMode) {
+        try {
+            quota = JSON.parse(document.getElementById('event-quota').value);
+        } catch(err) {
+            showToast('Invalid JSON in quota field');
+            return;
+        }
+    } else {
+        quota = buildQuotaFromForm();
     }
     fetch('/admin/event', {
         method: 'PUT',
@@ -105,12 +480,19 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
             open: document.getElementById('event-open').checked,
             quota: quota
         })
-    }).then(function() {
-        showToast('Event configuration saved');
+    }).then(function(r) {
+        if (r.ok) {
+            showToast('Event configuration saved');
+        } else {
+            r.json().then(function(data) {
+                showToast('Error: ' + (data.details ? data.details.join(', ') : data.error));
+            });
+        }
     });
 });
 
-// Load users
+// ── Load Users ──
+
 fetch('/admin/users')
     .then(r => r.json())
     .then(data => {
@@ -134,7 +516,8 @@ function rebuild(userId) {
         });
 }
 
-// Load registry images
+// ── Load Registry ──
+
 fetch('/admin/registry')
     .then(r => r.json())
     .then(data => {
@@ -154,7 +537,7 @@ fetch('/admin/registry')
             '<tr>' +
                 '<td><strong>' + img.repository + '</strong></td>' +
                 '<td>' + img.tag + '</td>' +
-                '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + (img.digest || '—') + '</td>' +
+                '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + (img.digest || '\u2014') + '</td>' +
             '</tr>'
         ).join('');
     })
@@ -163,10 +546,30 @@ fetch('/admin/registry')
             '<tr><td colspan="3" style="color: var(--red);">Failed to load registry data.</td></tr>';
     });
 
-// Load modules
+// ── Load Modules (also populates quota form dropdowns) ──
+
 fetch('/admin/modules')
     .then(r => r.json())
     .then(data => {
+        modulesData = data;
+
+        // Extract unique types, categories, tags for quota form
+        var typeSet = {};
+        var catSet = {};
+        var tagSet = {};
+        data.forEach(function(m) {
+            typeSet[m.type] = true;
+            catSet[m.category] = true;
+            (m.tags || []).forEach(function(t) { tagSet[t] = true; });
+        });
+        allTypes = Object.keys(typeSet).sort();
+        allCategories = Object.keys(catSet).sort();
+        allTags = Object.keys(tagSet).sort();
+
+        // Build the structured quota form
+        populateFormFromQuota(currentQuota);
+
+        // Render module table
         var body = document.getElementById('modules-body');
         body.innerHTML = data.map(m =>
             '<tr>' +

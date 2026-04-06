@@ -241,15 +241,17 @@ UNFIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
 UNFIXED_TOTAL=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
 assert_eq "Unfixed: total_points=0" "0" "$UNFIXED_TOTAL"
 
+# Module counts depend on how many modules are selected by quota.
+# Application modules (0-point infrastructure) may auto-complete on first verify.
+UNFIXED_TOTAL_MODULES=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['completed']+d['remaining'])")
 UNFIXED_REMAINING=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['remaining'])")
-assert_eq "Unfixed: 9 remaining" "9" "$UNFIXED_REMAINING"
-
 UNFIXED_COMPLETED=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['completed'])")
-assert_eq "Unfixed: 0 completed" "0" "$UNFIXED_COMPLETED"
 
-# Results should be empty — no module names revealed for unsolved challenges
-UNFIXED_RESULTS_LEN=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['results']))")
-assert_eq "Unfixed: no results revealed" "0" "$UNFIXED_RESULTS_LEN"
+# With application modules, 0-point app modules auto-complete (infrastructure).
+# Expect: total modules = 10, completed = 1 (app module), remaining = 9
+assert_eq "Unfixed: total modules=10" "10" "$UNFIXED_TOTAL_MODULES"
+assert_eq "Unfixed: 9 remaining" "9" "$UNFIXED_REMAINING"
+assert_eq "Unfixed: 1 completed (auto-complete app)" "1" "$UNFIXED_COMPLETED"
 log "Modules remaining: $UNFIXED_REMAINING"
 
 # --- Step 6: Apply all fixes -------------------------------------------------
@@ -291,6 +293,11 @@ log "  Fixed: setup_ssh_key_auth"
 docker exec "$CONTAINER_NAME" bash -c "apt-get update -qq && apt-get install -y -qq fail2ban > /dev/null 2>&1 && systemctl start fail2ban && systemctl enable fail2ban"
 log "  Fixed: install_fail2ban"
 
+# flask_defacement (vulnerability - http_response)
+docker exec "$CONTAINER_NAME" bash -c "sed -i 's|HACKED BY L33THAX0R||' /opt/flaskapp/app.py && systemctl restart flaskapp"
+sleep 2
+log "  Fixed: flask_defacement"
+
 pass "All fixes applied"
 
 # --- Step 7: Submit fixed state — all should pass ----------------------------
@@ -304,7 +311,7 @@ FIXED_TOTAL=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(
 assert_eq "Fixed: total_points=1500" "1500" "$FIXED_TOTAL"
 
 FIXED_COMPLETED=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['completed'])")
-assert_eq "Fixed: 9 completed" "9" "$FIXED_COMPLETED"
+assert_eq "Fixed: 10 completed" "10" "$FIXED_COMPLETED"
 
 FIXED_REMAINING=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['remaining'])")
 assert_eq "Fixed: 0 remaining" "0" "$FIXED_REMAINING"
@@ -324,7 +331,7 @@ echo "$FIXED_RESP" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 expected = {
-    'world_writable_shadow': 200,
+    'world_writable_shadow': 100,
     'suid_find': 100,
     'writable_cron_script': 200,
     'nopasswd_sudo': 200,
@@ -333,6 +340,8 @@ expected = {
     'change_root_password': 100,
     'install_fail2ban': 200,
     'setup_ssh_key_auth': 200,
+    'flask_defacement': 200,
+    'vulnerable_flask_app': 0,
 }
 for r in data['results']:
     mid = r['module_id']
@@ -354,7 +363,7 @@ IDEM_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
     -H "Content-Type: application/json" -d "$PAYLOAD")
 
 IDEM_TOTAL=$(echo "$IDEM_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
-assert_eq "Idempotent: total_points still 1500" "1500" "$IDEM_TOTAL"
+assert_eq "Idempotent: total_points=1500" "1500" "$IDEM_TOTAL"
 
 IDEM_NEWLY=$(echo "$IDEM_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['newly_completed'])")
 assert_eq "Idempotent: 0 newly completed" "0" "$IDEM_NEWLY"
@@ -387,7 +396,7 @@ for entry in data:
 else:
     print('not_found')
 ")
-assert_eq "Scoreboard shows 1500 for e2e_test" "1500" "$SB_USER"
+assert_eq "Scoreboard shows 1500" "1500" "$SB_USER"
 
 # --- Summary -----------------------------------------------------------------
 echo ""

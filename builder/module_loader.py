@@ -10,7 +10,7 @@ class Module:
     id: str
     name: str
     description: str
-    type: str  # "vulnerability" or "hardening"
+    type: str  # "vulnerability", "hardening", or "application"
     difficulty: str  # "easy", "medium", "hard"
     points: int
     category: str
@@ -21,6 +21,7 @@ class Module:
     verification: dict = field(default_factory=dict)
     hints: list[str] = field(default_factory=list)
     suggested_fix: Optional[str] = None
+    source_dir: Path = field(default_factory=Path)
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
@@ -46,5 +47,6 @@ def load_all_modules() -> list[Module]:
             verification=data.get("verification", {}),
             hints=data.get("hints", []),
             suggested_fix=data.get("suggested_fix"),
+            source_dir=yaml_path.parent,
         ))
     return modules
