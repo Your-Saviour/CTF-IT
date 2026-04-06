@@ -229,15 +229,23 @@ The platform selects modules based on an event quota like:
 
 ```json
 {
-  "vulnerability": {"easy": 1, "medium": 0, "hard": 0},
-  "hardening": {"easy": 0, "medium": 1, "hard": 0}
+  "vulnerability": {"easy": 1, "medium": 1, "hard": 0},
+  "hardening": {"easy": 1, "medium": 1, "hard": 0},
+  "application": {"easy": 1},
+  "categories": {"authentication": 2},
+  "tags": {"privilege-escalation": 1}
 }
 ```
 
-The selector (`builder/selector.py`) will:
-1. Pick modules matching each type/difficulty slot
-2. Skip modules that conflict with already-selected modules
-3. Auto-include any modules listed in `requires`
+The selector (`builder/selector.py`) runs three phases:
+1. **Type/difficulty** — pick modules matching each type/difficulty slot
+2. **Categories** (optional) — ensure at least N modules from a given category are selected (modules already picked in phase 1 count toward the total)
+3. **Tags** (optional) — ensure at least N modules with a given tag are selected (same inclusive counting)
+
+Across all phases, the selector will:
+- Skip modules that conflict with already-selected modules (bidirectional)
+- Auto-include any modules listed in `requires`
+- Count dependency-pulled modules toward their type/difficulty quota
 
 ## Tips
 
