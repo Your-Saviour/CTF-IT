@@ -89,7 +89,12 @@
 {% block content %}
 <div class="scoreboard-header">
     <h1>Scoreboard</h1>
-    <span class="refresh-indicator" id="refresh-timer"></span>
+    <div style="display: flex; align-items: center; gap: 1rem;">
+        <select id="event-selector" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.75rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+            <option value="">Loading events...</option>
+        </select>
+        <span class="refresh-indicator" id="refresh-timer"></span>
+    </div>
 </div>
 
 <div class="podium podium-empty" id="podium"></div>
@@ -113,11 +118,20 @@
 
 {% block extra_script %}
 <script>
+function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
 var refreshCountdown = 30;
+var currentEventId = null;
 
 function loadScoreboard() {
+    if (!currentEventId) return;
     refreshCountdown = 30;
-    fetch('/api/scoreboard')
+    fetch('/api/scoreboard?event_id=' + currentEventId)
         .then(r => r.json())
         .then(data => {
             // Podium
@@ -129,7 +143,7 @@ function loadScoreboard() {
                 for (var i = 0; i < Math.min(3, data.length); i++) {
                     html += '<div class="podium-card ' + tiers[i] + '">' +
                         '<div class="podium-rank ' + tiers[i] + '">#' + data[i].rank + '</div>' +
-                        '<div class="podium-name">' + data[i].username + '</div>' +
+                        '<div class="podium-name">' + esc(data[i].username) + '</div>' +
                         '<div class="podium-score">' + data[i].total_points + ' pts &middot; ' + data[i].modules_completed + ' tasks</div>' +
                     '</div>';
                 }
@@ -152,7 +166,7 @@ function loadScoreboard() {
                 else if (e.rank === 3) rankClass = 'rank-bronze';
                 return '<tr>' +
                     '<td class="' + rankClass + '">#' + e.rank + '</td>' +
-                    '<td>' + e.username + '</td>' +
+                    '<td>' + esc(e.username) + '</td>' +
                     '<td>' + e.total_points + '</td>' +
                     '<td>' + e.modules_completed + '</td>' +
                 '</tr>';
@@ -160,7 +174,32 @@ function loadScoreboard() {
         });
 }
 
-loadScoreboard();
+// Load event list for selector
+fetch('/api/scoreboard/events')
+    .then(function(r) { return r.json(); })
+    .then(function(events) {
+        var sel = document.getElementById('event-selector');
+        if (events.length === 0) {
+            sel.innerHTML = '<option value="">No events</option>';
+            return;
+        }
+        sel.innerHTML = events.map(function(e) {
+            var suffix = e.status === 'stopped' ? ' (Ended)' : '';
+            return '<option value="' + e.id + '">' + esc(e.name) + suffix + '</option>';
+        }).join('');
+
+        // Default to first open event, or just first event
+        var openEvent = events.find(function(e) { return e.status === 'open'; });
+        currentEventId = openEvent ? openEvent.id : events[0].id;
+        sel.value = currentEventId;
+        loadScoreboard();
+    });
+
+document.getElementById('event-selector').addEventListener('change', function() {
+    currentEventId = this.value;
+    loadScoreboard();
+});
+
 setInterval(loadScoreboard, 30000);
 
 // Countdown timer

@@ -18,9 +18,11 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=True)
 
     images: Mapped[list["UserImage"]] = relationship(back_populates="user")
     modules: Mapped[list["UserModule"]] = relationship(back_populates="user")
+    event: Mapped["Event"] = relationship(back_populates="users")
 
 
 class UserImage(Base):
@@ -58,5 +60,11 @@ class Event(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     quota: Mapped[str] = mapped_column(Text, nullable=False)
-    open: Mapped[bool] = mapped_column(Boolean, default=True)
+    open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    welcome_message: Mapped[str] = mapped_column(Text, nullable=True)
+    time_limit_minutes: Mapped[int] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    users: Mapped[list["User"]] = relationship(back_populates="event")

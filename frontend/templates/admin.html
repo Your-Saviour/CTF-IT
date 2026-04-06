@@ -1,6 +1,63 @@
 {% extends "base.html" %}
 {% block title %}Admin - CTF Platform{% endblock %}
 {% block extra_style %}
+.status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.status-badge.draft {
+    background: rgba(122, 133, 153, 0.15);
+    color: var(--text-secondary);
+    border-left: 3px solid var(--text-secondary);
+}
+.status-badge.open {
+    background: rgba(0, 230, 118, 0.12);
+    color: var(--green);
+    border-left: 3px solid var(--green);
+}
+.status-badge.stopped {
+    background: rgba(255, 23, 68, 0.12);
+    color: var(--red);
+    border-left: 3px solid var(--red);
+}
+.event-actions { display: flex; gap: 0.35rem; }
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transition: all 0.25s;
+}
+.btn-outline:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.btn-outline.danger:hover {
+    border-color: var(--red);
+    color: var(--red);
+}
+.btn-outline.success:hover {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+/* Event form */
+#event-form-panel {
+    display: none;
+    margin-bottom: 1.5rem;
+}
+#event-form-panel.active { display: block; }
 .quota-grid {
     display: grid;
     gap: 0.5rem;
@@ -141,65 +198,88 @@
     border-color: var(--cyan);
     color: var(--cyan);
 }
-#structured-editor, #json-editor { display: none; }
-#structured-editor.active, #json-editor.active { display: block; }
+#ef-structured-editor, #ef-json-editor { display: none; }
+#ef-structured-editor.active, #ef-json-editor.active { display: block; }
 {% endblock %}
 
 {% block content %}
 <h1>Admin Panel</h1>
 
-<!-- Event Config -->
+<!-- Events -->
 <div class="card">
-    <h3>Event Configuration</h3>
-    <form id="event-form">
-        <div class="form-group" style="margin-bottom: 1rem;">
-            <label for="event-name">Event Name</label>
-            <input type="text" id="event-name" value="{{ event.name if event else 'CTF Event' }}">
-        </div>
-        <div style="margin-bottom: 1rem;">
-            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; text-transform: none; letter-spacing: normal;">
-                <input type="checkbox" id="event-open" {% if not event or event.open %}checked{% endif %}
-                       style="width: auto; accent-color: var(--cyan);">
-                Event Open
-            </label>
-        </div>
-        <div class="form-group" style="margin-bottom: 1rem;">
-            <label>
-                Quota
-                <button type="button" class="mode-toggle" id="mode-toggle">Show Raw JSON</button>
-            </label>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin-bottom: 0;">Events</h3>
+        <button class="btn btn-primary btn-sm" onclick="showEventForm()">+ New Event</button>
+    </div>
 
-            <!-- Structured Editor -->
-            <div id="structured-editor" class="active">
-                <!-- Type/Difficulty Grid (populated by JS) -->
-                <div class="quota-grid" id="type-grid"></div>
-
-                <!-- Category Quotas -->
-                <div class="collapsible-header" id="cat-header">
-                    <span class="arrow">&#9654;</span> Category Quotas
+    <!-- Create/Edit Event Form (hidden by default) -->
+    <div id="event-form-panel">
+        <form id="event-form" style="background: var(--bg-deep); padding: 1.25rem; border-radius: 4px; border: 1px solid var(--border);">
+            <input type="hidden" id="ef-id" value="">
+            <h3 id="ef-title" style="margin-bottom: 1rem;">New Event</h3>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label for="ef-name">Event Name</label>
+                <input type="text" id="ef-name" value="" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label for="ef-description">Description</label>
+                <textarea id="ef-description" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
+            </div>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label for="ef-welcome">Welcome Message</label>
+                <textarea id="ef-welcome" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
+            </div>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label for="ef-timelimit">Time Limit (minutes, optional)</label>
+                <input type="number" id="ef-timelimit" min="0" style="width: 120px;">
+            </div>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label>
+                    Quota
+                    <button type="button" class="mode-toggle" id="ef-mode-toggle">Show Raw JSON</button>
+                </label>
+                <div id="ef-structured-editor" class="active">
+                    <div class="quota-grid" id="ef-type-grid"></div>
+                    <div class="collapsible-header" id="ef-cat-header">
+                        <span class="arrow">&#9654;</span> Category Quotas
+                    </div>
+                    <div class="collapsible-body" id="ef-cat-body">
+                        <div id="ef-cat-rows"></div>
+                        <button type="button" class="btn-add" id="ef-add-cat">+ Add Category</button>
+                    </div>
+                    <div class="collapsible-header" id="ef-tag-header">
+                        <span class="arrow">&#9654;</span> Tag Quotas
+                    </div>
+                    <div class="collapsible-body" id="ef-tag-body">
+                        <div id="ef-tag-rows"></div>
+                        <button type="button" class="btn-add" id="ef-add-tag">+ Add Tag</button>
+                    </div>
                 </div>
-                <div class="collapsible-body" id="cat-body">
-                    <div id="cat-rows"></div>
-                    <button type="button" class="btn-add" id="add-cat">+ Add Category</button>
-                </div>
-
-                <!-- Tag Quotas -->
-                <div class="collapsible-header" id="tag-header">
-                    <span class="arrow">&#9654;</span> Tag Quotas
-                </div>
-                <div class="collapsible-body" id="tag-body">
-                    <div id="tag-rows"></div>
-                    <button type="button" class="btn-add" id="add-tag">+ Add Tag</button>
+                <div id="ef-json-editor">
+                    <textarea id="ef-quota-json" rows="10" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">{}</textarea>
                 </div>
             </div>
-
-            <!-- JSON Editor -->
-            <div id="json-editor">
-                <textarea id="event-quota" rows="10">{{ event_quota | tojson(indent=2) }}</textarea>
+            <div style="display: flex; gap: 0.5rem;">
+                <button type="submit" class="btn btn-primary">Save Event</button>
+                <button type="button" class="btn-outline" onclick="hideEventForm()">Cancel</button>
             </div>
-        </div>
-        <button type="submit" class="btn btn-primary">Save</button>
-    </form>
+        </form>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Users</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="events-body">
+            <tr><td colspan="5" style="color: var(--text-secondary);">Loading...</td></tr>
+        </tbody>
+    </table>
 </div>
 
 <!-- Users -->
@@ -209,13 +289,14 @@
         <thead>
             <tr>
                 <th>Username</th>
+                <th>Event</th>
                 <th>Build Status</th>
                 <th>Points</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody id="users-body">
-            <tr><td colspan="4" style="color: var(--text-secondary);">Loading...</td></tr>
+            <tr><td colspan="5" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
 </div>
@@ -263,18 +344,59 @@
 
 {% block extra_script %}
 <script>
+function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
 var DIFFICULTIES = ['easy', 'medium', 'hard'];
-var currentQuota = {{ event_quota | tojson }};
 var allTypes = [];
 var allCategories = [];
 var allTags = [];
 var modulesData = [];
-var jsonMode = false;
+var efJsonMode = false;
+var efCurrentQuota = {};
 
-// ── Quota Form Logic ──
+// ── Event Form Logic ──
+
+function showEventForm(eventData) {
+    var panel = document.getElementById('event-form-panel');
+    panel.classList.add('active');
+
+    if (eventData) {
+        document.getElementById('ef-title').textContent = 'Edit Event';
+        document.getElementById('ef-id').value = eventData.id;
+        document.getElementById('ef-name').value = eventData.name;
+        document.getElementById('ef-description').value = eventData.description || '';
+        document.getElementById('ef-welcome').value = eventData.welcome_message || '';
+        document.getElementById('ef-timelimit').value = eventData.time_limit_minutes || '';
+        efCurrentQuota = eventData.quota || {};
+    } else {
+        document.getElementById('ef-title').textContent = 'New Event';
+        document.getElementById('ef-id').value = '';
+        document.getElementById('ef-name').value = '';
+        document.getElementById('ef-description').value = '';
+        document.getElementById('ef-welcome').value = '';
+        document.getElementById('ef-timelimit').value = '';
+        efCurrentQuota = {};
+    }
+
+    efJsonMode = false;
+    document.getElementById('ef-structured-editor').classList.add('active');
+    document.getElementById('ef-json-editor').classList.remove('active');
+    document.getElementById('ef-mode-toggle').textContent = 'Show Raw JSON';
+    populateQuotaForm(efCurrentQuota);
+    panel.scrollIntoView({ behavior: 'smooth' });
+}
+
+function hideEventForm() {
+    document.getElementById('event-form-panel').classList.remove('active');
+}
 
 function buildTypeGrid() {
-    var grid = document.getElementById('type-grid');
+    var grid = document.getElementById('ef-type-grid');
     var html = '<div class="grid-header"><span></span>';
     DIFFICULTIES.forEach(function(d) {
         html += '<span>' + d + '</span>';
@@ -284,8 +406,8 @@ function buildTypeGrid() {
     allTypes.forEach(function(type) {
         html += '<div class="grid-row"><span class="type-label">' + type + '</span>';
         DIFFICULTIES.forEach(function(d) {
-            var val = (currentQuota[type] && currentQuota[type][d]) || 0;
-            html += '<input type="number" min="0" id="q-' + type + '-' + d + '" value="' + val + '">';
+            var val = (efCurrentQuota[type] && efCurrentQuota[type][d]) || 0;
+            html += '<input type="number" min="0" id="efq-' + type + '-' + d + '" value="' + val + '">';
         });
         html += '</div>';
     });
@@ -327,34 +449,51 @@ function addFilterRow(containerId, options, key, value) {
     container.appendChild(row);
 }
 
-function loadCatRows() {
-    var cats = currentQuota.categories || {};
-    Object.keys(cats).forEach(function(k) {
-        addFilterRow('cat-rows', allCategories, k, cats[k]);
-    });
-}
+function populateQuotaForm(quota) {
+    efCurrentQuota = quota;
 
-function loadTagRows() {
-    var tags = currentQuota.tags || {};
-    Object.keys(tags).forEach(function(k) {
-        addFilterRow('tag-rows', allTags, k, tags[k]);
+    Object.keys(quota).forEach(function(k) {
+        if (k !== 'categories' && k !== 'tags' && allTypes.indexOf(k) === -1) {
+            allTypes.push(k);
+        }
     });
+
+    buildTypeGrid();
+    document.getElementById('ef-cat-rows').innerHTML = '';
+    document.getElementById('ef-tag-rows').innerHTML = '';
+
+    var cats = quota.categories || {};
+    Object.keys(cats).forEach(function(k) {
+        addFilterRow('ef-cat-rows', allCategories, k, cats[k]);
+    });
+
+    var tags = quota.tags || {};
+    Object.keys(tags).forEach(function(k) {
+        addFilterRow('ef-tag-rows', allTags, k, tags[k]);
+    });
+
+    if (Object.keys(cats).length > 0) {
+        document.getElementById('ef-cat-header').classList.add('open');
+        document.getElementById('ef-cat-body').classList.add('open');
+    }
+    if (Object.keys(tags).length > 0) {
+        document.getElementById('ef-tag-header').classList.add('open');
+        document.getElementById('ef-tag-body').classList.add('open');
+    }
 }
 
 function buildQuotaFromForm() {
     var quota = {};
 
-    // Type/difficulty grid
     allTypes.forEach(function(type) {
         quota[type] = {};
         DIFFICULTIES.forEach(function(d) {
-            var el = document.getElementById('q-' + type + '-' + d);
+            var el = document.getElementById('efq-' + type + '-' + d);
             quota[type][d] = parseInt(el.value) || 0;
         });
     });
 
-    // Category rows
-    var catRows = document.querySelectorAll('#cat-rows .filter-row');
+    var catRows = document.querySelectorAll('#ef-cat-rows .filter-row');
     if (catRows.length > 0) {
         var cats = {};
         catRows.forEach(function(row) {
@@ -365,8 +504,7 @@ function buildQuotaFromForm() {
         if (Object.keys(cats).length > 0) quota.categories = cats;
     }
 
-    // Tag rows
-    var tagRows = document.querySelectorAll('#tag-rows .filter-row');
+    var tagRows = document.querySelectorAll('#ef-tag-rows .filter-row');
     if (tagRows.length > 0) {
         var tags = {};
         tagRows.forEach(function(row) {
@@ -380,59 +518,30 @@ function buildQuotaFromForm() {
     return quota;
 }
 
-function populateFormFromQuota(quota) {
-    currentQuota = quota;
-
-    // Discover types from quota that aren't in allTypes
-    Object.keys(quota).forEach(function(k) {
-        if (k !== 'categories' && k !== 'tags' && allTypes.indexOf(k) === -1) {
-            allTypes.push(k);
-        }
-    });
-
-    buildTypeGrid();
-    document.getElementById('cat-rows').innerHTML = '';
-    document.getElementById('tag-rows').innerHTML = '';
-    loadCatRows();
-    loadTagRows();
-
-    // Auto-open sections if they have data
-    if (quota.categories && Object.keys(quota.categories).length > 0) {
-        document.getElementById('cat-header').classList.add('open');
-        document.getElementById('cat-body').classList.add('open');
-    }
-    if (quota.tags && Object.keys(quota.tags).length > 0) {
-        document.getElementById('tag-header').classList.add('open');
-        document.getElementById('tag-body').classList.add('open');
-    }
-}
-
 // ── Mode Toggle ──
 
-document.getElementById('mode-toggle').addEventListener('click', function() {
-    jsonMode = !jsonMode;
-    var structEl = document.getElementById('structured-editor');
-    var jsonEl = document.getElementById('json-editor');
-    var btn = document.getElementById('mode-toggle');
+document.getElementById('ef-mode-toggle').addEventListener('click', function() {
+    efJsonMode = !efJsonMode;
+    var structEl = document.getElementById('ef-structured-editor');
+    var jsonEl = document.getElementById('ef-json-editor');
+    var btn = document.getElementById('ef-mode-toggle');
 
-    if (jsonMode) {
-        // Sync form → JSON
+    if (efJsonMode) {
         var quota = buildQuotaFromForm();
-        document.getElementById('event-quota').value = JSON.stringify(quota, null, 2);
+        document.getElementById('ef-quota-json').value = JSON.stringify(quota, null, 2);
         structEl.classList.remove('active');
         jsonEl.classList.add('active');
         btn.textContent = 'Show Form';
     } else {
-        // Sync JSON → form
         try {
-            var quota = JSON.parse(document.getElementById('event-quota').value);
-            populateFormFromQuota(quota);
+            var quota = JSON.parse(document.getElementById('ef-quota-json').value);
+            populateQuotaForm(quota);
             jsonEl.classList.remove('active');
             structEl.classList.add('active');
             btn.textContent = 'Show Raw JSON';
         } catch(err) {
             showToast('Invalid JSON — fix before switching to form view');
-            jsonMode = true;
+            efJsonMode = true;
         }
     }
 });
@@ -445,16 +554,14 @@ function setupCollapsible(headerId, bodyId) {
         document.getElementById(bodyId).classList.toggle('open');
     });
 }
-setupCollapsible('cat-header', 'cat-body');
-setupCollapsible('tag-header', 'tag-body');
+setupCollapsible('ef-cat-header', 'ef-cat-body');
+setupCollapsible('ef-tag-header', 'ef-tag-body');
 
-// ── Add Buttons ──
-
-document.getElementById('add-cat').addEventListener('click', function() {
-    addFilterRow('cat-rows', allCategories, '', 1);
+document.getElementById('ef-add-cat').addEventListener('click', function() {
+    addFilterRow('ef-cat-rows', allCategories, '', 1);
 });
-document.getElementById('add-tag').addEventListener('click', function() {
-    addFilterRow('tag-rows', allTags, '', 1);
+document.getElementById('ef-add-tag').addEventListener('click', function() {
+    addFilterRow('ef-tag-rows', allTags, '', 1);
 });
 
 // ── Event Form Submit ──
@@ -462,9 +569,9 @@ document.getElementById('add-tag').addEventListener('click', function() {
 document.getElementById('event-form').addEventListener('submit', function(e) {
     e.preventDefault();
     var quota;
-    if (jsonMode) {
+    if (efJsonMode) {
         try {
-            quota = JSON.parse(document.getElementById('event-quota').value);
+            quota = JSON.parse(document.getElementById('ef-quota-json').value);
         } catch(err) {
             showToast('Invalid JSON in quota field');
             return;
@@ -472,17 +579,28 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
     } else {
         quota = buildQuotaFromForm();
     }
-    fetch('/admin/event', {
-        method: 'PUT',
+
+    var eventId = document.getElementById('ef-id').value;
+    var body = {
+        name: document.getElementById('ef-name').value,
+        quota: quota,
+        description: document.getElementById('ef-description').value || null,
+        welcome_message: document.getElementById('ef-welcome').value || null,
+        time_limit_minutes: parseInt(document.getElementById('ef-timelimit').value) || null,
+    };
+
+    var url = eventId ? '/admin/events/' + eventId : '/admin/events';
+    var method = eventId ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            name: document.getElementById('event-name').value,
-            open: document.getElementById('event-open').checked,
-            quota: quota
-        })
+        body: JSON.stringify(body)
     }).then(function(r) {
         if (r.ok) {
-            showToast('Event configuration saved');
+            showToast(eventId ? 'Event updated' : 'Event created');
+            hideEventForm();
+            loadEvents();
         } else {
             r.json().then(function(data) {
                 showToast('Error: ' + (data.details ? data.details.join(', ') : data.error));
@@ -490,6 +608,80 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
         }
     });
 });
+
+// ── Event Actions ──
+
+function startEvent(id) {
+    fetch('/admin/events/' + id + '/start', { method: 'POST' })
+        .then(function(r) {
+            if (r.ok) { showToast('Event started'); loadEvents(); }
+            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        });
+}
+
+function stopEvent(id) {
+    if (!confirm('Stop this event? Users will no longer be able to submit verifications.')) return;
+    fetch('/admin/events/' + id + '/stop', { method: 'POST' })
+        .then(function(r) {
+            if (r.ok) { showToast('Event stopped'); loadEvents(); }
+            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        });
+}
+
+function editEvent(id) {
+    fetch('/admin/events/' + id)
+        .then(function(r) { return r.json(); })
+        .then(function(data) { showEventForm(data); });
+}
+
+function deleteEvent(id) {
+    if (!confirm('Delete this event? This cannot be undone.')) return;
+    fetch('/admin/events/' + id, { method: 'DELETE' })
+        .then(function(r) {
+            if (r.ok) { showToast('Event deleted'); loadEvents(); }
+            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        });
+}
+
+// ── Load Events ──
+
+function loadEvents() {
+    fetch('/admin/events')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var body = document.getElementById('events-body');
+            if (data.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" style="color: var(--text-secondary);">No events yet. Click "+ New Event" to create one.</td></tr>';
+                return;
+            }
+            body.innerHTML = data.map(function(e) {
+                var actions = '<div class="event-actions">';
+                actions += '<button class="btn-outline" onclick="editEvent(' + e.id + ')">Edit</button>';
+                if (e.status === 'draft' || e.status === 'stopped') {
+                    actions += '<button class="btn-outline success" onclick="startEvent(' + e.id + ')">Start</button>';
+                }
+                if (e.status === 'open') {
+                    actions += '<button class="btn-outline danger" onclick="stopEvent(' + e.id + ')">Stop</button>';
+                }
+                if (e.user_count === 0) {
+                    actions += '<button class="btn-outline danger" onclick="deleteEvent(' + e.id + ')">Delete</button>';
+                }
+                actions += '</div>';
+
+                var created = e.created_at ? new Date(e.created_at).toLocaleDateString() : '—';
+
+                return '<tr>' +
+                    '<td><strong>' + esc(e.name) + '</strong></td>' +
+                    '<td><span class="status-badge ' + esc(e.status) + '">' + esc(e.status) + '</span></td>' +
+                    '<td>' + e.user_count + '</td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + created + '</td>' +
+                    '<td>' + actions + '</td>' +
+                '</tr>';
+            }).join('');
+        });
+}
+
+loadEvents();
 
 // ── Load Users ──
 
@@ -499,7 +691,8 @@ fetch('/admin/users')
         var body = document.getElementById('users-body');
         body.innerHTML = data.map(u =>
             '<tr>' +
-                '<td>' + u.username + (u.is_admin ? ' <span style="color: var(--cyan); font-size: 0.75rem;">(admin)</span>' : '') + '</td>' +
+                '<td>' + esc(u.username) + (u.is_admin ? ' <span style="color: var(--cyan); font-size: 0.75rem;">(admin)</span>' : '') + '</td>' +
+                '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + (u.event_name ? esc(u.event_name) : '<span style="color: var(--text-muted);">—</span>') + '</td>' +
                 '<td><span class="status-' + u.build_status + '" style="font-weight: 600; text-transform: uppercase;">' + u.build_status + '</span></td>' +
                 '<td>' + u.total_points + '</td>' +
                 '<td><button class="btn btn-sm btn-danger" onclick="rebuild(' + u.id + ')">Rebuild</button></td>' +
@@ -553,7 +746,6 @@ fetch('/admin/modules')
     .then(data => {
         modulesData = data;
 
-        // Extract unique types, categories, tags for quota form
         var typeSet = {};
         var catSet = {};
         var tagSet = {};
@@ -566,10 +758,6 @@ fetch('/admin/modules')
         allCategories = Object.keys(catSet).sort();
         allTags = Object.keys(tagSet).sort();
 
-        // Build the structured quota form
-        populateFormFromQuota(currentQuota);
-
-        // Render module table
         var body = document.getElementById('modules-body');
         body.innerHTML = data.map(m =>
             '<tr>' +

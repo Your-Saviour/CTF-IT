@@ -49,6 +49,7 @@ async def list_users(request: Request, db: Session = Depends(get_db)):
             "is_admin": u.is_admin,
             "build_status": image.status if image else "none",
             "total_points": total_points,
+            "event_name": u.event.name if u.event else None,
         })
 
     return result
@@ -74,9 +75,8 @@ async def rebuild_user(
     db.add(image)
     db.commit()
 
-    event = db.query(Event).filter(Event.open == True).first()
-    if event:
-        quota = json.loads(event.quota)
+    if user.event:
+        quota = json.loads(user.event.quota)
     else:
         quota = json.loads(os.environ.get(
             "EVENT_QUOTA",
@@ -156,11 +156,56 @@ async def list_registry_images(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.put("/event")
-async def update_event(
-    request: Request,
-    db: Session = Depends(get_db),
-):
+@router.get("/events")
+async def list_events(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    events = db.query(Event).order_by(Event.created_at.desc()).all()
+    result = []
+    for e in events:
+        user_count = db.query(User).filter(User.event_id == e.id).count()
+        result.append({
+            "id": e.id,
+            "name": e.name,
+            "status": e.status,
+            "description": e.description,
+            "welcome_message": e.welcome_message,
+            "time_limit_minutes": e.time_limit_minutes,
+            "quota": json.loads(e.quota),
+            "user_count": user_count,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        })
+    return result
+
+
+@router.get("/events/{event_id}")
+async def get_event(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+
+    user_count = db.query(User).filter(User.event_id == event.id).count()
+    return {
+        "id": event.id,
+        "name": event.name,
+        "status": event.status,
+        "description": event.description,
+        "welcome_message": event.welcome_message,
+        "time_limit_minutes": event.time_limit_minutes,
+        "quota": json.loads(event.quota),
+        "user_count": user_count,
+        "created_at": event.created_at.isoformat() if event.created_at else None,
+    }
+
+
+@router.post("/events")
+async def create_event(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
@@ -176,21 +221,106 @@ async def update_event(
                 status_code=422,
             )
 
-    event = db.query(Event).first()
+    event = Event(
+        name=body.get("name", "CTF Event"),
+        quota=json.dumps(body.get("quota", {})),
+        status="draft",
+        description=body.get("description"),
+        welcome_message=body.get("welcome_message"),
+        time_limit_minutes=body.get("time_limit_minutes"),
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return {"status": "created", "id": event.id}
+
+
+@router.put("/events/{event_id}")
+async def update_event(
+    event_id: int, request: Request, db: Session = Depends(get_db)
+):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
-        event = Event(
-            name=body.get("name", "CTF Event"),
-            quota=json.dumps(body.get("quota", {})),
-            open=body.get("open", True),
-        )
-        db.add(event)
-    else:
-        if "name" in body:
-            event.name = body["name"]
-        if "quota" in body:
-            event.quota = json.dumps(body["quota"])
-        if "open" in body:
-            event.open = body["open"]
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+
+    body = await request.json()
+
+    if "quota" in body:
+        from builder.quota_validation import validate_quota
+        errors = validate_quota(body["quota"])
+        if errors:
+            return JSONResponse(
+                {"error": "Invalid quota", "details": errors},
+                status_code=422,
+            )
+        event.quota = json.dumps(body["quota"])
+
+    if "name" in body:
+        event.name = body["name"]
+    if "description" in body:
+        event.description = body["description"]
+    if "welcome_message" in body:
+        event.welcome_message = body["welcome_message"]
+    if "time_limit_minutes" in body:
+        event.time_limit_minutes = body["time_limit_minutes"]
 
     db.commit()
     return {"status": "updated"}
+
+
+@router.post("/events/{event_id}/start")
+async def start_event(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+
+    event.status = "open"
+    event.open = True
+    db.commit()
+    return {"status": "started"}
+
+
+@router.post("/events/{event_id}/stop")
+async def stop_event(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+
+    event.status = "stopped"
+    event.open = False
+    db.commit()
+    return {"status": "stopped"}
+
+
+@router.delete("/events/{event_id}")
+async def delete_event(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+
+    user_count = db.query(User).filter(User.event_id == event.id).count()
+    if user_count > 0:
+        return JSONResponse(
+            {"error": f"Cannot delete event with {user_count} assigned users"},
+            status_code=409,
+        )
+
+    db.delete(event)
+    db.commit()
+    return {"status": "deleted"}

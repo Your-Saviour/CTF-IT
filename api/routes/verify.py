@@ -105,6 +105,13 @@ async def verify(
     if not user:
         return JSONResponse({"error": "User not found"}, status_code=404)
 
+    # Block verification for stopped events
+    if user.event and user.event.status == "stopped":
+        return JSONResponse(
+            {"error": "Event has ended. Verification is closed."},
+            status_code=403,
+        )
+
     # Find the user's ready image
     image = (
         db.query(UserImage)

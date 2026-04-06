@@ -2,6 +2,24 @@
 {% block title %}Dashboard - CTF Platform{% endblock %}
 {% block content %}
 <h1>Welcome, <span style="color: var(--cyan);">{{ user.username }}</span></h1>
+{% if event %}
+<div style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+    Event: <strong style="color: var(--text-primary);">{{ event.name }}</strong>
+    {% if event.status == 'stopped' %}
+        <span class="badge" style="background: rgba(255, 23, 68, 0.12); color: var(--red); border-left: 3px solid var(--red); margin-left: 0.5rem;">Ended</span>
+    {% endif %}
+</div>
+{% if event.welcome_message %}
+<div class="card" style="border-left: 3px solid var(--cyan); margin-bottom: 1.5rem;">
+    <p style="margin: 0; color: var(--text-secondary); font-size: 0.85rem;">{{ event.welcome_message }}</p>
+</div>
+{% endif %}
+{% if event.status == 'stopped' %}
+<div class="card" style="border-left: 3px solid var(--red); margin-bottom: 1.5rem; background: rgba(255, 23, 68, 0.05);">
+    <p style="margin: 0; color: var(--red); font-size: 0.85rem;">This event has ended. Your scores are preserved but verification is closed.</p>
+</div>
+{% endif %}
+{% endif %}
 
 <div class="grid-2">
     <!-- Points -->

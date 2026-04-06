@@ -79,6 +79,7 @@ CTF-IT/
   modules/              # Module definitions
     vulns/              # Vulnerability modules (one folder per module)
     hardening/          # Hardening modules (one folder per module)
+    application/        # Application modules (infrastructure for vulns to target)
   templates/
     Dockerfile.j2       # Jinja2 template for user images
   frontend/
@@ -112,6 +113,9 @@ modules/
     unauthorized_ssh_key/
       unauthorized_ssh_key.yaml
       unauthorized_ssh_key.sh
+    flask_defacement/
+      flask_defacement.yaml
+      deface_flask.sh
   hardening/
     change_root_password/
       change_root_password.yaml
@@ -121,6 +125,10 @@ modules/
       install_fail2ban.yaml
     setup_ssh_key_auth/
       setup_ssh_key_auth.yaml
+  application/
+    vulnerable_flask_app/
+      vulnerable_flask_app.yaml
+      install_flask_app.sh
 ```
 
 ## Running a User Container

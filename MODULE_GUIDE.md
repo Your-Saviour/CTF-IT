@@ -1,10 +1,10 @@
 # Module Guide
 
-How to create new vulnerability and hardening modules for CTF-IT.
+How to create new vulnerability, hardening, and application modules for CTF-IT.
 
 ## Folder Structure
 
-Each module lives in its own folder under `modules/vulns/` or `modules/hardening/`:
+Each module lives in its own folder under `modules/vulns/`, `modules/hardening/`, or `modules/application/`:
 
 ```
 modules/
@@ -13,9 +13,14 @@ modules/
     <module_id>.sh          # Optional: shell script to introduce the vulnerability
   hardening/<module_id>/
     <module_id>.yaml        # Required: module definition
+  application/<module_id>/
+    <module_id>.yaml        # Required: module definition
+    <module_id>.sh          # Script to install the application
 ```
 
-Vulnerability modules typically include a shell script that introduces a misconfiguration during the Docker build. Hardening modules usually don't have a script — the user is expected to implement the fix from scratch.
+- **Vulnerability** modules include a shell script that introduces a misconfiguration during the Docker build. The user must fix it.
+- **Hardening** modules usually don't have a script — the user is expected to implement the fix from scratch.
+- **Application** modules install infrastructure (web apps, services, CLI tools) that vulnerability modules can target via `requires`. They typically award 0 points.
 
 ## YAML Reference
 
@@ -26,7 +31,7 @@ Vulnerability modules typically include a shell script that introduces a misconf
 | `id` | string | Unique snake_case identifier. Must match the folder name. |
 | `name` | string | Human-readable display name. |
 | `description` | string | What the issue is and why it matters. Shown to users as their task. |
-| `type` | string | `vulnerability` or `hardening` |
+| `type` | string | `vulnerability`, `hardening`, or `application` |
 | `difficulty` | string | `easy`, `medium`, or `hard` |
 | `points` | integer | Points awarded on completion. |
 | `category` | string | Grouping category (e.g. `filesystem`, `services`, `network`, `authentication`). |
@@ -39,7 +44,7 @@ Vulnerability modules typically include a shell script that introduces a misconf
 | `tags` | list[string] | `[]` | Searchable tags for filtering. |
 | `conflicts` | list[string] | `[]` | Module IDs that cannot coexist with this module. |
 | `requires` | list[string] | `[]` | Module IDs that must also be selected if this module is picked. |
-| `script` | string | `null` | Filename of the shell script (vulnerability modules only). |
+| `script` | string | `null` | Filename of the shell script (vulnerability and application modules). |
 | `hints` | list[string] | `[]` | Progressive hints shown to users. Order from vague to specific. |
 | `suggested_fix` | string | `null` | The command(s) that fix the issue. Used for admin reference/testing. |
 
@@ -148,6 +153,33 @@ verification:
   user: root
 ```
 
+### `http_response`
+
+Checks HTTP status code and/or body content from a running web application. The `label` is `localhost_<port>` matching the port the app listens on. Supports `status_code`, `body_contains`, and `body_not_contains` — all optional, but at least one should be specified.
+
+```yaml
+verification:
+  type: http_response
+  label: localhost_5000
+  status_code: 200
+  body_not_contains: "HACKED BY"
+```
+
+The audit script dynamically probes all listening ports for HTTP responses.
+
+### `process_running`
+
+Checks whether a process matching a substring pattern is running. Use `expected: running` (default) to check presence, or `expected: stopped` to check absence.
+
+```yaml
+verification:
+  type: process_running
+  process: gunicorn
+  expected: running
+```
+
+The pattern is matched as a substring against the full command string from `ps aux`.
+
 ## Examples
 
 ### Vulnerability Module
@@ -222,6 +254,38 @@ hints:
 ```
 
 Hardening modules have no script — the base image is clean and the user must implement the hardening measure themselves.
+
+### Application Module
+
+```
+modules/application/vulnerable_flask_app/
+  vulnerable_flask_app.yaml
+  install_flask_app.sh
+```
+
+**vulnerable_flask_app.yaml**:
+
+```yaml
+id: vulnerable_flask_app
+name: Vulnerable Flask Application
+description: A small Flask web app running as a systemd service on port 5000.
+type: application
+difficulty: easy
+points: 0
+category: web
+tags: [web, flask, python]
+conflicts: []
+requires: []
+script: install_flask_app.sh
+verification:
+  type: process_running
+  process: gunicorn
+  expected: running
+hints:
+  - "Check what services are running on common web ports"
+```
+
+Application modules install infrastructure that vulnerability modules target. They award 0 points and auto-complete when the service is running. Vulnerability modules use `requires: [vulnerable_flask_app]` to depend on them — the selector automatically includes required modules and ensures their scripts run first during the Docker build.
 
 ## Module Selection
 

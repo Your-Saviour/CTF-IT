@@ -150,9 +150,12 @@ pass "Services running"
 # --- Step 1: Register user and build image -----------------------------------
 log "=== Step 1: Register & Build ==="
 
+# Default event (id=1) is created as "open" at startup
+EVENT_ID=1
+
 HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/auth/register \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=e2e_test&password=testpass123" \
+    -d "username=e2e_test&password=testpass123&event_id=$EVENT_ID" \
     -c "$COOKIES")
 
 # Registration returns 303 redirect to /dashboard and sets session cookie
@@ -385,7 +388,7 @@ assert_eq "Idempotent: all still passed" "true" "$IDEM_ALL_PASS"
 # --- Step 9: Scoreboard check -----------------------------------------------
 log "=== Step 9: Scoreboard ==="
 
-SCOREBOARD=$(curl -s http://localhost:8000/api/scoreboard)
+SCOREBOARD=$(curl -s "http://localhost:8000/api/scoreboard?event_id=$EVENT_ID")
 SB_USER=$(echo "$SCOREBOARD" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)

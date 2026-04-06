@@ -109,7 +109,7 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
-**Expected:** `"total_points": 0`, `"completed": 0`, `"remaining": 9`. The `results` array is empty — unsolved module names are not revealed.
+**Expected:** `"total_points": 0`, `"completed": 1`, `"remaining": 9`. The single completed module is the 0-point application module (`vulnerable_flask_app`) which auto-completes because its service is running from boot. Unsolved module names are not revealed.
 
 ## Step 6: Apply All Fixes
 
@@ -141,6 +141,10 @@ docker exec ctf-e2e-test bash -c "sed -i 's/#PasswordAuthentication yes/Password
 
 # install_fail2ban (hardening - service_running)
 docker exec ctf-e2e-test bash -c "apt-get update -qq && apt-get install -y -qq fail2ban > /dev/null 2>&1 && systemctl start fail2ban && systemctl enable fail2ban"
+
+# flask_defacement (vulnerability - http_response)
+docker exec ctf-e2e-test bash -c "sed -i 's|HACKED BY L33THAX0R||' /opt/flaskapp/app.py && systemctl restart flaskapp"
+sleep 2
 ```
 
 ## Step 7: Submit Fixed State — All Should Pass
@@ -151,20 +155,24 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
-**Expected:** `"completed": 9`, `"remaining": 0`, `"newly_completed": 9`. All 9 modules appear in `results` with `"passed": true` and correct points. Total should equal sum of all module points.
+**Expected:** `"completed": 10`, `"remaining": 0`, `"newly_completed": 9` (the app module was already completed in Step 5). All 10 modules appear in `results` with `"passed": true` and correct points. Total should equal sum of all module points.
 
-| Module | Points | Verification Type |
-|--------|--------|-------------------|
-| `world_writable_shadow` | 200 | `file_permissions` |
-| `suid_find` | 100 | `file_permissions` |
-| `writable_cron_script` | 200 | `file_permissions` |
-| `nopasswd_sudo` | 200 | `file_not_contains` |
-| `unauthorized_ssh_key` | 200 | `file_not_contains` |
-| `disable_ssh_root_login` | 100 | `file_contains` |
-| `change_root_password` | 100 | `password_changed` |
-| `install_fail2ban` | 200 | `service_running` |
-| `setup_ssh_key_auth` | 200 | `file_contains` |
-| **Total** | **1500** | |
+| Module | Type | Points | Verification Type |
+|--------|------|--------|-------------------|
+| `suid_find` | vulnerability | 100 | `file_permissions` |
+| `world_writable_shadow` | vulnerability | 100 | `file_permissions` |
+| `writable_cron_script` | vulnerability | 200 | `file_permissions` |
+| `nopasswd_sudo` | vulnerability | 200 | `file_not_contains` |
+| `unauthorized_ssh_key` | vulnerability | 200 | `file_not_contains` |
+| `flask_defacement` | vulnerability | 200 | `http_response` |
+| `disable_ssh_root_login` | hardening | 100 | `file_contains` |
+| `change_root_password` | hardening | 100 | `password_changed` |
+| `install_fail2ban` | hardening | 200 | `service_running` |
+| `setup_ssh_key_auth` | hardening | 200 | `file_contains` |
+| `vulnerable_flask_app` | application | 0 | `process_running` |
+| **Total** | | **1500** | |
+
+> **Note:** `vulnerable_flask_app` is a 0-point infrastructure module that auto-completes. Which easy vulnerability is selected (suid_find or world_writable_shadow) is random — total points are the same either way.
 
 ## Step 8: Verify Idempotency — No Double Points
 

@@ -79,34 +79,37 @@ async def _run_build(user_id: int, username: str, quota: dict):
         logging.getLogger(__name__).exception("Build failed for user %s", username)
 
 
+
 @router.post("/register")
 async def register(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
+    event_id: int = Form(...),
     db: Session = Depends(get_db),
 ):
+    event = db.query(Event).filter(
+        Event.id == event_id, Event.status == "open"
+    ).first()
+    if not event:
+        return RedirectResponse("/?error=invalid_event", status_code=303)
+
     existing = db.query(User).filter(User.username == username).first()
     if existing:
         return RedirectResponse("/?error=username_taken", status_code=303)
 
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    user = User(username=username, password_hash=hashed)
+    user = User(username=username, password_hash=hashed, event_id=event.id)
+
+    # First registered user becomes admin automatically
+    if db.query(User).count() == 0:
+        user.is_admin = True
+
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Get event quota
-    event = db.query(Event).filter(Event.open == True).first()
-    if event:
-        quota = json.loads(event.quota)
-    else:
-        quota = json.loads(
-            os.environ.get(
-                "EVENT_QUOTA",
-                '{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}',
-            )
-        )
+    quota = json.loads(event.quota)
 
     # Create queued image record
     image = UserImage(user_id=user.id, status="queued")

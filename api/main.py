@@ -20,16 +20,22 @@ API_HOST = os.environ.get("API_HOST", "host.docker.internal:8000")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # Create default event if none exists
     from api.database import SessionLocal
     db = SessionLocal()
     try:
+        # Migrate existing events: open bool → status field
+        for event in db.query(Event).filter(Event.status == "draft").all():
+            if event.open:
+                event.status = "open"
+        db.commit()
+
+        # Create default event if none exists
         if not db.query(Event).first():
             quota = os.environ.get(
                 "EVENT_QUOTA",
                 '{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}',
             )
-            db.add(Event(name="Default CTF Event", quota=quota, open=True))
+            db.add(Event(name="Default CTF Event", quota=quota, status="open"))
             db.commit()
     finally:
         db.close()
@@ -47,6 +53,26 @@ app.include_router(images.router)
 app.include_router(verify.router)
 app.include_router(scoreboard.router)
 app.include_router(admin.router)
+
+
+@app.get("/api/events")
+async def list_open_events(db: Session = Depends(get_db)):
+    """Public endpoint: returns events open for registration."""
+    events = (
+        db.query(Event)
+        .filter(Event.status == "open")
+        .order_by(Event.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": e.id,
+            "name": e.name,
+            "description": e.description,
+            "welcome_message": e.welcome_message,
+        }
+        for e in events
+    ]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -107,6 +133,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "registry_host": REGISTRY_HOST,
         "root_password": ROOT_PASSWORD,
         "api_host": API_HOST,
+        "event": user.event,
     })
 
 
@@ -124,10 +151,6 @@ async def admin_page(request: Request, db: Session = Depends(get_db)):
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
 
-    event = db.query(Event).first()
-
     return templates.TemplateResponse(request, "admin.html", {
         "user": user,
-        "event": event,
-        "event_quota": json.loads(event.quota) if event else {},
     })
