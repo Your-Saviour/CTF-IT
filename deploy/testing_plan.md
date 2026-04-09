@@ -192,34 +192,39 @@ ssh root@<TARGET_IP> "
 
 ## Phase 5: Caldera Red Team Emulation
 
-### 5.1 Import CTF Plugin into Caldera
+### 5.1 Automated Caldera Setup
 
-The deploy compose already bind-mounts `caldera/plugins/ctf-exploit/` into Caldera. Just copy the exported plugin there and restart:
-
-```bash
-# Copy exported plugin into the compose-mounted directory
-cp -r /opt/caldera_export/plugins/ctf-exploit/* /opt/CTF-IT/deploy/caldera/plugins/ctf-exploit/
-
-# Add ctf-exploit to the plugin list in local.yml
-sed -i '/^plugins:/a\  - ctf-exploit' deploy/caldera/config/local.yml
-
-# Restart Caldera to load the plugin
-cd /opt/CTF-IT/deploy && docker compose restart caldera
-```
-
-Wait ~60s for Caldera to start, then verify abilities loaded:
+A single API call handles the full setup: generates the CTF plugin, copies it to the Caldera plugin directory, adds it to `local.yml`, restarts Caldera, waits for it to be healthy, and creates an adversary operation.
 
 ```bash
-docker exec ctf-caldera python3 -c "
-import urllib.request, json
-req = urllib.request.Request('http://localhost:8888/api/v2/abilities', headers={'KEY': '<API_KEY_RED>'})
-data = json.loads(urllib.request.urlopen(req).read())
-ctf = [a for a in data if 'Recon:' in a.get('name','') or 'Exploit:' in a.get('name','')]
-print(f'CTF abilities loaded: {len(ctf)}')
-for a in ctf:
-    print(f'  [{a[\"tactic\"]}] {a[\"name\"]}')
+docker exec ctf-api python3 -c "
+import requests
+s = requests.Session()
+s.post('http://localhost:8000/auth/login', data={'username': 'admin', 'password': 'Admin2026!'})
+r = s.post('http://localhost:8000/admin/caldera-setup', json={'event_id': 1})
+import json; print(json.dumps(r.json(), indent=2))
 "
 ```
+
+**Expected output:**
+```json
+{
+  "status": "success",
+  "plugin": {
+    "files_copied": 12,
+    "plugin_added_to_config": true,
+    "abilities_loaded": 8,
+    "adversaries_loaded": 3
+  },
+  "operation": {
+    "id": "...",
+    "name": "CTF Red Team Emulation",
+    "state": "running"
+  }
+}
+```
+
+This replaces the manual steps: copying export files, editing `local.yml`, restarting Caldera, and creating the operation via API.
 
 ### 5.2 Deploy Sandcat Agent on Target
 
@@ -237,37 +242,7 @@ tail -5 /tmp/sandcat.log  # Should show "[+] Beacon (HTTP): ALIVE"
 
 **Important:** Use `-H "platform: linux" -H "file: sandcat.go"` headers (not `-d` JSON body) for the download endpoint.
 
-### 5.3 Create and Run Operation
-
-```bash
-# On the SERVER, via Caldera API
-docker exec ctf-caldera python3 -c "
-import urllib.request, json
-
-headers = {'KEY': '<API_KEY_RED>', 'Content-Type': 'application/json'}
-
-# Get the 'CTF Full Exploit Chain' adversary ID
-req = urllib.request.Request('http://localhost:8888/api/v2/adversaries', headers=headers)
-adversaries = json.loads(urllib.request.urlopen(req).read())
-ctf_adv = [a for a in adversaries if a['name'] == 'CTF Full Exploit Chain'][0]
-print(f'Adversary: {ctf_adv[\"name\"]} ({ctf_adv[\"adversary_id\"]})')
-
-# Create operation
-payload = json.dumps({
-    'name': 'CTF Red Team Emulation',
-    'adversary': {'adversary_id': ctf_adv['adversary_id']},
-    'planner': {'id': '788f0f7e-96f0-4545-a0d1-0c587db5f2ee'},
-    'source': {'id': 'ed32b9c3-9593-4c33-b0db-e2007315096b'},
-    'group': 'red',
-    'auto_close': False
-}).encode()
-req = urllib.request.Request('http://localhost:8888/api/v2/operations', data=payload, headers=headers, method='POST')
-result = json.loads(urllib.request.urlopen(req).read())
-print(f'Operation created: {result[\"id\"]} (state={result[\"state\"]})')
-"
-```
-
-### 5.4 Monitor and Verify Results
+### 5.3 Monitor and Verify Results
 
 Wait 3-5 minutes for all abilities to execute (12 abilities at ~15s intervals), then check:
 

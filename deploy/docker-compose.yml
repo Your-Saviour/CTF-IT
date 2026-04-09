@@ -93,6 +93,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ctf-api_data:/app/data
+      # Caldera integration: allows the API to install the exported plugin and update config
+      - ./caldera/plugins/ctf-exploit:/caldera-plugin/ctf-exploit
+      - ./caldera/config/local.yml:/caldera-config/local.yml
     env_file: ../.env
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
