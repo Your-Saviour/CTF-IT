@@ -4,6 +4,7 @@ __pycache__/
 base/.env
 *.pyc
 build_contexts/
+ansible_exports/
 *.egg-info/
 dist/
 .venv/

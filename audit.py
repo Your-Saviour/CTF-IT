@@ -93,6 +93,10 @@ CONTENT_PATHS = [
     "/root/.ssh/authorized_keys",
     "/root/.bashrc",
     "/root/.profile",
+    "/opt/inventory/app.py",
+    "/opt/inventory/inventory.db.bak",
+    "/opt/inventory/uploads/shell.php",
+    "/etc/systemd/system/inventory.service",
 ]
 
 # Directories to glob for content reads

@@ -46,7 +46,7 @@ docker compose up -d
 ```
 
 This starts two services:
-- **API** at `http://localhost:8000`
+- **API** at `http://localhost:8080`
 - **Docker Registry** at `http://localhost:5050`
 
 Built images are automatically pushed to the local registry. Users pull images with `docker pull localhost:5050/ctf-<uuid>`.
@@ -66,7 +66,7 @@ Built images are automatically pushed to the local registry. Users pull images w
 ```
 CTF-IT/
   api/                  # FastAPI application
-    routes/             # auth, images, verify, scoreboard, admin
+    routes/             # auth, images, verify, scoreboard, admin, ansible_export
     models.py           # User, UserImage, UserModule, Event
     main.py             # App entry point
   base/                 # Base Docker image (Ubuntu 22.04 + systemd)
@@ -74,6 +74,7 @@ CTF-IT/
     main.py             # Build entry point
     selector.py         # Module selection with quota/conflicts/deps
     renderer.py         # Dockerfile + manifest generation
+    ansible.py          # Ansible playbook export generation
     registry.py         # Image tagging, push to local registry
     module_loader.py    # YAML module parsing
   modules/              # Module definitions
@@ -82,6 +83,7 @@ CTF-IT/
     application/        # Application modules (infrastructure for vulns to target)
   templates/
     Dockerfile.j2       # Jinja2 template for user images
+    playbook.yml.j2     # Jinja2 template for Ansible playbook export
   frontend/
     templates/          # Jinja2 HTML templates
   audit.py              # In-container audit script (broad system snapshot)
@@ -182,6 +184,51 @@ sudo systemctl restart docker
 ```
 
 This must be done on **every machine** that pulls or pushes images (the server and all user machines).
+
+## Ansible Export
+
+As an alternative to Docker containers, administrators can export modules as Ansible playbooks. This generates a playbook that applies the same vulnerabilities, hardening tasks, and applications to bare machines or VMs.
+
+### API
+
+```bash
+# Export using a quota
+curl -X POST http://localhost:8080/admin/ansible-export \
+  -H "Cookie: session=<admin_session>" \
+  -H "Content-Type: application/json" \
+  -d '{"quota": {"vulnerability": {"easy": 2, "medium": 1, "hard": 0}}}' \
+  -o ctf-playbook.zip
+
+# Export using an event's quota
+curl -X POST http://localhost:8080/admin/ansible-export \
+  -H "Cookie: session=<admin_session>" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": 1}' \
+  -o ctf-playbook.zip
+```
+
+### Running the Playbook
+
+```bash
+unzip ctf-playbook.zip -d ctf-playbook
+cd ctf-playbook
+ansible-playbook -i inventory playbook.yml --become
+```
+
+The target machine should be Ubuntu 22.04 with the same base packages as the `ctf-base` Docker image. The playbook runs all module scripts and copies all module files in dependency order.
+
+### Output Structure
+
+```
+ctf-playbook/
+  playbook.yml              # Ansible playbook
+  scripts/                  # Module shell scripts
+    suid_find__suid_find.sh
+    inventory_dashboard__setup.sh
+  files/                    # Module files (for copy steps)
+    inventory_dashboard__app.py
+    inventory_dashboard__inventory.service
+```
 
 ## Key Design Decisions
 

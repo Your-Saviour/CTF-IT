@@ -1,0 +1,11 @@
+[Unit]
+Description=Inventory Dashboard
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/gunicorn --workers 2 --bind 0.0.0.0:5001 app:app
+WorkingDirectory=/opt/inventory
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

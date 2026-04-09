@@ -15,7 +15,8 @@ modules/
     <module_id>.yaml        # Required: module definition
   application/<module_id>/
     <module_id>.yaml        # Required: module definition
-    <module_id>.sh          # Script to install the application
+    *.sh                    # Shell scripts referenced by steps or script field
+    *.py, *.conf, etc.      # Files referenced by copy steps
 ```
 
 - **Vulnerability** modules include a shell script that introduces a misconfiguration during the Docker build. The user must fix it.
@@ -44,9 +45,49 @@ modules/
 | `tags` | list[string] | `[]` | Searchable tags for filtering. |
 | `conflicts` | list[string] | `[]` | Module IDs that cannot coexist with this module. |
 | `requires` | list[string] | `[]` | Module IDs that must also be selected if this module is picked. |
-| `script` | string | `null` | Filename of the shell script (vulnerability and application modules). |
+| `script` | string | `null` | Filename of a single shell script (legacy — use `steps` for new modules). |
+| `steps` | list | `[]` | Ordered build steps. See [Build Steps](#build-steps). Replaces `script`. |
 | `hints` | list[string] | `[]` | Progressive hints shown to users. Order from vague to specific. |
 | `suggested_fix` | string | `null` | The command(s) that fix the issue. Used for admin reference/testing. |
+
+## Build Steps
+
+The `steps` field defines an ordered list of build operations. Each step is either a file copy or a script execution:
+
+### `run` — Execute a shell script
+
+```yaml
+steps:
+  - run: setup.sh
+```
+
+Runs a `.sh` file from the module directory during the Docker build. Same behavior as the legacy `script` field.
+
+### `copy` — Copy a file into the container
+
+```yaml
+steps:
+  - copy: { src: app.py, dest: /opt/myapp/app.py }
+  - copy: { src: config.ini, dest: /etc/myapp/config.ini, mode: "0644" }
+```
+
+Copies a file from the module directory to the specified path in the container. The optional `mode` field sets permissions via `chmod` after copying.
+
+### Multi-stage example
+
+Steps execute in order, so you can interleave copies and scripts:
+
+```yaml
+steps:
+  - run: install_deps.sh              # apt/pip install
+  - copy: { src: app.py, dest: /opt/myapp/app.py }
+  - copy: { src: myapp.service, dest: /etc/systemd/system/myapp.service }
+  - run: finalize.sh                   # DB init, systemd enable, etc.
+```
+
+### Legacy `script` field
+
+Modules using `script: some_file.sh` continue to work — it is automatically converted to `steps: [{run: some_file.sh}]` during loading. New modules should use `steps` instead.
 
 ## Verification Types
 
@@ -255,37 +296,64 @@ hints:
 
 Hardening modules have no script — the base image is clean and the user must implement the hardening measure themselves.
 
-### Application Module
+### Application Module (with steps)
 
 ```
-modules/application/vulnerable_flask_app/
-  vulnerable_flask_app.yaml
-  install_flask_app.sh
+modules/application/inventory_dashboard/
+  inventory_dashboard.yaml
+  app.py
+  init_db.py
+  inventory.service
+  setup.sh
+  finalize.sh
 ```
 
-**vulnerable_flask_app.yaml**:
+**inventory_dashboard.yaml**:
 
 ```yaml
-id: vulnerable_flask_app
-name: Vulnerable Flask Application
-description: A small Flask web app running as a systemd service on port 5000.
+id: inventory_dashboard
+name: Python Inventory Dashboard
+description: A Flask-based server inventory dashboard running as a systemd service on port 5001.
 type: application
 difficulty: easy
 points: 0
 category: web
-tags: [web, flask, python]
+tags: [web, flask, python, inventory]
 conflicts: []
 requires: []
+steps:
+  - run: setup.sh
+  - copy: { src: app.py, dest: /opt/inventory/app.py }
+  - copy: { src: inventory.service, dest: /etc/systemd/system/inventory.service }
+  - copy: { src: init_db.py, dest: /tmp/init_db.py }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: "0.0.0.0:5001"
+  expected: running
+hints:
+  - "Check what services are running on port 5001"
+```
+
+Application modules install infrastructure that vulnerability modules target. They award 0 points and auto-complete when the service is running. Vulnerability modules use `requires: [inventory_dashboard]` to depend on them — the selector automatically includes required modules and ensures their steps run first during the Docker build.
+
+### Application Module (legacy script)
+
+Simple modules can still use the `script` field:
+
+```yaml
+id: vulnerable_flask_app
+name: Vulnerable Flask Application
+type: application
+difficulty: easy
+points: 0
+category: web
 script: install_flask_app.sh
 verification:
   type: process_running
   process: gunicorn
   expected: running
-hints:
-  - "Check what services are running on common web ports"
 ```
-
-Application modules install infrastructure that vulnerability modules target. They award 0 points and auto-complete when the service is running. Vulnerability modules use `requires: [vulnerable_flask_app]` to depend on them — the selector automatically includes required modules and ensures their scripts run first during the Docker build.
 
 ## Module Selection
 
@@ -310,6 +378,15 @@ Across all phases, the selector will:
 - Skip modules that conflict with already-selected modules (bidirectional)
 - Auto-include any modules listed in `requires`
 - Count dependency-pulled modules toward their type/difficulty quota
+
+## Ansible Export Compatibility
+
+Modules are automatically compatible with the Ansible export feature (`POST /admin/ansible-export`). The export generates an Ansible playbook that applies modules to bare machines using:
+
+- `ansible.builtin.script` for `run` steps (executes the same `.sh` scripts)
+- `ansible.builtin.copy` for `copy` steps (copies files to the same destination paths)
+
+When writing module scripts, keep in mind they may run on bare machines (not just inside Docker builds). Scripts that rely on Docker-specific behavior (e.g., `COPY` creating parent directories) should explicitly create directories with `mkdir -p`.
 
 ## Tips
 

@@ -1,0 +1,20 @@
+id: inventory_debug_mode
+name: Flask Debug Mode Enabled
+description: The inventory dashboard is running with Flask debug mode enabled, exposing the Werkzeug interactive debugger which allows remote code execution. Disable debug mode.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [web, debug, flask, remote-code-execution]
+conflicts: []
+requires: [inventory_dashboard]
+script: inventory_debug_mode.sh
+verification:
+  type: file_not_contains
+  path: /etc/systemd/system/inventory.service
+  pattern: "FLASK_DEBUG=1"
+hints:
+  - "Check how the inventory service is configured to run"
+  - "Examine the systemd service file for environment variables"
+  - "Remove the FLASK_DEBUG setting from /etc/systemd/system/inventory.service and restart the service"
+suggested_fix: "sed -i '/FLASK_DEBUG=1/d' /etc/systemd/system/inventory.service && systemctl daemon-reload && systemctl restart inventory"

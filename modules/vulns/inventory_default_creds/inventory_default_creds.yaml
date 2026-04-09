@@ -1,0 +1,20 @@
+id: inventory_default_creds
+name: Default Admin Credentials
+description: The inventory dashboard has default admin credentials, allowing anyone to log in. Change or remove the default account.
+type: vulnerability
+difficulty: easy
+points: 100
+category: authentication
+tags: [web, credentials, authentication]
+conflicts: []
+requires: [inventory_dashboard]
+script: inventory_default_creds.sh
+verification:
+  type: http_response
+  label: localhost_5001
+  body_not_contains: "Default credentials detected"
+hints:
+  - "Try logging into the inventory dashboard on port 5001"
+  - "Check the users table in the SQLite database at /opt/inventory/inventory.db"
+  - "Use sqlite3 to update or delete the default admin account"
+suggested_fix: "sqlite3 /opt/inventory/inventory.db \"DELETE FROM users WHERE username = 'admin'\""

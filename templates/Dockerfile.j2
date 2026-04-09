@@ -1,14 +1,18 @@
 FROM ctf-base:latest
+{% if operations %}
 
-{% if vuln_scripts %}
-COPY scripts/ /tmp/scripts/
-RUN chmod +x /tmp/scripts/*.sh \
-  {% for script in vuln_scripts %}
-  && /tmp/scripts/{{ script }} \
-  {% endfor %}
-  && rm -rf /tmp/scripts
+{% for op in operations %}
+{% if op.type == "copy" -%}
+COPY files/{{ op.staged }} {{ op.dest }}
+{% if op.mode -%}
+RUN chmod {{ op.mode }} {{ op.dest }}
+{% endif -%}
+{% elif op.type == "run" -%}
+COPY scripts/{{ op.script }} /tmp/scripts/{{ op.script }}
+RUN chmod +x /tmp/scripts/{{ op.script }} && /tmp/scripts/{{ op.script }} && rm /tmp/scripts/{{ op.script }}
+{% endif -%}
+{% endfor %}
 {% endif %}
-
 ARG FLAG
 RUN echo "$FLAG" > /root/flag.txt && chmod 400 /root/flag.txt
 

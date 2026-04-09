@@ -131,7 +131,7 @@ docker compose up -d
 # Wait for both services to be healthy
 log "Waiting for services..."
 for i in $(seq 1 30); do
-    if curl -sf http://localhost:8000/ >/dev/null 2>&1 && \
+    if curl -sf http://localhost:8080/ >/dev/null 2>&1 && \
        curl -sf http://localhost:5050/v2/_catalog >/dev/null 2>&1; then
         break
     fi
@@ -153,7 +153,7 @@ log "=== Step 1: Register & Build ==="
 # Default event (id=1) is created as "open" at startup
 EVENT_ID=1
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/auth/register \
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/auth/register \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -d "username=e2e_test&password=testpass123&event_id=$EVENT_ID" \
     -c "$COOKIES")
@@ -165,7 +165,7 @@ assert_eq "Register returns 303 redirect" "303" "$HTTP_CODE"
 log "Polling build status..."
 BUILD_STATUS="unknown"
 for i in $(seq 1 60); do
-    BUILD_STATUS=$(curl -s -b "$COOKIES" http://localhost:8000/api/images/status | json_field status)
+    BUILD_STATUS=$(curl -s -b "$COOKIES" http://localhost:8080/api/images/status | json_field status)
     if [ "$BUILD_STATUS" = "ready" ] || [ "$BUILD_STATUS" = "failed" ]; then
         break
     fi
@@ -189,13 +189,13 @@ log "=== Step 2: Registry Push ==="
 CATALOG=$(curl -s http://localhost:5050/v2/_catalog)
 assert_contains "Image in registry catalog" "$CATALOG" "ctf-"
 
-PULL_CMD_RESP=$(curl -s -b "$COOKIES" http://localhost:8000/api/images/pull-command)
+PULL_CMD_RESP=$(curl -s -b "$COOKIES" http://localhost:8080/api/images/pull-command)
 assert_contains "Pull command has registry prefix" "$PULL_CMD_RESP" "localhost:5050"
 
 # --- Step 3: Pull and run user container -------------------------------------
 log "=== Step 3: Pull & Run Container ==="
 
-IMAGE_TAG=$(curl -s -b "$COOKIES" http://localhost:8000/api/images/status \
+IMAGE_TAG=$(curl -s -b "$COOKIES" http://localhost:8080/api/images/status \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['image_tag'])")
 
 log "Image tag: $IMAGE_TAG"
@@ -238,7 +238,7 @@ assert_not_contains "No collect.py" "$CTF_FILES" "collect.py"
 log "=== Step 5: Verify Unfixed State ==="
 
 PAYLOAD=$(docker exec "$CONTAINER_NAME" python3 /opt/ctf/audit.py)
-UNFIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
+UNFIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8080/api/verify \
     -H "Content-Type: application/json" -d "$PAYLOAD")
 
 UNFIXED_TOTAL=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
@@ -251,10 +251,10 @@ UNFIXED_REMAINING=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(js
 UNFIXED_COMPLETED=$(echo "$UNFIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['completed'])")
 
 # With application modules, 0-point app modules auto-complete (infrastructure).
-# Expect: total modules = 10, completed = 1 (app module), remaining = 9
-assert_eq "Unfixed: total modules=10" "10" "$UNFIXED_TOTAL_MODULES"
-assert_eq "Unfixed: 9 remaining" "9" "$UNFIXED_REMAINING"
-assert_eq "Unfixed: 1 completed (auto-complete app)" "1" "$UNFIXED_COMPLETED"
+# Expect: total modules = 17, completed = 2 (app modules), remaining = 15
+assert_eq "Unfixed: total modules=17" "17" "$UNFIXED_TOTAL_MODULES"
+assert_eq "Unfixed: 15 remaining" "15" "$UNFIXED_REMAINING"
+assert_eq "Unfixed: 2 completed (auto-complete apps)" "2" "$UNFIXED_COMPLETED"
 log "Modules remaining: $UNFIXED_REMAINING"
 
 # --- Step 6: Apply all fixes -------------------------------------------------
@@ -301,26 +301,46 @@ docker exec "$CONTAINER_NAME" bash -c "sed -i 's|HACKED BY L33THAX0R||' /opt/fla
 sleep 2
 log "  Fixed: flask_defacement"
 
+# inventory_default_creds (vulnerability - http_response)
+docker exec "$CONTAINER_NAME" python3 -c "import sqlite3; c=sqlite3.connect('/opt/inventory/inventory.db'); c.execute(\"DELETE FROM users WHERE username='admin'\"); c.commit(); c.close()"
+log "  Fixed: inventory_default_creds"
+
+# inventory_secret_key (vulnerability - file_not_contains)
+docker exec "$CONTAINER_NAME" bash -c "sed -i 's/app.secret_key = \"changeme\"/app.secret_key = \"securerandomvalue123\"/' /opt/inventory/app.py"
+log "  Fixed: inventory_secret_key"
+
+# inventory_backup_file (vulnerability - file_not_contains)
+docker exec "$CONTAINER_NAME" bash -c "rm /opt/inventory/inventory.db.bak"
+log "  Fixed: inventory_backup_file"
+
+# inventory_debug_mode (vulnerability - file_not_contains)
+docker exec "$CONTAINER_NAME" bash -c "sed -i '/FLASK_DEBUG=1/d' /etc/systemd/system/inventory.service"
+log "  Fixed: inventory_debug_mode"
+
+# inventory_unrestricted_upload (vulnerability - file_not_contains)
+docker exec "$CONTAINER_NAME" bash -c "rm /opt/inventory/uploads/shell.php"
+log "  Fixed: inventory_unrestricted_upload"
+
 pass "All fixes applied"
 
 # --- Step 7: Submit fixed state — all should pass ----------------------------
 log "=== Step 7: Verify Fixed State ==="
 
 PAYLOAD=$(docker exec "$CONTAINER_NAME" python3 /opt/ctf/audit.py)
-FIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
+FIXED_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8080/api/verify \
     -H "Content-Type: application/json" -d "$PAYLOAD")
 
 FIXED_TOTAL=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
-assert_eq "Fixed: total_points=1500" "1500" "$FIXED_TOTAL"
+assert_eq "Fixed: total_points=2400" "2400" "$FIXED_TOTAL"
 
 FIXED_COMPLETED=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['completed'])")
-assert_eq "Fixed: 10 completed" "10" "$FIXED_COMPLETED"
+assert_eq "Fixed: 17 completed" "17" "$FIXED_COMPLETED"
 
 FIXED_REMAINING=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['remaining'])")
 assert_eq "Fixed: 0 remaining" "0" "$FIXED_REMAINING"
 
 FIXED_NEWLY=$(echo "$FIXED_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['newly_completed'])")
-assert_eq "Fixed: 9 newly completed" "9" "$FIXED_NEWLY"
+assert_eq "Fixed: 15 newly completed" "15" "$FIXED_NEWLY"
 
 FIXED_ALL_PASS=$(echo "$FIXED_RESP" | python3 -c "
 import sys, json
@@ -334,7 +354,7 @@ echo "$FIXED_RESP" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 expected = {
-    'world_writable_shadow': 100,
+    'world_writable_shadow': 200,
     'suid_find': 100,
     'writable_cron_script': 200,
     'nopasswd_sudo': 200,
@@ -345,6 +365,12 @@ expected = {
     'setup_ssh_key_auth': 200,
     'flask_defacement': 200,
     'vulnerable_flask_app': 0,
+    'inventory_dashboard': 0,
+    'inventory_default_creds': 100,
+    'inventory_secret_key': 100,
+    'inventory_backup_file': 100,
+    'inventory_debug_mode': 200,
+    'inventory_unrestricted_upload': 200,
 }
 for r in data['results']:
     mid = r['module_id']
@@ -362,11 +388,11 @@ for r in data['results']:
 log "=== Step 8: Idempotency Check ==="
 
 PAYLOAD=$(docker exec "$CONTAINER_NAME" python3 /opt/ctf/audit.py)
-IDEM_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8000/api/verify \
+IDEM_RESP=$(curl -s -b "$COOKIES" -X POST http://localhost:8080/api/verify \
     -H "Content-Type: application/json" -d "$PAYLOAD")
 
 IDEM_TOTAL=$(echo "$IDEM_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_points'])")
-assert_eq "Idempotent: total_points=1500" "1500" "$IDEM_TOTAL"
+assert_eq "Idempotent: total_points=2400" "2400" "$IDEM_TOTAL"
 
 IDEM_NEWLY=$(echo "$IDEM_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['newly_completed'])")
 assert_eq "Idempotent: 0 newly completed" "0" "$IDEM_NEWLY"
@@ -388,7 +414,7 @@ assert_eq "Idempotent: all still passed" "true" "$IDEM_ALL_PASS"
 # --- Step 9: Scoreboard check -----------------------------------------------
 log "=== Step 9: Scoreboard ==="
 
-SCOREBOARD=$(curl -s "http://localhost:8000/api/scoreboard?event_id=$EVENT_ID")
+SCOREBOARD=$(curl -s "http://localhost:8080/api/scoreboard?event_id=$EVENT_ID")
 SB_USER=$(echo "$SCOREBOARD" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -399,7 +425,7 @@ for entry in data:
 else:
     print('not_found')
 ")
-assert_eq "Scoreboard shows 1500" "1500" "$SB_USER"
+assert_eq "Scoreboard shows 2400" "2400" "$SB_USER"
 
 # --- Summary -----------------------------------------------------------------
 echo ""

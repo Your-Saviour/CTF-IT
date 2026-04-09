@@ -36,7 +36,7 @@ curl -s http://localhost:5050/v2/_catalog
 
 ```bash
 # Register — triggers background image build
-curl -s -X POST http://localhost:8000/auth/register \
+curl -s -X POST http://localhost:8080/auth/register \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=e2e_test&password=testpass123" \
   -c /tmp/ctf-test-cookies.txt -D - -o /dev/null
@@ -44,7 +44,7 @@ curl -s -X POST http://localhost:8000/auth/register \
 # Poll until ready (should take <30s)
 for i in $(seq 1 30); do
   img_status=$(curl -s -b /tmp/ctf-test-cookies.txt \
-    http://localhost:8000/api/images/status \
+    http://localhost:8080/api/images/status \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
   echo "Attempt $i: $img_status"
   if [ "$img_status" = "ready" ] || [ "$img_status" = "failed" ]; then break; fi
@@ -61,7 +61,7 @@ done
 curl -s http://localhost:5050/v2/_catalog
 
 # Verify pull-command endpoint returns registry-prefixed commands
-curl -s -b /tmp/ctf-test-cookies.txt http://localhost:8000/api/images/pull-command
+curl -s -b /tmp/ctf-test-cookies.txt http://localhost:8080/api/images/pull-command
 ```
 
 **Expected:** The catalog contains the image tag. The pull-command endpoint returns `pull_command` and `run_command` prefixed with `localhost:5050/`.
@@ -71,7 +71,7 @@ curl -s -b /tmp/ctf-test-cookies.txt http://localhost:8000/api/images/pull-comma
 ```bash
 # Get image tag
 IMAGE_TAG=$(curl -s -b /tmp/ctf-test-cookies.txt \
-  http://localhost:8000/api/images/status \
+  http://localhost:8080/api/images/status \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['image_tag'])")
 
 # Pull from registry
@@ -105,7 +105,7 @@ docker exec ctf-e2e-test ls /opt/ctf/
 
 ```bash
 PAYLOAD=$(docker exec ctf-e2e-test python3 /opt/ctf/audit.py)
-curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
+curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
@@ -151,7 +151,7 @@ sleep 2
 
 ```bash
 PAYLOAD=$(docker exec ctf-e2e-test python3 /opt/ctf/audit.py)
-curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
+curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 
@@ -178,7 +178,7 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
 
 ```bash
 PAYLOAD=$(docker exec ctf-e2e-test python3 /opt/ctf/audit.py)
-curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8000/api/verify \
+curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
   -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
 ```
 

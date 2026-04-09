@@ -1,0 +1,30 @@
+---
+# CTF Environment Playbook
+# Applies CTF vulnerabilities and configurations to target hosts.
+# Modules: {{ module_names | join(', ') }}
+#
+# Requirements: Target must be Ubuntu 22.04 with base packages installed.
+# Usage:
+#   ansible-playbook -i inventory playbook.yml --become
+
+- name: Apply CTF environment
+  hosts: all
+  become: true
+  tasks:
+{%- for op in operations %}
+{%- if op.type == "copy" %}
+    - name: "Copy file: {{ op.staged }} [{{ op.module_name }}]"
+      ansible.builtin.copy:
+        src: "files/{{ op.staged }}"
+        dest: "{{ op.dest }}"
+{%- if op.mode %}
+        mode: "{{ op.mode }}"
+{%- endif %}
+{%- elif op.type == "run" %}
+    - name: "Run script: {{ op.script }} [{{ op.module_name }}]"
+      ansible.builtin.script:
+        cmd: "scripts/{{ op.script }}"
+      args:
+        executable: /bin/bash
+{%- endif %}
+{%- endfor %}

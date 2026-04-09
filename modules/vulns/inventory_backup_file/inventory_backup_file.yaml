@@ -1,0 +1,20 @@
+id: inventory_backup_file
+name: Exposed Database Backup
+description: A backup of the inventory database is sitting in the application directory with sensitive data. Remove it or move it to a secure location.
+type: vulnerability
+difficulty: easy
+points: 100
+category: web
+tags: [web, backup, data-exposure]
+conflicts: []
+requires: [inventory_dashboard]
+script: inventory_backup_file.sh
+verification:
+  type: file_not_contains
+  path: /opt/inventory/inventory.db.bak
+  pattern: "SENSITIVE_BACKUP_DATA"
+hints:
+  - "Look for backup files in the application directory"
+  - "Check for .bak files in /opt/inventory/"
+  - "Delete the backup file: rm /opt/inventory/inventory.db.bak"
+suggested_fix: "rm /opt/inventory/inventory.db.bak"

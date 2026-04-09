@@ -1,0 +1,22 @@
+id: inventory_dashboard
+name: Python Inventory Dashboard
+description: A Flask-based server inventory dashboard running as a systemd service on port 5001.
+type: application
+difficulty: easy
+points: 0
+category: web
+tags: [web, flask, python, inventory]
+conflicts: []
+requires: []
+steps:
+  - run: setup.sh
+  - copy: { src: app.py, dest: /opt/inventory/app.py }
+  - copy: { src: inventory.service, dest: /etc/systemd/system/inventory.service }
+  - copy: { src: init_db.py, dest: /tmp/init_db.py }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: "0.0.0.0:5001"
+  expected: running
+hints:
+  - "Check what services are running on port 5001"
