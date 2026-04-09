@@ -10,3 +10,5 @@ dist/
 .venv/
 deploy/.env
 deploy/caldera/config/local.yml
+deploy/caldera/plugins/ctf-exploit/*
+!deploy/caldera/plugins/ctf-exploit/.gitkeep

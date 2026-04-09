@@ -3,7 +3,8 @@
 #   1. Copy .env.example to .env and fill in values (see generation commands inside)
 #   2. Copy caldera/config/local.yml.example to caldera/config/local.yml and update secrets
 #   3. Build the CTF base image (see main repo README)
-#   4. Start: docker compose up -d
+#   4. (Optional) Export Caldera plugin from CTF admin and unzip into caldera/plugins/ctf-exploit/
+#   5. Start: docker compose up -d
 #
 # Resource requirements: ~2GB RAM minimum
 #   - Traefik: ~64MB
@@ -155,6 +156,8 @@ services:
     volumes:
       - ./caldera/config/local.yml:/usr/src/app/conf/local.yml:ro
       - ctf-caldera_data:/usr/src/app/data
+      # Mount exported CTF plugin — unzip caldera export into caldera/plugins/ctf-exploit/
+      - ./caldera/plugins/ctf-exploit:/usr/src/app/plugins/ctf-exploit:ro
     ports:
       # Agent communication ports — cannot be reverse-proxied.
       # Agents connect directly to the host on these ports for C2 communication.
@@ -164,6 +167,7 @@ services:
       - "8022:8022"       # SSH tunnel
       - "2222:2222"       # FTP
       - "8853:8853"       # DNS
+      - "8888:8888"       # HTTP C2 (agents beacon here directly)
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ctf-caldera.rule=Host(`caldera.${DOMAIN}`)"

@@ -103,9 +103,7 @@ ufw reload
 docker compose ps  # All 7 containers should be "healthy"
 ```
 
-**Important: Caldera port 8888 must be published on the host.** The default deploy compose only exposes agent ports (7010-8853) but not 8888 since it's proxied through Traefik. For agent C2 to work over HTTP, you need port 8888 published. Either:
-- Add `- "8888:8888"` to the Caldera ports in `docker-compose.yml`, or
-- Run Caldera with `docker run` including `-p 8888:8888` (see Phase 4.2 below)
+Port 8888 (Caldera HTTP C2) is published in the compose file for direct agent communication.
 
 ## Phase 3: Generate Exports
 
@@ -196,33 +194,17 @@ ssh root@<TARGET_IP> "
 
 ### 5.1 Import CTF Plugin into Caldera
 
-The plugin must be present when Caldera starts. Mount it as a bind volume:
+The deploy compose already bind-mounts `caldera/plugins/ctf-exploit/` into Caldera. Just copy the exported plugin there and restart:
 
 ```bash
-# Stop compose-managed Caldera and run with plugin mounted
-cd /opt/CTF-IT/deploy && docker compose stop caldera && docker compose rm -f caldera
-
-# Create persistent plugin directory
-mkdir -p /opt/caldera_plugin
-cp -r /opt/caldera_export/plugins/ctf-exploit /opt/caldera_plugin/
+# Copy exported plugin into the compose-mounted directory
+cp -r /opt/caldera_export/plugins/ctf-exploit/* /opt/CTF-IT/deploy/caldera/plugins/ctf-exploit/
 
 # Add ctf-exploit to the plugin list in local.yml
 sed -i '/^plugins:/a\  - ctf-exploit' deploy/caldera/config/local.yml
 
-# Run Caldera with the plugin bind-mounted
-docker run -d --name ctf-caldera --restart unless-stopped \
-  --network ctf-proxy \
-  -v /opt/CTF-IT/deploy/caldera/config/local.yml:/usr/src/app/conf/local.yml:ro \
-  -v ctf-caldera_data:/usr/src/app/data \
-  -v /opt/caldera_plugin/ctf-exploit:/usr/src/app/plugins/ctf-exploit:ro \
-  -p 7010:7010 -p 7011:7011/udp -p 7012:7012 -p 8022:8022 \
-  -p 2222:2222 -p 8853:8853 -p 8888:8888 \
-  -l "traefik.enable=true" \
-  -l "traefik.http.routers.ctf-caldera.rule=Host(\`caldera.<SERVER_DOMAIN>\`)" \
-  -l "traefik.http.routers.ctf-caldera.entrypoints=websecure" \
-  -l "traefik.http.routers.ctf-caldera.tls.certresolver=letsencrypt" \
-  -l "traefik.http.services.ctf-caldera.loadbalancer.server.port=8888" \
-  ghcr.io/mitre/caldera:latest
+# Restart Caldera to load the plugin
+cd /opt/CTF-IT/deploy && docker compose restart caldera
 ```
 
 Wait ~60s for Caldera to start, then verify abilities loaded:
@@ -350,9 +332,7 @@ print(f'Total: {len(op.get(\"chain\",[]))} links')
 
 5. **Ubuntu 24.04 PEP 668**: If the target runs Ubuntu 24.04, remove `/usr/lib/python3.12/EXTERNALLY-MANAGED` before running module scripts that use `pip install`.
 
-6. **Firewall**: Port 8888 must be open on the server for Caldera agent HTTP C2 communication. The default deploy compose doesn't publish 8888 on the host (it routes through Traefik), but agents need direct HTTP access.
-
-7. **Caldera port 8888**: When running Caldera outside of `docker compose` (e.g. with `docker run` for plugin bind mount), remember to publish port 8888 (`-p 8888:8888`).
+6. **Firewall**: Port 8888 must be open on the server for Caldera agent HTTP C2 communication. The deploy compose publishes 8888 on the host, but the server firewall (ufw) must also allow it.
 
 ## Cleanup
 
