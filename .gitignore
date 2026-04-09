@@ -8,3 +8,5 @@ ansible_exports/
 *.egg-info/
 dist/
 .venv/
+deploy/.env
+deploy/caldera/config/local.yml

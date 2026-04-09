@@ -1,0 +1,94 @@
+# MITRE Caldera — Local Configuration
+# Copy this file to local.yml and replace all REPLACE_ME values before starting.
+#
+# IMPORTANT: This file is used as the MAIN config (not merged with default.yml).
+# All keys must be present — missing keys will cause startup errors or broken features.
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+# Generate each with: openssl rand -base64 32
+
+# API keys for programmatic access (used by agents and REST API clients)
+api_key_blue: REPLACE_ME
+api_key_red: REPLACE_ME
+
+# Encryption key for stored credentials and sensitive data
+encryption_key: REPLACE_ME
+
+# Salt for password hashing
+crypt_salt: REPLACE_ME
+
+# ─── Users ───────────────────────────────────────────────────────────────────
+# Format: team: { username: password }
+# IMPORTANT: Change all passwords before deploying.
+users:
+  blue:
+    blue: REPLACE_ME
+  red:
+    admin: REPLACE_ME
+    red: REPLACE_ME
+
+# ─── Server ──────────────────────────────────────────────────────────────────
+host: 0.0.0.0
+port: 8888
+auth.login.handler.module: default
+session_expiration_days: 7
+ability_refresh: 60
+client_max_size_mb: 1
+api_upload_max_size_mb: 100
+objects.planners.default: atomic
+
+# ─── Agent Contact Methods ───────────────────────────────────────────────────
+# Agent callback URL — agents use this to reach the C2 server.
+# Set to the VM/host IP or hostname that agents can reach.
+app.contact.http: http://0.0.0.0:8888
+app.contact.tcp: 0.0.0.0:7010
+app.contact.udp: 0.0.0.0:7011
+app.contact.websocket: 0.0.0.0:7012
+app.contact.dns.domain: mycaldera.caldera
+app.contact.dns.socket: 0.0.0.0:8853
+app.contact.html: /weather
+app.contact.gist: API_KEY
+app.contact.slack.api_key: SLACK_TOKEN
+app.contact.slack.bot_id: SLACK_BOT_ID
+app.contact.slack.channel_id: SLACK_CHANNEL_ID
+app.contact.tunnel.ssh.host_key_file: REPLACE_WITH_KEY_FILE_PATH
+app.contact.tunnel.ssh.host_key_passphrase: REPLACE_WITH_KEY_FILE_PASSPHRASE
+app.contact.tunnel.ssh.socket: 0.0.0.0:8022
+app.contact.tunnel.ssh.user_name: sandcat
+app.contact.tunnel.ssh.user_password: REPLACE_ME
+app.contact.ftp.host: 0.0.0.0
+app.contact.ftp.port: 2222
+app.contact.ftp.pword: REPLACE_ME
+app.contact.ftp.server.dir: ftp_dir
+app.contact.ftp.user: caldera_user
+
+# ─── Plugins ─────────────────────────────────────────────────────────────────
+# Core plugins for adversary emulation and agent management
+plugins:
+  - access
+  - atomic
+  - compass
+  - debrief
+  - fieldmanual
+  - manx
+  - response
+  - sandcat
+  - stockpile
+  - training
+
+# ─── Misc ────────────────────────────────────────────────────────────────────
+exfil_dir: /tmp/caldera
+reports_dir: /tmp
+reachable_host_traits:
+  - remote.host.fqdn
+  - remote.host.ip
+requirements:
+  go:
+    command: go version
+    type: installed_program
+    version: "1.19"
+  python:
+    attr: version
+    module: sys
+    type: python_module
+    version: "3.9.0"

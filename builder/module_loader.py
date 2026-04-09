@@ -57,6 +57,7 @@ class Module:
     verification: dict = field(default_factory=dict)
     hints: list[str] = field(default_factory=list)
     suggested_fix: Optional[str] = None
+    caldera: Optional[dict] = None
     source_dir: Path = field(default_factory=Path)
 
 
@@ -84,6 +85,7 @@ def load_all_modules() -> list[Module]:
             verification=data.get("verification", {}),
             hints=data.get("hints", []),
             suggested_fix=data.get("suggested_fix"),
+            caldera=data.get("caldera"),
             source_dir=yaml_path.parent,
         ))
     return modules

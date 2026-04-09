@@ -1,0 +1,247 @@
+# CTF-IT Deployment Stack — Traefik + Dockhand + API + Registry + Caldera + Semaphore
+# Prerequisites:
+#   1. Copy .env.example to .env and fill in values (see generation commands inside)
+#   2. Copy caldera/config/local.yml.example to caldera/config/local.yml and update secrets
+#   3. Build the CTF base image (see main repo README)
+#   4. Start: docker compose up -d
+#
+# Resource requirements: ~2GB RAM minimum
+#   - Traefik: ~64MB
+#   - Dockhand: ~64MB
+#   - CTF API: ~128MB (Python + Docker client)
+#   - Registry: ~64MB
+#   - Caldera: ~512MB (Python + plugins)
+#   - Semaphore: ~128MB (Go binary)
+#   - Semaphore Postgres: ~128MB
+#
+# Notes:
+#   - Domain is configured via DOMAIN in .env (e.g. DOMAIN=example.com)
+#   - Services: ctf.DOMAIN, caldera.DOMAIN, semaphore.DOMAIN, registry.DOMAIN,
+#     dockhand.DOMAIN, traefik.DOMAIN
+#   - Caldera agent ports are published directly (cannot be reverse-proxied)
+#   - Caldera export workflow: download zip from CTF admin panel, upload plugin to Caldera
+#   - Ansible export workflow: download zip from CTF admin panel, create project in Semaphore
+#   - The API container needs Docker socket access for image building
+
+services:
+
+  # ─── Traefik — Reverse Proxy ────────────────────────────────────────────────
+  traefik:
+    image: traefik:latest
+    container_name: ctf-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?Please set ACME_EMAIL in your .env file}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ctf-letsencrypt:/letsencrypt
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/ping || exit 1"]
+      start_period: 15s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-dashboard.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.ctf-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.ctf-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.ctf-dashboard.service=api@internal"
+      - "traefik.http.routers.ctf-dashboard.middlewares=ctf-dashboard-auth"
+      - "traefik.http.middlewares.ctf-dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH:?Please set TRAEFIK_DASHBOARD_AUTH in your .env file}"
+    networks:
+      - ctf-proxy
+
+  # ─── Dockhand — Container Management UI ────────────────────────────────────
+  dockhand:
+    image: fnsys/dockhand:latest
+    container_name: ctf-dockhand
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ctf-dockhand_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000 || exit 1"]
+      start_period: 15s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-dockhand.rule=Host(`dockhand.${DOMAIN}`)"
+      - "traefik.http.routers.ctf-dockhand.entrypoints=websecure"
+      - "traefik.http.routers.ctf-dockhand.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ctf-dockhand.loadbalancer.server.port=3000"
+    depends_on:
+      traefik:
+        condition: service_healthy
+    networks:
+      - ctf-proxy
+
+  # ─── CTF API — FastAPI Application ─────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: ctf-api
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ctf-api_data:/app/data
+    env_file: ../.env
+    environment:
+      - DATABASE_URL=sqlite:///data/ctf.db
+      - REGISTRY_HOST=registry.${DOMAIN}
+      - REGISTRY_PUSH_HOST=ctf-registry:5000
+      - API_HOST=ctf.${DOMAIN}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
+      start_period: 15s
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-api.rule=Host(`ctf.${DOMAIN}`)"
+      - "traefik.http.routers.ctf-api.entrypoints=websecure"
+      - "traefik.http.routers.ctf-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ctf-api.loadbalancer.server.port=8000"
+    depends_on:
+      registry:
+        condition: service_healthy
+    networks:
+      - ctf-proxy
+      - ctf-internal
+
+  # ─── Docker Registry — Image Distribution ──────────────────────────────────
+  registry:
+    image: registry:2
+    container_name: ctf-registry
+    restart: unless-stopped
+    volumes:
+      - ctf-registry_data:/var/lib/registry
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/v2/"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-registry.rule=Host(`registry.${DOMAIN}`)"
+      - "traefik.http.routers.ctf-registry.entrypoints=websecure"
+      - "traefik.http.routers.ctf-registry.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.ctf-registry.middlewares=ctf-registry-auth"
+      - "traefik.http.middlewares.ctf-registry-auth.basicauth.users=${REGISTRY_AUTH:?Please set REGISTRY_AUTH in your .env file}"
+      - "traefik.http.services.ctf-registry.loadbalancer.server.port=5000"
+    networks:
+      - ctf-proxy
+      - ctf-internal
+
+  # ─── MITRE Caldera — Adversary Emulation ───────────────────────────────────
+  caldera:
+    image: ghcr.io/mitre/caldera:${CALDERA_TAG:-latest}
+    container_name: ctf-caldera
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888')\""]
+      start_period: 90s
+      interval: 30s
+      retries: 5
+      timeout: 10s
+    volumes:
+      - ./caldera/config/local.yml:/usr/src/app/conf/local.yml:ro
+      - ctf-caldera_data:/usr/src/app/data
+    ports:
+      # Agent communication ports — cannot be reverse-proxied.
+      # Agents connect directly to the host on these ports for C2 communication.
+      - "7010:7010"       # TCP (Sandcat)
+      - "7011:7011/udp"   # UDP
+      - "7012:7012"       # WebSocket (Manx)
+      - "8022:8022"       # SSH tunnel
+      - "2222:2222"       # FTP
+      - "8853:8853"       # DNS
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-caldera.rule=Host(`caldera.${DOMAIN}`)"
+      - "traefik.http.routers.ctf-caldera.entrypoints=websecure"
+      - "traefik.http.routers.ctf-caldera.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ctf-caldera.loadbalancer.server.port=8888"
+    networks:
+      - ctf-proxy
+
+  # ─── Semaphore Postgres — Database for Semaphore ───────────────────────────
+  semaphore-postgres:
+    image: postgres:16-alpine
+    container_name: ctf-semaphore-postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d semaphore -U semaphore"]
+      start_period: 15s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    volumes:
+      - ctf-semaphore_postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: semaphore
+      POSTGRES_USER: semaphore
+      POSTGRES_PASSWORD: ${SEMAPHORE_POSTGRES_PASSWORD:?Please set SEMAPHORE_POSTGRES_PASSWORD in your .env file}
+    networks:
+      - ctf-internal
+
+  # ─── Ansible Semaphore — Playbook Execution UI ─────────────────────────────
+  semaphore:
+    image: semaphoreui/semaphore:latest
+    container_name: ctf-semaphore
+    restart: unless-stopped
+    depends_on:
+      semaphore-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    environment:
+      SEMAPHORE_DB_DIALECT: postgres
+      SEMAPHORE_DB_HOST: ctf-semaphore-postgres
+      SEMAPHORE_DB_PORT: 5432
+      SEMAPHORE_DB_NAME: semaphore
+      SEMAPHORE_DB_USER: semaphore
+      SEMAPHORE_DB_PASS: ${SEMAPHORE_POSTGRES_PASSWORD:?Please set SEMAPHORE_POSTGRES_PASSWORD in your .env file}
+      SEMAPHORE_ADMIN: ${SEMAPHORE_ADMIN:-admin}
+      SEMAPHORE_ADMIN_PASSWORD: ${SEMAPHORE_ADMIN_PASSWORD:?Please set SEMAPHORE_ADMIN_PASSWORD in your .env file}
+      SEMAPHORE_ADMIN_NAME: ${SEMAPHORE_ADMIN_NAME:-Admin}
+      SEMAPHORE_ADMIN_EMAIL: ${SEMAPHORE_ADMIN_EMAIL:-admin@example.com}
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${SEMAPHORE_ACCESS_KEY_ENCRYPTION:?Please set SEMAPHORE_ACCESS_KEY_ENCRYPTION in your .env file}
+    volumes:
+      - ctf-semaphore_data:/var/lib/semaphore
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-semaphore.rule=Host(`semaphore.${DOMAIN}`)"
+      - "traefik.http.routers.ctf-semaphore.entrypoints=websecure"
+      - "traefik.http.routers.ctf-semaphore.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ctf-semaphore.loadbalancer.server.port=3000"
+    networks:
+      - ctf-proxy
+      - ctf-internal
+
+volumes:
+  ctf-letsencrypt:
+  ctf-dockhand_data:
+  ctf-api_data:
+  ctf-registry_data:
+  ctf-caldera_data:
+  ctf-semaphore_postgres_data:
+  ctf-semaphore_data:
+
+networks:
+  ctf-proxy:
+    name: ctf-proxy
+  ctf-internal:
+    internal: true

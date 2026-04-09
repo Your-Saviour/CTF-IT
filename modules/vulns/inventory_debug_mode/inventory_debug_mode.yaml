@@ -18,3 +18,16 @@ hints:
   - "Examine the systemd service file for environment variables"
   - "Remove the FLASK_DEBUG setting from /etc/systemd/system/inventory.service and restart the service"
 suggested_fix: "sed -i '/FLASK_DEBUG=1/d' /etc/systemd/system/inventory.service && systemctl daemon-reload && systemctl restart inventory"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1190
+    name: "Exploit Public-Facing Application"
+  recon:
+    description: "Check if Flask debug mode is enabled exposing Werkzeug console"
+    command: |
+      curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/console | grep -q '200' && echo "VULNERABLE: Werkzeug debug console exposed" || echo "SECURE: debug console not accessible"
+  exploit:
+    description: "Access Werkzeug interactive debugger for RCE"
+    command: |
+      curl -s http://localhost:5001/console | head -20

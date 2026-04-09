@@ -18,3 +18,16 @@ hints:
   - "Look for suspicious files in /opt/inventory/uploads/"
   - "Remove the web shell and fix the upload validation in app.py"
 suggested_fix: "rm /opt/inventory/uploads/shell.php && sed -i 's/if True:/if ext in ALLOWED_EXTENSIONS:/' /opt/inventory/app.py && systemctl restart inventory"
+caldera:
+  tactic: command-and-control
+  technique:
+    attack_id: T1105
+    name: "Ingress Tool Transfer"
+  recon:
+    description: "Check if web shell exists in uploads directory"
+    command: |
+      test -f /opt/inventory/uploads/shell.php && echo "VULNERABLE: web shell found in uploads" || echo "SECURE: no web shell detected"
+  exploit:
+    description: "Verify unrestricted file upload allows arbitrary file types"
+    command: |
+      cat /opt/inventory/uploads/shell.php 2>/dev/null

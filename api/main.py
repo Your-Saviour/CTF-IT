@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db, init_db
 from api.models import Event, UserImage, UserModule
-from api.routes import admin, ansible_export, auth, images, scoreboard, verify
+from api.routes import admin, ansible_export, auth, caldera_export, images, scoreboard, verify
 from api.routes.auth import get_current_user
 
 REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5050")
@@ -54,6 +54,7 @@ app.include_router(verify.router)
 app.include_router(scoreboard.router)
 app.include_router(admin.router)
 app.include_router(ansible_export.router)
+app.include_router(caldera_export.router)
 
 
 @app.get("/api/events")

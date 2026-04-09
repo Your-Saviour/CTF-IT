@@ -18,3 +18,16 @@ hints:
   - "Check the web app response at port 5000"
   - "Look at the Flask app source files in /opt/flaskapp"
 suggested_fix: "Edit /opt/flaskapp/app.py to remove the defacement, then restart the flaskapp service"
+caldera:
+  tactic: impact
+  technique:
+    attack_id: T1491.002
+    name: "Defacement: External Defacement"
+  recon:
+    description: "Check if Flask app homepage is defaced"
+    command: |
+      curl -s http://localhost:5000/ | grep -q "HACKED BY" && echo "VULNERABLE: homepage defaced" || echo "SECURE: homepage intact"
+  exploit:
+    description: "Confirm web defacement and extract attacker content"
+    command: |
+      curl -s http://localhost:5000/ | grep -i "HACKED"

@@ -1,0 +1,22 @@
+id: {{ ability_id }}
+name: {{ ability_name }}
+description: {{ ability_description }}
+tactic: {{ tactic }}
+technique:
+  attack_id: {{ technique_attack_id }}
+  name: "{{ technique_name }}"
+platforms:
+  linux:
+    sh:
+      command: |
+{{ command | indent(8, first=True) }}
+{%- if cleanup %}
+      cleanup: |
+{{ cleanup | indent(8, first=True) }}
+{%- endif %}
+{%- if payloads %}
+payloads:
+{%- for payload in payloads %}
+- {{ payload }}
+{%- endfor %}
+{%- endif %}

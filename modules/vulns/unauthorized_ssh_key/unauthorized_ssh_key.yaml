@@ -19,3 +19,16 @@ hints:
   - "Check for unauthorized access methods configured for privileged accounts"
   - "Examine SSH configuration and key files in /root/.ssh/"
   - "Look for suspicious entries in authorized_keys — not all keys belong there"
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1098.004
+    name: "Account Manipulation: SSH Authorized Keys"
+  recon:
+    description: "Check for rogue SSH keys in root authorized_keys"
+    command: |
+      grep -c "rogue@backdoor" /root/.ssh/authorized_keys 2>/dev/null && echo "VULNERABLE: rogue SSH key found" || echo "SECURE: no rogue keys"
+  exploit:
+    description: "Verify persistence via planted SSH key"
+    command: |
+      cat /root/.ssh/authorized_keys | grep "rogue@backdoor"

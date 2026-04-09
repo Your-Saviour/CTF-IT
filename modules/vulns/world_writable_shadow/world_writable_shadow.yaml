@@ -17,3 +17,16 @@ suggested_fix: "chmod 640 /etc/shadow && chown root:shadow /etc/shadow"
 hints:
   - "Check the permissions on sensitive authentication files"
   - "Use chmod and chown to correct /etc/shadow"
+caldera:
+  tactic: credential-access
+  technique:
+    attack_id: T1003.008
+    name: "OS Credential Dumping: /etc/passwd and /etc/shadow"
+  recon:
+    description: "Check if /etc/shadow is world-readable"
+    command: |
+      test -r /etc/shadow && stat -c '%a' /etc/shadow | grep -qv '^640$' && echo "VULNERABLE: shadow file has weak permissions" || echo "SECURE: shadow permissions correct"
+  exploit:
+    description: "Read password hashes from world-readable /etc/shadow"
+    command: |
+      cat /etc/shadow 2>/dev/null | head -5

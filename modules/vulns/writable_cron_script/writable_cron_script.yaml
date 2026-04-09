@@ -18,3 +18,16 @@ hints:
   - "Examine scheduled tasks and the scripts they execute"
   - "Check crontab entries with: crontab -l && ls -la /etc/cron.*"
   - "Look for scripts with overly permissive write access"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1053.003
+    name: "Scheduled Task/Job: Cron"
+  recon:
+    description: "Check for world-writable cron scripts"
+    command: |
+      test -w /opt/maintenance.sh && echo "VULNERABLE: cron script is world-writable" || echo "SECURE: cron script has correct permissions"
+  exploit:
+    description: "Inject command into world-writable cron script"
+    command: |
+      ls -la /opt/maintenance.sh && stat -c '%a' /opt/maintenance.sh
