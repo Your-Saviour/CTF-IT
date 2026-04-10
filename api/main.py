@@ -46,6 +46,14 @@ async def lifespan(app: FastAPI):
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
             db.commit()
 
+        # Migrate events table: add Semaphore project columns (idempotent)
+        if inspector.has_table("events"):
+            existing = {col["name"] for col in inspector.get_columns("events")}
+            for col, typ in {"semaphore_project_id": "INTEGER", "semaphore_key_id": "INTEGER"}.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))
+            db.commit()
+
         # Create default event if none exists
         if not db.query(Event).first():
             quota = os.environ.get(

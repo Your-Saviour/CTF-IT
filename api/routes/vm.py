@@ -534,21 +534,31 @@ def _run_provision(vm_id: int) -> None:
         _update_provision_step(db, vm, "configuring_semaphore")
 
         private_key, _ = get_or_create_platform_keypair(db)
+        event = vm.event
 
         with SemaphoreClient() as client:
             client.login()
 
-            project_name = f"CTF VM {vm.hostname or vm_id}"
-            project_id = client.create_project(project_name)
+            # Get-or-create the event-level Semaphore project and SSH key.
+            # These are shared across all VMs in the same event.
+            if event.semaphore_project_id:
+                project_id = event.semaphore_project_id
+                key_id = event.semaphore_key_id
+            else:
+                project_id = client.create_project(f"CTF Event {event.id}: {event.name}")
+                key_id = client.create_key(
+                    project_id,
+                    name="platform-key",
+                    private_key_pem=private_key,
+                )
+                event.semaphore_project_id = project_id
+                event.semaphore_key_id = key_id
+                db.commit()
 
-            key_id = client.create_key(
-                project_id,
-                name="platform-key",
-                private_key_pem=private_key,
-            )
+            # Per-VM: inventory (target host) + repo (this VM's playbook dir) + template
             inventory_id = client.create_inventory(
                 project_id,
-                name="vm-target",
+                name=f"vm-{vm_id}",
                 ip=vm.ip_address,
                 ssh_user=vm.ssh_user or "root",
                 ssh_port=vm.ssh_port or 22,
@@ -556,13 +566,13 @@ def _run_provision(vm_id: int) -> None:
             )
             repo_id = client.create_repository(
                 project_id,
-                name="playbook",
+                name=f"playbook-vm-{vm_id}",
                 local_path=str(playbook_dir),
                 key_id=key_id,
             )
             template_id = client.create_template(
                 project_id,
-                name="provision",
+                name=f"provision-vm-{vm_id}",
                 playbook="playbook.yml",
                 inventory_id=inventory_id,
                 repository_id=repo_id,

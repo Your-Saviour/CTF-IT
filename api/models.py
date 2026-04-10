@@ -67,6 +67,10 @@ class Event(Base):
     time_limit_minutes: Mapped[int] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    # Semaphore project created once per event, reused for all VM provisions
+    semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    semaphore_key_id: Mapped[int] = mapped_column(Integer, nullable=True)
+
     users: Mapped[list["User"]] = relationship(back_populates="event")
     teams: Mapped[list["Team"]] = relationship(back_populates="event")
     vms: Mapped[list["VM"]] = relationship(back_populates="event")
