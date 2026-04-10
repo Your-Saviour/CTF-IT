@@ -452,6 +452,7 @@ function renderModule(m) {
     if (m.steps && m.steps.length) {
         stepsEl.innerHTML = m.steps.map(function(step, idx) {
             var typeClass = 'step-type-' + esc(step.type);
+            var filename = step.type === 'run' ? step.script : step.src;
             var detail = '';
             if (step.type === 'run') {
                 detail = '<span class="step-detail">' + esc(step.script) + '</span>';
@@ -460,15 +461,52 @@ function renderModule(m) {
                     '<span class="step-dest">&#8594; ' + esc(step.dest) + (step.mode ? ' (mode: ' + esc(step.mode) + ')' : '') + '</span>' +
                 '</span>';
             }
-            return '<div class="step-item">' +
-                '<span class="step-num">' + (idx + 1) + '.</span>' +
-                '<span class="step-type ' + typeClass + '">' + esc(step.type) + '</span>' +
-                detail +
+            return '<div class="step-item" style="flex-direction: column; align-items: flex-start; gap: 0;">' +
+                '<div style="display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.4rem 0;">' +
+                    '<span class="step-num">' + (idx + 1) + '.</span>' +
+                    '<span class="step-type ' + typeClass + '">' + esc(step.type) + '</span>' +
+                    detail +
+                    '<button class="copy-btn" style="margin-left: auto; flex-shrink: 0;" onclick="toggleStepFile(' + idx + ', ' + JSON.stringify(filename) + ')">View</button>' +
+                '</div>' +
+                '<div id="step-file-' + idx + '" style="display: none; width: 100%; padding-bottom: 0.5rem;">' +
+                    '<div class="code-block" id="step-file-content-' + idx + '" style="max-height: 400px; overflow-y: auto; color: var(--text-primary); white-space: pre;">Loading...</div>' +
+                '</div>' +
             '</div>';
         }).join('');
     } else {
         stepsEl.innerHTML = '<span class="empty-list">No build steps defined.</span>';
     }
+}
+
+function toggleStepFile(idx, filename) {
+    var wrap = document.getElementById('step-file-' + idx);
+    var contentEl = document.getElementById('step-file-content-' + idx);
+    var btn = wrap.previousElementSibling.querySelector('button');
+
+    if (wrap.style.display !== 'none') {
+        wrap.style.display = 'none';
+        btn.textContent = 'View';
+        return;
+    }
+
+    wrap.style.display = 'block';
+    btn.textContent = 'Hide';
+
+    if (contentEl.dataset.loaded) return;
+
+    fetch('/admin/modules/' + encodeURIComponent(MODULE_ID) + '/file?filename=' + encodeURIComponent(filename))
+        .then(function(r) {
+            if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error); }); }
+            return r.json();
+        })
+        .then(function(data) {
+            contentEl.textContent = data.content;
+            contentEl.dataset.loaded = '1';
+        })
+        .catch(function(e) {
+            contentEl.textContent = 'Error loading file: ' + e.message;
+            contentEl.style.color = 'var(--red)';
+        });
 }
 
 function toggleHint(idx) {

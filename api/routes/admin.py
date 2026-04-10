@@ -184,6 +184,31 @@ async def toggle_module_disabled(module_id: str, request: Request, db: Session =
     return {"id": module_id, "disabled": disabled}
 
 
+@router.get("/modules/{module_id}/file")
+async def get_module_file(module_id: str, filename: str, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    from pathlib import Path
+
+    modules_dir = Path(__file__).resolve().parent.parent.parent / "modules"
+    yaml_matches = list(modules_dir.rglob(f"{module_id}.yaml"))
+    if not yaml_matches:
+        return JSONResponse({"error": "module not found"}, status_code=404)
+
+    source_dir = yaml_matches[0].parent
+    # Prevent path traversal — only allow files within the module's own directory
+    file_path = (source_dir / filename).resolve()
+    if not str(file_path).startswith(str(source_dir.resolve())):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if not file_path.exists() or not file_path.is_file():
+        return JSONResponse({"error": "file not found"}, status_code=404)
+
+    return {"filename": filename, "content": file_path.read_text(errors="replace")}
+
+
 @router.get("/registry")
 async def list_registry_images(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
