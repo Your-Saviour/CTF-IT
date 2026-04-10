@@ -184,6 +184,7 @@ async def admin_page(request: Request, db: Session = Depends(get_db)):
 
     return templates.TemplateResponse(request, "admin.html", {
         "user": user,
+        "domain": os.environ.get("DOMAIN"),
     })
 
 

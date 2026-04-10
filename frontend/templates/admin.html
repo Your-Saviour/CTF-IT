@@ -200,6 +200,7 @@
 }
 #ef-structured-editor, #ef-json-editor { display: none; }
 #ef-structured-editor.active, #ef-json-editor.active { display: block; }
+.service-link:hover { border-color: var(--cyan) !important; box-shadow: 0 0 8px rgba(0, 229, 255, 0.2); }
 {% endblock %}
 
 {% block content %}
@@ -425,6 +426,30 @@
         </tbody>
     </table>
 </div>
+
+<!-- Service Links -->
+{% if domain %}
+<div class="card">
+    <h3>Service Links</h3>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <a href="https://caldera.{{ domain }}" target="_blank" rel="noopener noreferrer" class="service-link"
+           style="display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; transition: all 0.25s; min-width: 160px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Caldera</span>
+            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Adversary Emulation</span>
+        </a>
+        <a href="https://semaphore.{{ domain }}" target="_blank" rel="noopener noreferrer" class="service-link"
+           style="display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; transition: all 0.25s; min-width: 160px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Semaphore</span>
+            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Playbook Execution</span>
+        </a>
+        <a href="https://dockhand.{{ domain }}" target="_blank" rel="noopener noreferrer" class="service-link"
+           style="display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; transition: all 0.25s; min-width: 160px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Dockhand</span>
+            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Container Management</span>
+        </a>
+    </div>
+</div>
+{% endif %}
 
 <!-- Modules -->
 <div class="card">
@@ -956,7 +981,7 @@ fetch('/admin/users')
             '<tr>' +
                 '<td>' + esc(u.username) + (u.is_admin ? ' <span style="color: var(--cyan); font-size: 0.75rem;">(admin)</span>' : '') + '</td>' +
                 '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + (u.event_name ? esc(u.event_name) : '<span style="color: var(--text-muted);">—</span>') + '</td>' +
-                '<td><span class="status-' + u.build_status + '" style="font-weight: 600; text-transform: uppercase;">' + u.build_status + '</span></td>' +
+                '<td><span class="status-' + esc(u.build_status) + '" style="font-weight: 600; text-transform: uppercase;">' + esc(u.build_status) + '</span></td>' +
                 '<td>' + u.total_points + '</td>' +
                 '<td><button class="btn btn-sm btn-danger" onclick="rebuild(' + u.id + ')">Rebuild</button></td>' +
             '</tr>'
@@ -980,7 +1005,7 @@ fetch('/admin/registry')
         var body = document.getElementById('registry-body');
         var countEl = document.getElementById('registry-count');
         if (data.error) {
-            body.innerHTML = '<tr><td colspan="3" style="color: var(--red);">' + data.error + '</td></tr>';
+            body.innerHTML = '<tr><td colspan="3" style="color: var(--red);">' + esc(data.error) + '</td></tr>';
             countEl.textContent = 'Registry unavailable';
             return;
         }
@@ -991,9 +1016,9 @@ fetch('/admin/registry')
         }
         body.innerHTML = data.map(img =>
             '<tr>' +
-                '<td><strong>' + img.repository + '</strong></td>' +
-                '<td>' + img.tag + '</td>' +
-                '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + (img.digest || '\u2014') + '</td>' +
+                '<td><strong>' + esc(img.repository) + '</strong></td>' +
+                '<td>' + esc(img.tag) + '</td>' +
+                '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + (img.digest ? esc(img.digest) : '\u2014') + '</td>' +
             '</tr>'
         ).join('');
     })
@@ -1024,12 +1049,12 @@ fetch('/admin/modules')
         var body = document.getElementById('modules-body');
         body.innerHTML = data.map(m =>
             '<tr>' +
-                '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + m.id + '</td>' +
-                '<td><strong>' + m.name + '</strong></td>' +
-                '<td>' + m.type + '</td>' +
-                '<td><span class="badge badge-' + m.difficulty + '">' + m.difficulty + '</span></td>' +
+                '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(m.id) + '</td>' +
+                '<td><strong>' + esc(m.name) + '</strong></td>' +
+                '<td>' + esc(m.type) + '</td>' +
+                '<td><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
                 '<td>' + m.points + '</td>' +
-                '<td>' + m.category + '</td>' +
+                '<td>' + esc(m.category) + '</td>' +
             '</tr>'
         ).join('');
     });
