@@ -91,6 +91,9 @@ def prepare_build_context(
         if v.get("type") == "file_absent":
             check_paths.append(v["path"])
 
+    # Write flag file — using COPY avoids exposing the value in docker history (unlike ARG)
+    (context_dir / "flag.txt").write_text(flag)
+
     # Write opaque state file (no module info)
     state = generate_state_file(user_id, hash_paths=hash_paths, check_paths=check_paths)
     (context_dir / "state.json").write_text(json.dumps(state, indent=2))

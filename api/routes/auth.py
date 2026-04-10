@@ -14,7 +14,9 @@ from builder.main import build_image_for_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is required")
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
 

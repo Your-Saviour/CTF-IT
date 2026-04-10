@@ -38,7 +38,7 @@ def _extract_build_state(client, image_tag: str, platform: str = None) -> dict:
 
 
 def build_image_for_user(user_id: str, quota: dict) -> dict:
-    secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+    secret_key = os.environ["SECRET_KEY"]
 
     library = load_all_modules()
     selected = select_modules(quota, library)
@@ -53,7 +53,6 @@ def build_image_for_user(user_id: str, quota: dict) -> dict:
         build_kwargs = dict(
             path=str(context_dir),
             tag=image_tag,
-            buildargs={"FLAG": flag},
             rm=True,
         )
         if platform:

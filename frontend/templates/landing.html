@@ -224,6 +224,13 @@ function toggleMode(e) {
     }
 }
 
+function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
 // Load open events for registration
 fetch('/api/events')
     .then(function(r) { return r.json(); })
@@ -236,7 +243,7 @@ fetch('/api/events')
             if (!isLogin) document.getElementById('submit-btn').disabled = true;
         } else {
             sel.innerHTML = data.map(function(e) {
-                return '<option value="' + e.id + '">' + e.name + '</option>';
+                return '<option value="' + e.id + '">' + esc(e.name) + '</option>';
             }).join('');
             // Show description for first event
             if (data[0].description) {

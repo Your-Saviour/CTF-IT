@@ -13,8 +13,8 @@ RUN chmod +x /tmp/scripts/{{ op.script }} && /tmp/scripts/{{ op.script }} && rm 
 {% endif -%}
 {% endfor %}
 {% endif %}
-ARG FLAG
-RUN echo "$FLAG" > /root/flag.txt && chmod 400 /root/flag.txt
+COPY flag.txt /root/flag.txt
+RUN chmod 400 /root/flag.txt
 
 COPY state.json /opt/ctf/state.json
 COPY audit.py /opt/ctf/audit.py
