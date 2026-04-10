@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db, init_db
 from api.models import Event, UserImage, UserModule
-from api.routes import admin, ansible_export, auth, caldera_export, caldera_setup, images, scoreboard, verify
+from api.routes import admin, ansible_export, auth, caldera_export, caldera_setup, images, scoreboard, verify, vm
 from api.routes.auth import get_current_user
 
 REGISTRY_HOST = os.environ.get("REGISTRY_HOST", "localhost:5050")
@@ -56,6 +56,7 @@ app.include_router(admin.router)
 app.include_router(ansible_export.router)
 app.include_router(caldera_export.router)
 app.include_router(caldera_setup.router)
+app.include_router(vm.router)
 
 
 @app.get("/api/events")
@@ -156,4 +157,16 @@ async def admin_page(request: Request, db: Session = Depends(get_db)):
 
     return templates.TemplateResponse(request, "admin.html", {
         "user": user,
+    })
+
+
+@app.get("/admin/vm/{vm_id}", response_class=HTMLResponse)
+async def vm_detail_page(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+
+    return templates.TemplateResponse(request, "vm_detail.html", {
+        "user": user,
+        "vm_id": vm_id,
     })

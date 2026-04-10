@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+{% block title %}VM Detail - CTF Platform{% endblock %}
+{% block extra_style %}
+.vm-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+}
+@media (max-width: 720px) {
+    .vm-grid { grid-template-columns: 1fr; }
+}
+.vm-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+.vm-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+.vm-back {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+.vm-back:hover {
+    color: var(--cyan);
+    border-color: var(--cyan);
+}
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 0.85rem;
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-label {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    min-width: 110px;
+}
+.detail-value { color: var(--text-primary); text-align: right; }
+.progress-wrap {
+    margin-bottom: 1rem;
+}
+.progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+}
+.vm-status-registered { color: var(--text-secondary); font-weight: 700; text-transform: uppercase; }
+.vm-status-active { color: var(--green); font-weight: 700; text-transform: uppercase; }
+.vm-status-stopped { color: var(--red); font-weight: 700; text-transform: uppercase; }
+.vm-status-failed { color: var(--red); font-weight: 700; text-transform: uppercase; }
+.module-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.add-module-form {
+    display: none;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.add-module-form.active { display: flex; }
+.add-module-form select {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    min-width: 240px;
+}
+.add-module-form select:focus {
+    outline: none;
+    border-color: var(--cyan);
+}
+.inline-edit { display: flex; gap: 0.5rem; align-items: center; }
+.inline-edit select, .inline-edit textarea {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+}
+.inline-edit textarea { width: 100%; resize: vertical; }
+.card h3 { margin-bottom: 1rem; }
+{% endblock %}
+
+{% block content %}
+<div class="vm-header">
+    <a href="/admin" class="vm-back">&#8592; Admin</a>
+    <h1 class="vm-title" id="vm-hostname">Loading...</h1>
+    <span id="vm-status-badge"></span>
+</div>
+
+<div class="vm-grid">
+    <!-- Connection Info -->
+    <div class="card">
+        <h3>Connection Info</h3>
+        <div id="connection-info">
+            <div class="detail-row">
+                <span class="detail-label">Hostname</span>
+                <span class="detail-value" id="ci-hostname">—</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">IP Address</span>
+                <span class="detail-value" id="ci-ip">—</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">OS</span>
+                <span class="detail-value" id="ci-os">—</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">SSH Port</span>
+                <span class="detail-value" id="ci-port">—</span>
+            </div>
+        </div>
+        <div style="margin-top: 0.75rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">SSH Command</div>
+            <div class="copy-box" id="ssh-command" onclick="copySSH()" title="Click to copy">—</div>
+        </div>
+        <div style="margin-top: 0.75rem; display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-muted);">
+            <span>Created: <span id="ci-created">—</span></span>
+            <span>Updated: <span id="ci-updated">—</span></span>
+        </div>
+    </div>
+
+    <!-- Assignment -->
+    <div class="card">
+        <h3>Assignment</h3>
+        <div class="detail-row">
+            <span class="detail-label">Event</span>
+            <span class="detail-value" id="as-event">—</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Team</span>
+            <span class="detail-value" id="as-team">—</span>
+        </div>
+        <div class="detail-row" style="align-items: flex-start; padding-top: 0.75rem;">
+            <span class="detail-label">Status</span>
+            <div class="inline-edit">
+                <select id="as-status-select" onchange="updateStatus()">
+                    <option value="registered">registered</option>
+                    <option value="active">active</option>
+                    <option value="stopped">stopped</option>
+                    <option value="failed">failed</option>
+                </select>
+            </div>
+        </div>
+        <div style="margin-top: 0.75rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">Notes</div>
+            <div class="inline-edit" style="flex-direction: column; gap: 0.35rem;">
+                <textarea id="as-notes" rows="3" placeholder="Add notes about this VM..."></textarea>
+                <button class="btn btn-sm" onclick="saveNotes()">Save Notes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modules -->
+<div class="card" style="margin-bottom: 1.25rem;">
+    <h3>Assigned Modules</h3>
+    <div class="progress-wrap" id="modules-progress" style="display:none;">
+        <div class="progress-label">
+            <span>Completion</span>
+            <span id="progress-text">0 / 0</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 0%;"></div></div>
+    </div>
+    <div class="module-actions">
+        <button class="btn btn-primary btn-sm" onclick="assignModules()">Auto-assign from Quota</button>
+        <button class="btn btn-sm" onclick="toggleAddModule()">+ Add Module</button>
+        <div class="add-module-form" id="add-module-form">
+            <select id="add-module-select">
+                <option value="">— select module —</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="addModule()">Add</button>
+            <button class="btn-outline" onclick="toggleAddModule()" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;">Cancel</button>
+        </div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Difficulty</th>
+                <th>Points</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="modules-body">
+            <tr><td colspan="7" style="color: var(--text-secondary);">No modules assigned.</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Actions -->
+<div class="card">
+    <h3>Actions</h3>
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="exportAnsible()">Export Ansible Playbook</button>
+        <button class="btn btn-danger" onclick="deleteVM()">Delete VM</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+var VM_ID = {{ vm_id }};
+var vmData = null;
+var allModules = [];
+
+function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function fmtDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString();
+}
+
+function loadVM() {
+    fetch('/admin/vms/' + VM_ID)
+        .then(function(r) {
+            if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error); }); }
+            return r.json();
+        })
+        .then(function(data) {
+            vmData = data;
+            renderVM(data);
+        })
+        .catch(function(e) {
+            document.getElementById('vm-hostname').textContent = 'Error: ' + e.message;
+        });
+}
+
+function renderVM(data) {
+    // Header
+    document.getElementById('vm-hostname').textContent = data.hostname || 'VM #' + data.id;
+    document.title = (data.hostname || 'VM #' + data.id) + ' — CTF Platform';
+
+    var statusClass = 'vm-status-' + (data.status || 'registered');
+    document.getElementById('vm-status-badge').innerHTML =
+        '<span class="' + statusClass + '">' + esc(data.status) + '</span>';
+
+    // Connection info
+    document.getElementById('ci-hostname').textContent = data.hostname || '—';
+    document.getElementById('ci-ip').textContent = data.ip_address || '—';
+    document.getElementById('ci-os').textContent = data.os || '—';
+    document.getElementById('ci-port').textContent = data.ssh_port || 22;
+    document.getElementById('ci-created').textContent = fmtDate(data.created_at);
+    document.getElementById('ci-updated').textContent = fmtDate(data.updated_at);
+
+    var sshCmd = data.ip_address
+        ? 'ssh ' + (data.ssh_user || 'root') + '@' + data.ip_address + (data.ssh_port && data.ssh_port !== 22 ? ' -p ' + data.ssh_port : '')
+        : '— no IP assigned —';
+    document.getElementById('ssh-command').textContent = sshCmd;
+
+    // Assignment
+    document.getElementById('as-event').textContent = data.event_name || '—';
+    document.getElementById('as-team').textContent = data.team_name || '—';
+    document.getElementById('as-status-select').value = data.status || 'registered';
+    document.getElementById('as-notes').value = data.notes || '';
+
+    // Modules
+    renderModules(data.modules || []);
+}
+
+function renderModules(modules) {
+    var body = document.getElementById('modules-body');
+    var progressWrap = document.getElementById('modules-progress');
+
+    if (!modules.length) {
+        body.innerHTML = '<tr><td colspan="7" style="color: var(--text-secondary);">No modules assigned. Click "Auto-assign from Quota" to get started.</td></tr>';
+        progressWrap.style.display = 'none';
+        return;
+    }
+
+    var completed = modules.filter(function(m) { return m.completed; }).length;
+    var total = modules.length;
+    var pct = total > 0 ? Math.round(completed / total * 100) : 0;
+
+    progressWrap.style.display = 'block';
+    document.getElementById('progress-text').textContent = completed + ' / ' + total;
+    document.getElementById('progress-fill').style.width = pct + '%';
+
+    body.innerHTML = modules.map(function(m) {
+        var completedBadge = m.completed
+            ? '<span style="color: var(--green); font-weight: 700;">&#10003; Solved</span>'
+            : '<span style="color: var(--text-muted);">Unsolved</span>';
+        return '<tr>' +
+            '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + esc(m.module_id) + '</td>' +
+            '<td><strong>' + esc(m.name) + '</strong></td>' +
+            '<td style="font-size: 0.85rem;">' + esc(m.module_type) + '</td>' +
+            '<td><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
+            '<td>' + m.points + '</td>' +
+            '<td>' + completedBadge + '</td>' +
+            '<td><button class="btn-outline danger" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;" onclick="removeModule(' + JSON.stringify(m.module_id) + ')">Remove</button></td>' +
+        '</tr>';
+    }).join('');
+}
+
+function copySSH() {
+    var text = document.getElementById('ssh-command').textContent;
+    if (text.startsWith('—')) return;
+    navigator.clipboard.writeText(text).then(function() {
+        showToast('SSH command copied');
+    });
+}
+
+function updateStatus() {
+    var status = document.getElementById('as-status-select').value;
+    fetch('/admin/vms/' + VM_ID, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: status})
+    }).then(function(r) {
+        if (r.ok) {
+            showToast('Status updated');
+            vmData.status = status;
+            var statusClass = 'vm-status-' + status;
+            document.getElementById('vm-status-badge').innerHTML =
+                '<span class="' + statusClass + '">' + esc(status) + '</span>';
+        } else {
+            r.json().then(function(d) { showToast('Error: ' + d.error); });
+        }
+    });
+}
+
+function saveNotes() {
+    var notes = document.getElementById('as-notes').value.trim() || null;
+    fetch('/admin/vms/' + VM_ID, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({notes: notes})
+    }).then(function(r) {
+        if (r.ok) { showToast('Notes saved'); }
+        else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+    });
+}
+
+function assignModules() {
+    if (!confirm('Auto-assign modules from the event quota? This will replace any existing module assignments.')) return;
+    fetch('/admin/vms/' + VM_ID + '/assign-modules', {method: 'POST'})
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok) {
+                showToast(res.data.count + ' modules assigned');
+                loadVM();
+            } else {
+                showToast('Error: ' + res.data.error);
+            }
+        });
+}
+
+function toggleAddModule() {
+    var form = document.getElementById('add-module-form');
+    form.classList.toggle('active');
+}
+
+function loadModuleOptions() {
+    fetch('/admin/modules')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            allModules = data;
+            var sel = document.getElementById('add-module-select');
+            sel.innerHTML = '<option value="">— select module —</option>' +
+                data.map(function(m) {
+                    return '<option value="' + esc(m.id) + '">' +
+                        esc(m.name) + ' (' + esc(m.type) + ', ' + esc(m.difficulty) + ')' +
+                    '</option>';
+                }).join('');
+        });
+}
+
+function addModule() {
+    var module_id = document.getElementById('add-module-select').value;
+    if (!module_id) { showToast('Select a module'); return; }
+    fetch('/admin/vms/' + VM_ID + '/add-module', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({module_id: module_id})
+    }).then(function(r) {
+        if (r.ok) {
+            showToast('Module added');
+            document.getElementById('add-module-form').classList.remove('active');
+            loadVM();
+        } else {
+            r.json().then(function(d) { showToast('Error: ' + d.error); });
+        }
+    });
+}
+
+function removeModule(module_id) {
+    if (!confirm('Remove module "' + module_id + '" from this VM?')) return;
+    fetch('/admin/vms/' + VM_ID + '/modules/' + encodeURIComponent(module_id), {method: 'DELETE'})
+        .then(function(r) {
+            if (r.ok) { showToast('Module removed'); loadVM(); }
+            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        });
+}
+
+function exportAnsible() {
+    showToast('Generating playbook...');
+    fetch('/admin/vms/' + VM_ID + '/ansible-export', {method: 'POST'})
+        .then(function(r) {
+            if (!r.ok) {
+                return r.json().then(function(d) { throw new Error(d.error); });
+            }
+            return r.blob().then(function(blob) {
+                var disposition = r.headers.get('Content-Disposition') || '';
+                var match = disposition.match(/filename="([^"]+)"/);
+                var filename = match ? match[1] : 'ansible_export.zip';
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('Playbook downloaded');
+            });
+        })
+        .catch(function(e) { showToast('Error: ' + e.message); });
+}
+
+function deleteVM() {
+    if (!confirm('Delete this VM? This cannot be undone.')) return;
+    fetch('/admin/vms/' + VM_ID, {method: 'DELETE'})
+        .then(function(r) {
+            if (r.ok) {
+                showToast('VM deleted');
+                setTimeout(function() { window.location.href = '/admin'; }, 1000);
+            } else {
+                r.json().then(function(d) { showToast('Error: ' + d.error); });
+            }
+        });
+}
+
+loadVM();
+loadModuleOptions();
+</script>
+{% endblock %}

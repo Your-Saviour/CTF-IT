@@ -301,6 +301,111 @@
     </table>
 </div>
 
+<!-- Teams & VMs -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin-bottom: 0;">Teams &amp; VMs</h3>
+        <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-sm btn-primary" onclick="showTeamForm()">+ New Team</button>
+            <button class="btn btn-sm btn-primary" onclick="showVMForm()">+ Register VM</button>
+        </div>
+    </div>
+
+    <!-- Inline Team Create Form -->
+    <div id="team-form-panel" style="display:none; margin-bottom: 1rem;">
+        <div style="background: var(--bg-deep); padding: 1rem; border-radius: 4px; border: 1px solid var(--border); display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
+                <label for="tf-name" style="font-size: 0.8rem;">Team Name</label>
+                <input type="text" id="tf-name" placeholder="e.g. Blue Team 1">
+            </div>
+            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
+                <label for="tf-event" style="font-size: 0.8rem;">Event</label>
+                <select id="tf-event" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></select>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-primary btn-sm" onclick="createTeam()">Create</button>
+                <button class="btn-outline" onclick="hideTeamForm()" style="padding: 0.35rem 0.75rem;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inline VM Register Form -->
+    <div id="vm-form-panel" style="display:none; margin-bottom: 1rem;">
+        <div style="background: var(--bg-deep); padding: 1rem; border-radius: 4px; border: 1px solid var(--border);">
+            <h4 style="margin-bottom: 0.75rem; color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">Register VM</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="vf-hostname" style="font-size: 0.8rem;">Hostname</label>
+                    <input type="text" id="vf-hostname" placeholder="e.g. target-01">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="vf-ip" style="font-size: 0.8rem;">IP Address</label>
+                    <input type="text" id="vf-ip" placeholder="e.g. 192.168.1.10">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="vf-os" style="font-size: 0.8rem;">OS</label>
+                    <input type="text" id="vf-os" value="Ubuntu 22.04">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="vf-team" style="font-size: 0.8rem;">Team</label>
+                    <select id="vf-team" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></select>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="vf-sshuser" style="font-size: 0.8rem;">SSH User</label>
+                    <input type="text" id="vf-sshuser" value="root">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="vf-sshport" style="font-size: 0.8rem;">SSH Port</label>
+                    <input type="number" id="vf-sshport" value="22" style="width: 100%;">
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom: 0.75rem;">
+                <label for="vf-notes" style="font-size: 0.8rem;">Notes</label>
+                <textarea id="vf-notes" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-primary btn-sm" onclick="createVM()">Register</button>
+                <button class="btn-outline" onclick="hideVMForm()" style="padding: 0.35rem 0.75rem;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teams sub-table -->
+    <h4 style="color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">Teams</h4>
+    <table style="margin-bottom: 1.5rem;">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Event</th>
+                <th>VMs</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="teams-body">
+            <tr><td colspan="4" style="color: var(--text-secondary);">Loading...</td></tr>
+        </tbody>
+    </table>
+
+    <!-- VMs table -->
+    <h4 style="color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">VMs</h4>
+    <table>
+        <thead>
+            <tr>
+                <th>Hostname</th>
+                <th>IP</th>
+                <th>Team</th>
+                <th>Event</th>
+                <th>Status</th>
+                <th>Modules</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="vms-body">
+            <tr><td colspan="7" style="color: var(--text-secondary);">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
 <!-- Registry -->
 <div class="card">
     <h3>Container Registry</h3>
@@ -682,6 +787,164 @@ function loadEvents() {
 }
 
 loadEvents();
+
+// ── Teams & VMs ──
+
+var teamsData = [];
+var eventsForSelect = [];
+
+function showTeamForm() {
+    // Populate event dropdown
+    var sel = document.getElementById('tf-event');
+    sel.innerHTML = eventsForSelect.map(function(e) {
+        return '<option value="' + e.id + '">' + esc(e.name) + '</option>';
+    }).join('');
+    document.getElementById('team-form-panel').style.display = 'block';
+}
+function hideTeamForm() { document.getElementById('team-form-panel').style.display = 'none'; }
+
+function showVMForm() {
+    // Populate team dropdown
+    var sel = document.getElementById('vf-team');
+    sel.innerHTML = teamsData.map(function(t) {
+        return '<option value="' + t.id + '">' + esc(t.name) + ' (' + esc(t.event_name || '') + ')</option>';
+    }).join('');
+    if (teamsData.length === 0) {
+        sel.innerHTML = '<option value="">— create a team first —</option>';
+    }
+    document.getElementById('vm-form-panel').style.display = 'block';
+}
+function hideVMForm() { document.getElementById('vm-form-panel').style.display = 'none'; }
+
+function loadTeams() {
+    fetch('/admin/teams')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            teamsData = data;
+            var body = document.getElementById('teams-body');
+            if (!data.length) {
+                body.innerHTML = '<tr><td colspan="4" style="color: var(--text-secondary);">No teams yet.</td></tr>';
+                return;
+            }
+            body.innerHTML = data.map(function(t) {
+                return '<tr>' +
+                    '<td><strong>' + esc(t.name) + '</strong></td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(t.event_name || '—') + '</td>' +
+                    '<td>' + t.vm_count + '</td>' +
+                    '<td><button class="btn btn-sm btn-danger" onclick="deleteTeam(' + t.id + ')">Delete</button></td>' +
+                '</tr>';
+            }).join('');
+        });
+}
+
+function createTeam() {
+    var name = document.getElementById('tf-name').value.trim();
+    var event_id = parseInt(document.getElementById('tf-event').value);
+    if (!name) { showToast('Team name is required'); return; }
+    if (!event_id) { showToast('Select an event'); return; }
+    fetch('/admin/teams', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, event_id: event_id})
+    }).then(function(r) {
+        if (r.ok) {
+            showToast('Team created');
+            hideTeamForm();
+            document.getElementById('tf-name').value = '';
+            loadTeams();
+        } else {
+            r.json().then(function(d) { showToast('Error: ' + d.error); });
+        }
+    });
+}
+
+function deleteTeam(id) {
+    if (!confirm('Delete this team?')) return;
+    fetch('/admin/teams/' + id, {method: 'DELETE'})
+        .then(function(r) {
+            if (r.ok) { showToast('Team deleted'); loadTeams(); loadVMs(); }
+            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        });
+}
+
+function loadVMs() {
+    fetch('/admin/vms')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var body = document.getElementById('vms-body');
+            if (!data.length) {
+                body.innerHTML = '<tr><td colspan="7" style="color: var(--text-secondary);">No VMs registered yet.</td></tr>';
+                return;
+            }
+            body.innerHTML = data.map(function(v) {
+                var progress = v.modules_total > 0
+                    ? v.modules_completed + '/' + v.modules_total
+                    : '<span style="color: var(--text-muted);">—</span>';
+                var statusClass = {registered: 'status-queued', active: 'status-ready', stopped: 'status-failed', failed: 'status-failed'}[v.status] || 'status-queued';
+                return '<tr>' +
+                    '<td><strong>' + esc(v.hostname || '—') + '</strong></td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(v.ip_address || '—') + '</td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(v.team_name || '—') + '</td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(v.event_name || '—') + '</td>' +
+                    '<td><span class="' + statusClass + '" style="font-weight: 600; text-transform: uppercase; font-size: 0.8rem;">' + esc(v.status) + '</span></td>' +
+                    '<td>' + progress + '</td>' +
+                    '<td style="display: flex; gap: 0.35rem;">' +
+                        '<a href="/admin/vm/' + v.id + '" class="btn btn-sm" style="text-decoration: none;">View</a>' +
+                        '<button class="btn btn-sm btn-danger" onclick="deleteVM(' + v.id + ')">Delete</button>' +
+                    '</td>' +
+                '</tr>';
+            }).join('');
+        });
+}
+
+function createVM() {
+    var team_id = parseInt(document.getElementById('vf-team').value);
+    if (!team_id) { showToast('Select a team'); return; }
+    var body = {
+        hostname: document.getElementById('vf-hostname').value.trim() || null,
+        ip_address: document.getElementById('vf-ip').value.trim() || null,
+        os: document.getElementById('vf-os').value.trim() || 'Ubuntu 22.04',
+        team_id: team_id,
+        ssh_user: document.getElementById('vf-sshuser').value.trim() || 'root',
+        ssh_port: parseInt(document.getElementById('vf-sshport').value) || 22,
+        notes: document.getElementById('vf-notes').value.trim() || null,
+    };
+    fetch('/admin/vms', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    }).then(function(r) {
+        if (r.ok) {
+            r.json().then(function(d) {
+                showToast('VM registered');
+                hideVMForm();
+                loadVMs();
+                // Navigate to detail page
+                window.location.href = '/admin/vm/' + d.id;
+            });
+        } else {
+            r.json().then(function(d) { showToast('Error: ' + d.error); });
+        }
+    });
+}
+
+function deleteVM(id) {
+    if (!confirm('Delete this VM? This will remove all its assigned modules.')) return;
+    fetch('/admin/vms/' + id, {method: 'DELETE'})
+        .then(function(r) {
+            if (r.ok) { showToast('VM deleted'); loadVMs(); }
+            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        });
+}
+
+// Load teams and VMs on page load; also capture events list for team form
+fetch('/admin/events')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        eventsForSelect = data;
+        loadTeams();
+        loadVMs();
+    });
 
 // ── Load Users ──
 

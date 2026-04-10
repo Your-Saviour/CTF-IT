@@ -45,7 +45,7 @@ class UserModule(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     module_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    module_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    module_type: Mapped[str] = mapped_column(String(32), nullable=False)
     difficulty: Mapped[str] = mapped_column(String(8), nullable=False)
     points: Mapped[int] = mapped_column(Integer, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -68,3 +68,53 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     users: Mapped[list["User"]] = relationship(back_populates="event")
+    teams: Mapped[list["Team"]] = relationship(back_populates="event")
+    vms: Mapped[list["VM"]] = relationship(back_populates="event")
+
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    event: Mapped["Event"] = relationship(back_populates="teams")
+    vms: Mapped[list["VM"]] = relationship(back_populates="team")
+
+
+class VM(Base):
+    __tablename__ = "vms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(256), nullable=True)
+    ip_address: Mapped[str] = mapped_column(String(64), nullable=True)
+    os: Mapped[str] = mapped_column(String(64), nullable=True, default="Ubuntu 22.04")
+    status: Mapped[str] = mapped_column(String(16), default="registered")
+    ssh_port: Mapped[int] = mapped_column(Integer, nullable=True, default=22)
+    ssh_user: Mapped[str] = mapped_column(String(64), nullable=True, default="root")
+    notes: Mapped[str] = mapped_column(Text, nullable=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    team: Mapped["Team"] = relationship(back_populates="vms")
+    event: Mapped["Event"] = relationship(back_populates="vms")
+    modules: Mapped[list["VMModule"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
+
+
+class VMModule(Base):
+    __tablename__ = "vm_modules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vm_id: Mapped[int] = mapped_column(ForeignKey("vms.id"), nullable=False)
+    module_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    module_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    difficulty: Mapped[str] = mapped_column(String(8), nullable=False)
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    vm: Mapped["VM"] = relationship(back_populates="modules")
