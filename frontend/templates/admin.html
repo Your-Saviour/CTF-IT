@@ -393,7 +393,17 @@
 
     <!-- VMs table -->
     <h4 style="color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">VMs</h4>
-    <table>
+    <div style="overflow-x: auto;">
+    <table style="table-layout: fixed; width: 100%;">
+        <colgroup>
+            <col style="width: auto;">
+            <col style="width: 130px;">
+            <col style="width: 100px;">
+            <col style="width: 130px;">
+            <col style="width: 90px;">
+            <col style="width: 75px;">
+            <col style="width: 120px;">
+        </colgroup>
         <thead>
             <tr>
                 <th>Hostname</th>
@@ -409,6 +419,7 @@
             <tr><td colspan="7" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+    </div>
 </div>
 
 <!-- Registry -->
@@ -981,16 +992,16 @@ function loadVMs() {
                     : '<span style="color: var(--text-muted);">—</span>';
                 var statusClass = {registered: 'status-queued', active: 'status-ready', stopped: 'status-failed', failed: 'status-failed'}[v.status] || 'status-queued';
                 return '<tr>' +
-                    '<td><strong>' + esc(v.hostname || '—') + '</strong></td>' +
-                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(v.ip_address || '—') + '</td>' +
-                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(v.team_name || '—') + '</td>' +
-                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(v.event_name || '—') + '</td>' +
-                    '<td><span class="' + statusClass + '" style="font-weight: 600; text-transform: uppercase; font-size: 0.8rem;">' + esc(v.status) + '</span></td>' +
-                    '<td>' + progress + '</td>' +
-                    '<td style="display: flex; gap: 0.35rem;">' +
-                        '<a href="/admin/vm/' + v.id + '" class="btn btn-sm" style="text-decoration: none;">View</a>' +
-                        '<button class="btn btn-sm btn-danger" onclick="deleteVM(' + v.id + ')">Delete</button>' +
-                    '</td>' +
+                    '<td style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><strong>' + esc(v.hostname || '—') + '</strong></td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem; white-space: nowrap; font-family: \'JetBrains Mono\', monospace;">' + esc(v.ip_address || '—') + '</td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + esc(v.team_name || '—') + '</td>' +
+                    '<td style="color: var(--text-secondary); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">' + esc(v.event_name || '—') + '</td>' +
+                    '<td style="white-space: nowrap;"><span class="' + statusClass + '" style="font-weight: 600; text-transform: uppercase; font-size: 0.8rem;">' + esc(v.status) + '</span></td>' +
+                    '<td style="white-space: nowrap;">' + progress + '</td>' +
+                    '<td><div style="display: flex; gap: 0.35rem;">' +
+                        '<a href="/admin/vm/' + v.id + '" class="btn btn-sm" style="text-decoration: none; white-space: nowrap;">View</a>' +
+                        '<button class="btn btn-sm btn-danger" onclick="deleteVM(' + v.id + ')" style="white-space: nowrap;">Delete</button>' +
+                    '</div></td>' +
                 '</tr>';
             }).join('');
         });
