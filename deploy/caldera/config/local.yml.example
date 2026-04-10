@@ -35,7 +35,7 @@ session_expiration_days: 7
 ability_refresh: 60
 client_max_size_mb: 1
 api_upload_max_size_mb: 100
-objects.planners.default: atomic
+objects.planners.default: batch
 
 # ─── Agent Contact Methods ───────────────────────────────────────────────────
 # Agent callback URL — agents use this to reach the C2 server.
@@ -66,15 +66,12 @@ app.contact.ftp.user: caldera_user
 # Core plugins for adversary emulation and agent management
 plugins:
   - access
-  - atomic
   - compass
   - debrief
   - fieldmanual
   - manx
   - response
   - sandcat
-  - stockpile
-  - training
 
 # ─── Misc ────────────────────────────────────────────────────────────────────
 exfil_dir: /tmp/caldera
