@@ -23,3 +23,7 @@ class SnapshotPayload(BaseModel):
     http_responses: dict = {}
     processes: list[str] = []
     shadow_hashes: dict
+    passwd_users: list[str] = []
+    cron_entries: list[str] = []
+    file_hashes: dict = {}
+    file_existence: dict = {}

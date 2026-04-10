@@ -7,6 +7,7 @@ for submission to the CTF platform.
 Usage (inside container):
     python3 /opt/ctf/audit.py
 """
+import hashlib
 import json
 import os
 import re
@@ -232,6 +233,75 @@ def collect_shadow_hashes():
     return hashes
 
 
+def collect_passwd_users():
+    """Collect usernames from /etc/passwd for user_not_exists verification."""
+    users = []
+    try:
+        with open("/etc/passwd") as f:
+            for line in f:
+                parts = line.strip().split(":")
+                if parts and parts[0]:
+                    users.append(parts[0])
+    except OSError:
+        pass
+    return users
+
+
+def collect_cron_entries():
+    """Collect all active (non-comment) cron entries for cron_not_present verification."""
+    entries = []
+
+    def _read_cron_file(path):
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        entries.append(line)
+        except OSError:
+            pass
+
+    _read_cron_file("/etc/crontab")
+    for cron_dir in ["/etc/cron.d", "/etc/cron.daily", "/etc/cron.hourly",
+                     "/etc/cron.weekly", "/etc/cron.monthly"]:
+        for fpath in _list_dir_files(cron_dir):
+            _read_cron_file(fpath)
+
+    for cmd in ["crontab -l 2>/dev/null", "crontab -u root -l 2>/dev/null"]:
+        output, _ = run(cmd)
+        for line in output.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                entries.append(line)
+
+    return entries
+
+
+def collect_file_existence(state: dict) -> dict:
+    """Check existence of files listed in state.json check_paths.
+
+    Used by file_absent verification to confirm payload files were removed.
+    """
+    paths = state.get("check_paths", [])
+    return {path: os.path.exists(path) for path in paths}
+
+
+def collect_file_hashes(state: dict) -> dict:
+    """Hash files listed in state.json hash_paths.
+
+    Used by file_hash_changed verification to detect payload modifications.
+    """
+    paths = state.get("hash_paths", [])
+    hashes = {}
+    for path in paths:
+        try:
+            with open(path, "rb") as f:
+                hashes[path] = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            hashes[path] = None
+    return hashes
+
+
 def read_flag():
     try:
         with open("/root/flag.txt") as f:
@@ -267,6 +337,10 @@ def main():
         "http_responses": collect_http_responses(ports),
         "processes": collect_processes(),
         "shadow_hashes": collect_shadow_hashes(),
+        "passwd_users": collect_passwd_users(),
+        "cron_entries": collect_cron_entries(),
+        "file_existence": collect_file_existence(state),
+        "file_hashes": collect_file_hashes(state),
     }
     print(json.dumps(snapshot))
 

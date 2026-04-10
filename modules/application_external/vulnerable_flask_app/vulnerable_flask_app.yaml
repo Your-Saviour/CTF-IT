@@ -1,7 +1,7 @@
 id: vulnerable_flask_app
 name: Vulnerable Flask Application
 description: A small Flask web app running as a systemd service on port 5000.
-type: application
+type: application_external
 difficulty: easy
 points: 0
 category: web

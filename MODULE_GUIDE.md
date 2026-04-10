@@ -1,10 +1,10 @@
 # Module Guide
 
-How to create new vulnerability, hardening, and application modules for CTF-IT.
+How to create new vulnerability, hardening, payload, and application modules for CTF-IT.
 
 ## Folder Structure
 
-Each module lives in its own folder under `modules/vulns/`, `modules/hardening/`, or `modules/application/`:
+Each module lives in its own folder under the appropriate type directory:
 
 ```
 modules/
@@ -13,15 +13,23 @@ modules/
     <module_id>.sh          # Optional: shell script to introduce the vulnerability
   hardening/<module_id>/
     <module_id>.yaml        # Required: module definition
-  application/<module_id>/
+  payloads/<module_id>/
+    <module_id>.yaml        # Required: module definition
+    <module_id>.sh          # Script to plant the payload at build time
+  application_external/<module_id>/
     <module_id>.yaml        # Required: module definition
     *.sh                    # Shell scripts referenced by steps or script field
     *.py, *.conf, etc.      # Files referenced by copy steps
+  application_internal/<module_id>/
+    <module_id>.yaml        # Required: module definition
+    *.sh, *.conf, etc.      # Supporting files
 ```
 
 - **Vulnerability** modules include a shell script that introduces a misconfiguration during the Docker build. The user must fix it.
 - **Hardening** modules usually don't have a script — the user is expected to implement the fix from scratch.
-- **Application** modules install infrastructure (web apps, services, CLI tools) that vulnerability modules can target via `requires`. They typically award 0 points.
+- **Payload** modules plant malicious artifacts (backdoor users, cron jobs, planted files, etc.) that the user must find and remove for points. They are scored like vulnerabilities.
+- **Application (external)** modules install externally-accessible infrastructure (web apps, services) that vulnerability modules can target via `requires`. They award 0 points.
+- **Application (internal)** modules install internal/system-level services (e.g., Docker daemon, VS Code Server) that vulnerability or payload modules can target. They award 0 points.
 
 ## YAML Reference
 
@@ -32,7 +40,7 @@ modules/
 | `id` | string | Unique snake_case identifier. Must match the folder name. |
 | `name` | string | Human-readable display name. |
 | `description` | string | What the issue is and why it matters. Shown to users as their task. |
-| `type` | string | `vulnerability`, `hardening`, or `application` |
+| `type` | string | `vulnerability`, `hardening`, `payload`, `application_external`, or `application_internal` |
 | `difficulty` | string | `easy`, `medium`, or `hard` |
 | `points` | integer | Points awarded on completion. |
 | `category` | string | Grouping category (e.g. `filesystem`, `services`, `network`, `authentication`). |
@@ -221,6 +229,52 @@ verification:
 
 The pattern is matched as a substring against the full command string from `ps aux`.
 
+### `file_absent`
+
+Checks that a file has been deleted from the container. Passes only when the file does not exist.
+
+```yaml
+verification:
+  type: file_absent
+  path: /opt/payloads/backdoor.sh
+```
+
+The audit script reports file existence for any path listed in `state.json`'s `check_paths`. The renderer automatically populates this from modules using `file_absent` verification.
+
+### `file_hash_changed`
+
+Checks that a file's content has been modified since the image was built. Useful for payloads that are files the user must overwrite or neutralize.
+
+```yaml
+verification:
+  type: file_hash_changed
+  path: /etc/malware.conf
+```
+
+At build time, the SHA-256 hash of the file is captured into `state.json`. At audit time, the current hash is compared against the build-time hash. Passes only if both hashes exist and differ.
+
+### `cron_not_present`
+
+Checks that a malicious cron entry has been removed. The `pattern` is matched as a substring against all active cron lines (from `/etc/crontab`, cron directories, and user crontabs).
+
+```yaml
+verification:
+  type: cron_not_present
+  pattern: "malicious_task.sh"
+```
+
+Passes when no active cron line contains the pattern.
+
+### `user_not_exists`
+
+Checks that a backdoor user account has been removed. Passes only when the user is absent from both `/etc/passwd` and `/etc/shadow`.
+
+```yaml
+verification:
+  type: user_not_exists
+  user: backdoor
+```
+
 ## Examples
 
 ### Vulnerability Module
@@ -296,10 +350,54 @@ hints:
 
 Hardening modules have no script — the base image is clean and the user must implement the hardening measure themselves.
 
-### Application Module (with steps)
+### Payload Module
+
+Payload modules plant malicious artifacts that the user must find and remove for points.
 
 ```
-modules/application/inventory_dashboard/
+modules/payloads/backdoor_user/
+  backdoor_user.yaml
+  backdoor_user.sh
+```
+
+**backdoor_user.yaml**:
+
+```yaml
+id: backdoor_user
+name: Backdoor User Account
+description: A hidden user account "support" was created with sudo access. Remove it.
+type: payload
+difficulty: easy
+points: 150
+category: persistence
+tags: [users, backdoor, privilege-escalation]
+conflicts: []
+requires: []
+script: backdoor_user.sh
+verification:
+  type: user_not_exists
+  user: support
+hints:
+  - "Check /etc/passwd for unexpected user accounts"
+  - "Use 'userdel' to remove the account, 'delgroup' to remove the group"
+suggested_fix: "userdel -r support"
+```
+
+**backdoor_user.sh**:
+
+```bash
+#!/bin/bash
+useradd -m -s /bin/bash support
+echo "support:support123" | chpasswd
+usermod -aG sudo support
+```
+
+### Application (External) Module
+
+External application modules install network-accessible services (web apps, APIs, etc.) that vulnerability modules can target via `requires`.
+
+```
+modules/application_external/inventory_dashboard/
   inventory_dashboard.yaml
   app.py
   init_db.py
@@ -314,7 +412,7 @@ modules/application/inventory_dashboard/
 id: inventory_dashboard
 name: Python Inventory Dashboard
 description: A Flask-based server inventory dashboard running as a systemd service on port 5001.
-type: application
+type: application_external
 difficulty: easy
 points: 0
 category: web
@@ -337,6 +435,10 @@ hints:
 
 Application modules install infrastructure that vulnerability modules target. They award 0 points and auto-complete when the service is running. Vulnerability modules use `requires: [inventory_dashboard]` to depend on them — the selector automatically includes required modules and ensures their steps run first during the Docker build.
 
+### Application (Internal) Module
+
+Internal application modules install system-level or developer tools (e.g., Docker daemon, VS Code Server) that can have interesting security vulnerabilities. Use `type: application_internal`. Same structure as external modules.
+
 ### Application Module (legacy script)
 
 Simple modules can still use the `script` field:
@@ -344,7 +446,7 @@ Simple modules can still use the `script` field:
 ```yaml
 id: vulnerable_flask_app
 name: Vulnerable Flask Application
-type: application
+type: application_external
 difficulty: easy
 points: 0
 category: web
@@ -363,11 +465,14 @@ The platform selects modules based on an event quota like:
 {
   "vulnerability": {"easy": 1, "medium": 1, "hard": 0},
   "hardening": {"easy": 1, "medium": 1, "hard": 0},
-  "application": {"easy": 1},
+  "payload": {"easy": 1, "medium": 0, "hard": 0},
+  "application_external": {"easy": 1},
   "categories": {"authentication": 2},
   "tags": {"privilege-escalation": 1}
 }
 ```
+
+Valid module type keys: `vulnerability`, `hardening`, `payload`, `application_external`, `application_internal`.
 
 The selector (`builder/selector.py`) runs three phases:
 1. **Type/difficulty** — pick modules matching each type/difficulty slot

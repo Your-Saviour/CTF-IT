@@ -91,6 +91,31 @@ def extract_and_check(
         )
         return current_hash != "" and original_hash != "" and current_hash != original_hash
 
+    if vtype == "file_absent":
+        path = verification["path"]
+        if snapshot.file_existence:
+            return snapshot.file_existence.get(path) is False
+        # Fallback for older audit.py: file not in either collector means absent
+        return path not in snapshot.file_permissions and path not in snapshot.file_contents
+
+    if vtype == "file_hash_changed":
+        path = verification["path"]
+        current_hash = snapshot.file_hashes.get(path)
+        original_hash = server_build_state.get("file_hashes", {}).get(path)
+        return (
+            current_hash is not None
+            and original_hash is not None
+            and current_hash != original_hash
+        )
+
+    if vtype == "cron_not_present":
+        pattern = verification["pattern"]
+        return not any(pattern in entry for entry in snapshot.cron_entries)
+
+    if vtype == "user_not_exists":
+        user = verification["user"]
+        return user not in snapshot.passwd_users and user not in snapshot.shadow_hashes
+
     return False
 
 

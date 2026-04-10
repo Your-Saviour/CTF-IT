@@ -9,6 +9,7 @@ password hashes before the user modifies them.
 The snapshot is deliberately broad (all shadow entries, not per-module) so that
 the state file reveals nothing about which modules are assigned.
 """
+import hashlib
 import json
 
 STATE_PATH = "/opt/ctf/state.json"
@@ -28,11 +29,31 @@ def snapshot_shadow_hashes() -> dict:
     return hashes
 
 
+def snapshot_file_hashes(paths: list) -> dict:
+    """Capture SHA-256 hashes of specified files at build time.
+
+    Used by file_hash_changed verification — stores the original hash so the
+    server can later detect if the file was modified by the user.
+    """
+    hashes = {}
+    for path in paths:
+        try:
+            with open(path, "rb") as f:
+                hashes[path] = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            hashes[path] = None
+    return hashes
+
+
 def main():
     with open(STATE_PATH) as f:
         state = json.load(f)
 
     state["snapshots"]["shadow_hashes"] = snapshot_shadow_hashes()
+
+    hash_paths = state.get("hash_paths", [])
+    if hash_paths:
+        state["snapshots"]["file_hashes"] = snapshot_file_hashes(hash_paths)
 
     with open(STATE_PATH, "w") as f:
         json.dump(state, f)

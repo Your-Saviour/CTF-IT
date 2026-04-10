@@ -35,11 +35,21 @@ def render_dockerfile(modules: list[Module]) -> str:
     return template.render(operations=operations)
 
 
-def generate_state_file(user_id: str) -> dict:
-    """Minimal opaque state file — no module info."""
+def generate_state_file(
+    user_id: str,
+    hash_paths: list[str] | None = None,
+    check_paths: list[str] | None = None,
+) -> dict:
+    """Minimal opaque state file — no module info.
+
+    hash_paths: files whose SHA-256 will be captured at build time (for file_hash_changed verification).
+    check_paths: files whose existence will be checked at audit time (for file_absent verification).
+    """
     return {
         "user_id": user_id,
         "snapshots": {},
+        "hash_paths": hash_paths or [],
+        "check_paths": check_paths or [],
     }
 
 
@@ -71,8 +81,18 @@ def prepare_build_context(
                 else:
                     shutil.copy2(src, files_dir / staged_name)
 
+    # Collect paths needed for build-time state capture from module verification specs
+    hash_paths = []
+    check_paths = []
+    for m in modules:
+        v = m.verification
+        if v.get("type") == "file_hash_changed":
+            hash_paths.append(v["path"])
+        if v.get("type") == "file_absent":
+            check_paths.append(v["path"])
+
     # Write opaque state file (no module info)
-    state = generate_state_file(user_id)
+    state = generate_state_file(user_id, hash_paths=hash_paths, check_paths=check_paths)
     (context_dir / "state.json").write_text(json.dumps(state, indent=2))
 
     # Copy audit script

@@ -58,7 +58,7 @@ User selects an open event and registers → user is bound to that event (`User.
 
 - **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`.
 - **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images.
-- **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), and applications (`application/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
+- **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), and internal applications (`application_internal/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`templates/playbook.yml.j2`** — Jinja2 template for Ansible playbook export. Generates tasks using `ansible.builtin.script` and `ansible.builtin.copy` to apply the same modules on bare machines.
 - **`base/`** — Base Docker image (Ubuntu 22.04 + common tools). All user images inherit from `ctf-base:latest`.
@@ -67,11 +67,11 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Module System
 
-Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/application), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`.
+Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/payload/application_external/application_internal), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`.
 
-Application modules install infrastructure (web apps, services, CLI tools) that vulnerability modules can target via `requires`. They award 0 points and are selected via their own quota category (`"application"` key in `EVENT_QUOTA`).
+Application modules install infrastructure that vulnerability/payload modules can target via `requires`. They award 0 points and are selected via their own quota keys (`"application_external"` or `"application_internal"` in `EVENT_QUOTA`). Payload modules are scored like vulnerabilities — users must find and remove malicious artifacts for points.
 
-Verification types: `file_permissions`, `file_contains`, `file_not_contains`, `service_running`, `package_installed`, `port_closed`, `flag_contents`, `password_not_default`, `password_changed`, `http_response`, `process_running`.
+Verification types: `file_permissions`, `file_contains`, `file_not_contains`, `service_running`, `package_installed`, `port_closed`, `flag_contents`, `password_not_default`, `password_changed`, `http_response`, `process_running`, `file_absent`, `file_hash_changed`, `cron_not_present`, `user_not_exists`.
 
 The selector (`builder/selector.py`) runs three phases: (1) type/difficulty quotas, (2) category quotas, (3) tag quotas. Category/tag counts are inclusive — modules already picked by earlier phases count toward later quotas. Respects bidirectional conflict exclusions, auto-resolves dependencies, and counts dependency-pulled modules toward their type/difficulty quota. Quota validation lives in `builder/quota_validation.py`.
 

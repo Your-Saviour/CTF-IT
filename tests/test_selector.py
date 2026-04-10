@@ -28,7 +28,7 @@ def library():
         _mod("h_auth_e1", type="hardening", category="authentication", tags=["ssh"]),
         _mod("h_auth_m1", type="hardening", difficulty="medium", category="authentication"),
         _mod("h_svc_m1", type="hardening", difficulty="medium", category="services"),
-        _mod("a_web_e1", type="application", category="web", tags=["flask"]),
+        _mod("a_web_e1", type="application_external", category="web", tags=["flask"]),
     ]
 
 
@@ -52,11 +52,29 @@ class TestTypeDifficultySelection:
         types = {m.type for m in result}
         assert types == {"vulnerability", "hardening"}
 
-    def test_application_type(self, library):
-        quota = {"application": {"easy": 1}}
+    def test_application_external_type(self, library):
+        quota = {"application_external": {"easy": 1}}
         result = select_modules(quota, library)
         assert len(result) == 1
-        assert result[0].type == "application"
+        assert result[0].type == "application_external"
+
+    def test_payload_type(self):
+        lib = [
+            _mod("p_backdoor_e1", type="payload", category="persistence"),
+        ]
+        quota = {"payload": {"easy": 1}}
+        result = select_modules(quota, lib)
+        assert len(result) == 1
+        assert result[0].type == "payload"
+
+    def test_application_internal_type(self):
+        lib = [
+            _mod("ai_docker_e1", type="application_internal", category="services"),
+        ]
+        quota = {"application_internal": {"easy": 1}}
+        result = select_modules(quota, lib)
+        assert len(result) == 1
+        assert result[0].type == "application_internal"
 
     def test_insufficient_modules_raises(self, library):
         quota = {"vulnerability": {"hard": 1}}
@@ -155,7 +173,7 @@ class TestConflictsAndDeps:
 
     def test_requires_pulled_in(self):
         lib = [
-            _mod("app", type="application", category="web"),
+            _mod("app", type="application_external", category="web"),
             _mod("vuln", category="web", requires=["app"]),
         ]
         quota = {"vulnerability": {"easy": 1}}
@@ -168,18 +186,18 @@ class TestConflictsAndDeps:
 
     def test_requires_counted_toward_type_quota(self):
         lib = [
-            _mod("app", type="application", category="web"),
-            _mod("app2", type="application", category="web"),
+            _mod("app", type="application_external", category="web"),
+            _mod("app2", type="application_external", category="web"),
             _mod("vuln", category="web", requires=["app"]),
         ]
         quota = {
             "vulnerability": {"easy": 1},
-            "application": {"easy": 1},
+            "application_external": {"easy": 1},
         }
         result = select_modules(quota, lib)
-        app_count = sum(1 for m in result if m.type == "application")
-        # app was pulled by requires, should count toward application quota
-        # so the application tier shouldn't add a second one
+        app_count = sum(1 for m in result if m.type == "application_external")
+        # app was pulled by requires, should count toward application_external quota
+        # so the application_external tier shouldn't add a second one
         assert app_count == 1
 
 
@@ -195,7 +213,9 @@ class TestValidation:
         assert validate_quota({
             "vulnerability": {"easy": 1},
             "hardening": {"medium": 1},
-            "application": {"easy": 1},
+            "application_external": {"easy": 1},
+            "application_internal": {"easy": 0},
+            "payload": {"easy": 1},
             "categories": {"auth": 2},
             "tags": {"ssh": 1},
         }) == []

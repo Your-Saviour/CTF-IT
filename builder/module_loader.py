@@ -45,7 +45,7 @@ class Module:
     id: str
     name: str
     description: str
-    type: str  # "vulnerability", "hardening", or "application"
+    type: str  # "vulnerability", "hardening", "payload", "application_external", or "application_internal"
     difficulty: str  # "easy", "medium", "hard"
     points: int
     category: str
