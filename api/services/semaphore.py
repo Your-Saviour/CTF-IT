@@ -185,6 +185,7 @@ class SemaphoreClient:
                 "allow_override_args_in_task": False,
                 "become_authorization": "",
                 "type": "",
+                "app": "ansible",
                 "vault_key_id": None,
             },
         )
