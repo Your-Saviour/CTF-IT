@@ -44,7 +44,7 @@ cd /opt/CTF-IT
 cat > .env << 'EOF'
 SECRET_KEY=$(openssl rand -base64 32)
 DATABASE_URL=sqlite:///data/ctf.db
-EVENT_QUOTA={"vulnerability":{"easy":3,"medium":3,"hard":0},"hardening":{"easy":0,"medium":0,"hard":0},"application":{"easy":1,"medium":0,"hard":0}}
+EVENT_QUOTA={"vulnerability":{"easy":3,"medium":3,"hard":0},"hardening":{"easy":0,"medium":0,"hard":0},"application_external":{"easy":1,"medium":0,"hard":0}}
 ROOT_PASSWORD=changeme123
 REGISTRY_HOST=registry.<SERVER_DOMAIN>
 REGISTRY_PUSH_HOST=ctf-registry:5000

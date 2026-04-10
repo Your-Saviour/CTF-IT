@@ -80,7 +80,9 @@ CTF-IT/
   modules/              # Module definitions
     vulns/              # Vulnerability modules (one folder per module)
     hardening/          # Hardening modules (one folder per module)
-    application/        # Application modules (infrastructure for vulns to target)
+    application_external/  # External application modules (web apps, services for vulns to target)
+    application_internal/  # Internal application modules (system services like Docker, VS Code)
+    payloads/              # Payload modules (malicious artifacts users must find and remove)
   templates/
     Dockerfile.j2       # Jinja2 template for user images
     playbook.yml.j2     # Jinja2 template for Ansible playbook export
@@ -127,10 +129,14 @@ modules/
       install_fail2ban.yaml
     setup_ssh_key_auth/
       setup_ssh_key_auth.yaml
-  application/
+  application_external/
     vulnerable_flask_app/
       vulnerable_flask_app.yaml
       install_flask_app.sh
+  payloads/
+    <module_id>/
+      <module_id>.yaml
+      <module_id>.sh
 ```
 
 ## Running a User Container

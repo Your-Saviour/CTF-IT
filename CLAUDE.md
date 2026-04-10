@@ -78,7 +78,7 @@ The selector (`builder/selector.py`) runs three phases: (1) type/difficulty quot
 ### Key Design Decisions
 
 - **Deterministic flags**: `HMAC(secret_key, user_id)` — same user always gets same flag, enables rebuilds without storing flags separately.
-- **Opaque collection**: the container ships only a broad `audit.py` and a minimal `state.json` (user_id + build-time snapshots). No module names, verification specs, or expected values are exposed to the user. The server knows which modules are assigned via the `UserModule` table and extracts relevant data from the broad snapshot.
+- **Opaque collection**: the container ships only a broad `audit.py` and a minimal `state.json` (user_id + build-time snapshots + `hash_paths`/`check_paths` file lists for payload verification). No module names, verification specs, or expected values are exposed to the user. The server knows which modules are assigned via the `UserModule` table and extracts relevant data from the broad snapshot.
 - **Opaque verify response**: `/api/verify` only returns details (module ID, name) for **completed** challenges. Unsolved modules are hidden — the response includes only summary counts (`completed`, `remaining`, `newly_completed`) to prevent leaking task names.
 - **Stateless verification**: flag in payload proves container legitimacy; no session required for verify endpoint.
 - **In-process async builds**: uses `asyncio.create_task` (not a separate worker). Production spec calls for RQ + Redis but this is not yet implemented.

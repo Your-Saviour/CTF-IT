@@ -92,7 +92,7 @@ sleep 3
 docker exec ctf-e2e-test cat /opt/ctf/state.json | python3 -m json.tool
 ```
 
-**Expected:** Contains `user_id` and `snapshots.shadow_hashes` (all system users). No module names, verification specs, or expected values should be present.
+**Expected:** Contains `user_id`, `snapshots.shadow_hashes` (all system users), and optionally `hash_paths`/`check_paths` lists if any selected modules use `file_hash_changed` or `file_absent` verification. No module names, verification specs, or expected values should be present.
 
 ```bash
 # Confirm no manifest.json exists
@@ -169,7 +169,7 @@ curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
 | `change_root_password` | hardening | 100 | `password_changed` |
 | `install_fail2ban` | hardening | 200 | `service_running` |
 | `setup_ssh_key_auth` | hardening | 200 | `file_contains` |
-| `vulnerable_flask_app` | application | 0 | `process_running` |
+| `vulnerable_flask_app` | application_external | 0 | `process_running` |
 | **Total** | | **1500** | |
 
 > **Note:** `vulnerable_flask_app` is a 0-point infrastructure module that auto-completes. Which easy vulnerability is selected (suid_find or world_writable_shadow) is random — total points are the same either way.
