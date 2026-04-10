@@ -29,6 +29,23 @@ async def lifespan(app: FastAPI):
                 event.status = "open"
         db.commit()
 
+        # Migrate vms table: add columns added after initial schema (idempotent)
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.bind)
+        if inspector.has_table("vms"):
+            existing = {col["name"] for col in inspector.get_columns("vms")}
+            new_cols = {
+                "provision_step": "VARCHAR(64)",
+                "provision_error": "TEXT",
+                "semaphore_project_id": "INTEGER",
+                "semaphore_task_id": "INTEGER",
+                "agent_status": "VARCHAR(16)",
+            }
+            for col, typ in new_cols.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
+            db.commit()
+
         # Create default event if none exists
         if not db.query(Event).first():
             quota = os.environ.get(
