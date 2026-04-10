@@ -384,6 +384,52 @@ async def get_platform_ssh_key(request: Request, db: Session = Depends(get_db)):
     return {"public_key": public_key}
 
 
+# ── Connection Test ───────────────────────────────────────────────────────────
+
+@router.post("/vms/{vm_id}/test-connection")
+async def test_connection(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+
+    if not vm.ip_address:
+        return JSONResponse({"error": "No IP address set on this VM"}, status_code=422)
+
+    from api.services.ssh_keys import get_or_create_platform_keypair
+    private_key_pem, _ = get_or_create_platform_keypair(db)
+
+    try:
+        import io as _io
+        import paramiko
+
+        pkey = paramiko.Ed25519Key.from_private_key(_io.StringIO(private_key_pem))
+
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            hostname=vm.ip_address,
+            port=vm.ssh_port or 22,
+            username=vm.ssh_user or "root",
+            pkey=pkey,
+            timeout=10,
+            banner_timeout=10,
+            auth_timeout=10,
+        )
+        _, stdout, stderr = client.exec_command("echo ok && hostname && id")
+        out = stdout.read().decode().strip()
+        err = stderr.read().decode().strip()
+        client.close()
+
+        return {"status": "ok", "output": out, "error": err or None}
+
+    except Exception as exc:
+        return JSONResponse({"status": "failed", "error": str(exc)}, status_code=200)
+
+
 # ── Ansible Export for VM ──────────────────────────────────────────────────────
 
 @router.post("/vms/{vm_id}/ansible-export")

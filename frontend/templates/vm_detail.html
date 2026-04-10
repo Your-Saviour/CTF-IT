@@ -196,6 +196,11 @@
             <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">SSH Command</div>
             <div class="copy-box" id="ssh-command" onclick="copySSH()" title="Click to copy">—</div>
         </div>
+        <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            <button class="btn btn-sm" id="btn-test-conn" onclick="testConnection()">Test Connection</button>
+            <span id="conn-result" style="font-size: 0.8rem;"></span>
+        </div>
+        <div id="conn-output" style="display:none; margin-top: 0.5rem;" class="provision-log"></div>
         <div style="margin-top: 0.75rem; display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-muted);">
             <span>Created: <span id="ci-created">—</span></span>
             <span>Updated: <span id="ci-updated">—</span></span>
@@ -729,6 +734,44 @@ function copyPubKey() {
     navigator.clipboard.writeText(text).then(function() {
         showToast('Public key copied');
     });
+}
+
+// ── Connection Test ───────────────────────────────────────────────────────────
+
+function testConnection() {
+    var btn = document.getElementById('btn-test-conn');
+    var result = document.getElementById('conn-result');
+    var output = document.getElementById('conn-output');
+    btn.disabled = true;
+    result.style.color = 'var(--text-muted)';
+    result.textContent = 'Testing…';
+    output.style.display = 'none';
+
+    fetch('/admin/vms/' + VM_ID + '/test-connection', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            if (data.status === 'ok') {
+                result.style.color = 'var(--green)';
+                result.textContent = '✓ Connected';
+                if (data.output) {
+                    output.textContent = data.output;
+                    output.style.display = 'block';
+                }
+            } else {
+                result.style.color = 'var(--red)';
+                result.textContent = '✗ Failed';
+                if (data.error) {
+                    output.textContent = data.error;
+                    output.style.display = 'block';
+                }
+            }
+        })
+        .catch(function(e) {
+            btn.disabled = false;
+            result.style.color = 'var(--red)';
+            result.textContent = '✗ ' + e.message;
+        });
 }
 
 loadVM();
