@@ -142,7 +142,7 @@ class SemaphoreClient:
 
     # ── Repositories ──────────────────────────────────────────────────────────
 
-    def create_repository(self, project_id: int, name: str, local_path: str) -> int:
+    def create_repository(self, project_id: int, name: str, local_path: str, key_id: int) -> int:
         """Create a local-path repository (Semaphore reads playbook files from here)."""
         resp = self._client.post(
             f"/api/project/{project_id}/repositories",
@@ -151,7 +151,7 @@ class SemaphoreClient:
                 "project_id": project_id,
                 "git_url": local_path,
                 "git_branch": "main",
-                "ssh_key_id": 0,
+                "ssh_key_id": key_id,
             },
         )
         if resp.status_code not in (200, 201):

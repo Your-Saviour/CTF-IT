@@ -557,8 +557,8 @@ def _run_provision(vm_id: int) -> None:
             repo_id = client.create_repository(
                 project_id,
                 name="playbook",
-                # Path as seen from inside the Semaphore container
                 local_path=str(playbook_dir),
+                key_id=key_id,
             )
             template_id = client.create_template(
                 project_id,
@@ -761,7 +761,7 @@ def _run_deploy_agent(vm_id: int) -> None:
                 key_id=key_id,
             )
             repo_id = client.create_repository(
-                project_id, "agent-deploy", local_path=str(playbook_dir)
+                project_id, "agent-deploy", local_path=str(playbook_dir), key_id=key_id,
             )
             template_id = client.create_template(
                 project_id, "deploy-agent", "playbook.yml",
