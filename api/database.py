@@ -25,5 +25,5 @@ def get_db():
 
 
 def init_db():
-    from api.models import User, UserImage, UserModule, Event, Team, VM, VMModule  # noqa: F401
+    from api.models import User, UserImage, UserModule, Event, Team, VM, VMModule, PlatformSettings  # noqa: F401
     Base.metadata.create_all(bind=engine)

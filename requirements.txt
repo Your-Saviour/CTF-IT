@@ -9,3 +9,4 @@ pyyaml
 docker
 pydantic>=2.0
 httpx
+cryptography

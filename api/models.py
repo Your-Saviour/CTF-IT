@@ -99,10 +99,24 @@ class VM(Base):
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # Provisioning state
+    provision_step: Mapped[str] = mapped_column(String(32), nullable=True)
+    provision_error: Mapped[str] = mapped_column(Text, nullable=True)
+    semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    semaphore_task_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    agent_status: Mapped[str] = mapped_column(String(16), nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
     modules: Mapped[list["VMModule"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
+
+
+class PlatformSettings(Base):
+    __tablename__ = "platform_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class VMModule(Base):

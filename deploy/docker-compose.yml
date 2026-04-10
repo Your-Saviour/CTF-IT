@@ -96,12 +96,21 @@ services:
       # Caldera integration: allows the API to install the exported plugin and update config
       - ./caldera/plugins/ctf-exploit:/caldera-plugin/ctf-exploit
       - ./caldera/config/local.yml:/caldera-config/local.yml
+      # Shared playbooks: API writes playbook files here; Semaphore reads them
+      - ctf-shared_playbooks:/shared/playbooks
     env_file: ../.env
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
       - REGISTRY_HOST=registry.${DOMAIN}
       - REGISTRY_PUSH_HOST=ctf-registry:5000
       - API_HOST=ctf.${DOMAIN}
+      # Semaphore integration for automated VM provisioning
+      - SEMAPHORE_URL=http://ctf-semaphore:3000
+      - SEMAPHORE_ADMIN=${SEMAPHORE_ADMIN:-admin}
+      - SEMAPHORE_ADMIN_PASSWORD=${SEMAPHORE_ADMIN_PASSWORD}
+      - SHARED_PLAYBOOK_DIR=/shared/playbooks
+      # External address Caldera agents use to beacon back (set to server's public IP/domain)
+      - CALDERA_AGENT_URL=${CALDERA_AGENT_URL:-http://localhost:8888}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
       start_period: 15s
@@ -228,6 +237,8 @@ services:
       SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${SEMAPHORE_ACCESS_KEY_ENCRYPTION:?Please set SEMAPHORE_ACCESS_KEY_ENCRYPTION in your .env file}
     volumes:
       - ctf-semaphore_data:/var/lib/semaphore
+      # Shared playbooks: Semaphore reads playbook files staged here by the CTF API
+      - ctf-shared_playbooks:/shared/playbooks:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ctf-semaphore.rule=Host(`semaphore.${DOMAIN}`)"
@@ -246,6 +257,7 @@ volumes:
   ctf-caldera_data:
   ctf-semaphore_postgres_data:
   ctf-semaphore_data:
+  ctf-shared_playbooks:
 
 networks:
   ctf-proxy:
