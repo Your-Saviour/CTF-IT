@@ -17,7 +17,7 @@ entryPoints:
 certificatesResolvers:
   letsencrypt:
     acme:
-      # Email is set via compose command-line arg (--certificatesresolvers.letsencrypt.acme.email)
+      # Set ACME_EMAIL in deploy/.env — this is passed via compose CLI arg and overrides this value.
       email: noreply@example.com
       storage: /letsencrypt/acme.json
       tlsChallenge: {}
