@@ -17,8 +17,8 @@ entryPoints:
 certificatesResolvers:
   letsencrypt:
     acme:
-      # Set ACME_EMAIL in deploy/.env — this is passed via compose CLI arg and overrides this value.
-      email: noreply@example.com
+      # email is set via --certificatesresolvers.letsencrypt.acme.email in docker-compose.yml
+      # sourced from ACME_EMAIL in deploy/.env
       storage: /letsencrypt/acme.json
       tlsChallenge: {}
 
