@@ -21,38 +21,40 @@ API_HOST = os.environ.get("API_HOST", "host.docker.internal:8080")
 async def lifespan(app: FastAPI):
     init_db()
     from api.database import SessionLocal
+    from sqlalchemy import inspect, text
     db = SessionLocal()
     try:
-        # Migrate existing events: open bool → status field
-        for event in db.query(Event).filter(Event.status == "draft").all():
-            if event.open:
-                event.status = "open"
-        db.commit()
-
-        # Migrate vms table: add columns added after initial schema (idempotent)
-        from sqlalchemy import inspect, text
+        # Schema migrations — run before any ORM queries so new columns exist first
         inspector = inspect(db.bind)
+
         if inspector.has_table("vms"):
             existing = {col["name"] for col in inspector.get_columns("vms")}
-            new_cols = {
+            for col, typ in {
                 "provision_step": "VARCHAR(64)",
                 "provision_error": "TEXT",
                 "semaphore_project_id": "INTEGER",
                 "semaphore_task_id": "INTEGER",
                 "agent_status": "VARCHAR(16)",
-            }
-            for col, typ in new_cols.items():
+            }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
-            db.commit()
 
-        # Migrate events table: add Semaphore project columns (idempotent)
         if inspector.has_table("events"):
             existing = {col["name"] for col in inspector.get_columns("events")}
-            for col, typ in {"semaphore_project_id": "INTEGER", "semaphore_key_id": "INTEGER"}.items():
+            for col, typ in {
+                "semaphore_project_id": "INTEGER",
+                "semaphore_key_id": "INTEGER",
+            }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))
-            db.commit()
+
+        db.commit()
+
+        # Migrate existing events: open bool → status field
+        for event in db.query(Event).filter(Event.status == "draft").all():
+            if event.open:
+                event.status = "open"
+        db.commit()
 
         # Create default event if none exists
         if not db.query(Event).first():
