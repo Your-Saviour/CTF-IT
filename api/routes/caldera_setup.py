@@ -56,9 +56,24 @@ def _write_caldera_config(config: dict) -> None:
 def _copy_plugin_files(export_plugin_dir) -> int:
     """Copy exported plugin contents to the shared mount. Returns file count."""
     dest = CALDERA_PLUGIN_DIR
+    # Clear contents without removing the directory itself — it's a bind mount
+    # so the mount point can't be deleted, only its contents.
     if os.path.exists(dest):
-        shutil.rmtree(dest)
-    shutil.copytree(str(export_plugin_dir), dest)
+        for item in os.listdir(dest):
+            item_path = os.path.join(dest, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+    else:
+        os.makedirs(dest)
+    for item in os.listdir(str(export_plugin_dir)):
+        src = os.path.join(str(export_plugin_dir), item)
+        dst = os.path.join(dest, item)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst)
+        else:
+            shutil.copy2(src, dst)
     return sum(1 for _ in export_plugin_dir.rglob("*") if _.is_file())
 
 
