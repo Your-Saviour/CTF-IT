@@ -56,7 +56,7 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Key Components
 
-- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`.
+- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `vm` (Team/VM CRUD).
 - **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), and internal applications (`application_internal/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
@@ -108,6 +108,16 @@ An alternative to Docker image builds — generates Ansible playbooks that apply
 - **No Docker artifacts**: Flag, audit.py, state.json, and build_snapshot.py are excluded — those are Docker-specific verification concerns.
 - **Output structure**: `ansible_exports/{export_id}/playbook.yml` + `scripts/{module_id}__{script}.sh` + `files/{module_id}__{filename}`.
 
+### Team and VM Management
+
+The platform supports VM-based deployments alongside the existing per-user Docker flow. VMs are team-scoped (not per-user) and will eventually be auto-provisioned; for now admins register them manually.
+
+- **Team**: groups of users within an event. `Team` has `name`, `event_id` FK. Admin CRUD at `GET/POST /admin/teams`, `PUT/DELETE /admin/teams/{id}`. Teams cannot be deleted while they have VMs.
+- **VM**: a registered target machine. Fields: `hostname`, `ip_address`, `os`, `status` (registered/active/stopped/failed), `ssh_port`, `ssh_user`, `notes`, `team_id`, `event_id` (denormalized from team for query convenience), timestamps. Admin CRUD at `/admin/vms` and `/admin/vms/{id}`.
+- **VMModule**: mirrors `UserModule` — tracks which modules are assigned to a VM and their completion status. Created via `POST /admin/vms/{id}/assign-modules` (runs `select_modules()` with the event's quota) or manually via `POST /admin/vms/{id}/add-module`.
+- **VM-scoped Ansible export**: `POST /admin/vms/{id}/ansible-export` generates a playbook from the VM's assigned modules (reuses `render_playbook` + `_stage_files` from `builder/ansible.py`). Returns a zip download.
+- **Admin UI**: the admin page has a "Teams & VMs" card with inline create forms and overview tables. Each VM links to `/admin/vm/{id}` — a dedicated detail page showing connection info (with copyable SSH command), module progress, status/notes editing, and action buttons.
+
 ### Database Models (api/models.py)
 
-Four models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module), `Event` (name, quota JSON, status, description, welcome_message, time_limit_minutes). A default "open" event is created at startup if none exists.
+Seven models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, status, description, welcome_message, time_limit_minutes), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id), `VMModule` (mirrors UserModule — completion tracking per module per VM). A default "open" event is created at startup if none exists.
