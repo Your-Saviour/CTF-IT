@@ -45,6 +45,7 @@ def _pull_requires(pick: Module, selected: list[Module], library: list[Module]):
 
 
 def select_modules(quota: dict, module_library: list[Module]) -> list[Module]:
+    module_library = [m for m in module_library if not m.disabled]
     selected: list[Module] = []
 
     # Phase 1: type → difficulty selection (existing behaviour)

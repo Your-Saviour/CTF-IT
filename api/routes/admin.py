@@ -101,14 +101,87 @@ async def list_modules(request: Request, db: Session = Depends(get_db)):
         {
             "id": m.id,
             "name": m.name,
+            "description": m.description,
             "type": m.type,
             "difficulty": m.difficulty,
             "points": m.points,
             "category": m.category,
             "tags": m.tags,
+            "disabled": m.disabled,
         }
         for m in modules
     ]
+
+
+@router.get("/modules/{module_id}")
+async def get_module(module_id: str, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    from builder.module_loader import load_all_modules, CopyStep, RunStep
+    modules = load_all_modules()
+    module = next((m for m in modules if m.id == module_id), None)
+    if not module:
+        return JSONResponse({"error": "module not found"}, status_code=404)
+
+    steps = []
+    for step in module.steps:
+        if isinstance(step, RunStep):
+            steps.append({"type": "run", "script": step.script})
+        elif isinstance(step, CopyStep):
+            steps.append({"type": "copy", "src": step.src, "dest": step.dest, "mode": step.mode})
+
+    return {
+        "id": module.id,
+        "name": module.name,
+        "description": module.description,
+        "type": module.type,
+        "difficulty": module.difficulty,
+        "points": module.points,
+        "category": module.category,
+        "tags": module.tags,
+        "conflicts": module.conflicts,
+        "requires": module.requires,
+        "verification": module.verification,
+        "hints": module.hints,
+        "suggested_fix": module.suggested_fix,
+        "caldera": module.caldera,
+        "steps": steps,
+        "disabled": module.disabled,
+    }
+
+
+@router.put("/modules/{module_id}/disable")
+async def toggle_module_disabled(module_id: str, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    body = await request.json()
+    disabled = bool(body.get("disabled", False))
+
+    from pathlib import Path
+    import yaml
+
+    modules_dir = Path(__file__).resolve().parent.parent.parent / "modules"
+    yaml_matches = list(modules_dir.rglob(f"{module_id}.yaml"))
+    if not yaml_matches:
+        return JSONResponse({"error": "module not found"}, status_code=404)
+
+    yaml_path = yaml_matches[0]
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+
+    if disabled:
+        data["disabled"] = True
+    else:
+        data.pop("disabled", None)
+
+    with open(yaml_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    return {"id": module_id, "disabled": disabled}
 
 
 @router.get("/registry")

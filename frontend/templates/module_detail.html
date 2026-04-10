@@ -1,0 +1,531 @@
+{% extends "base.html" %}
+{% block title %}Module Detail - CTF Platform{% endblock %}
+{% block extra_style %}
+.mod-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+}
+@media (max-width: 720px) {
+    .mod-grid { grid-template-columns: 1fr; }
+}
+.mod-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+.mod-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+.mod-back {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.mod-back:hover {
+    color: var(--cyan);
+    border-color: var(--cyan);
+}
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 0.85rem;
+    gap: 1rem;
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-label {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    min-width: 110px;
+    flex-shrink: 0;
+    padding-top: 0.1rem;
+}
+.detail-value { color: var(--text-primary); text-align: right; word-break: break-word; }
+.description-text {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-end;
+}
+.tag {
+    background: rgba(0, 229, 255, 0.08);
+    color: var(--cyan-dim);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: 3px;
+    padding: 0.1rem 0.45rem;
+    font-size: 0.72rem;
+    font-family: 'JetBrains Mono', monospace;
+}
+.module-id-link {
+    color: var(--cyan);
+    text-decoration: none;
+    font-size: 0.82rem;
+    font-family: 'JetBrains Mono', monospace;
+}
+.module-id-link:hover { text-decoration: underline; }
+.empty-list {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-style: italic;
+}
+.verify-block {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+}
+.code-block {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.78rem;
+    color: var(--cyan-dim);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+}
+.copy-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.copy-btn:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.hint-item {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+}
+.hint-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.02);
+}
+.hint-header:hover { background: rgba(255,255,255,0.04); color: var(--text-primary); }
+.hint-body {
+    display: none;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    border-top: 1px solid var(--border);
+    line-height: 1.5;
+}
+.hint-body.visible { display: block; }
+.step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 0.82rem;
+}
+.step-item:last-child { border-bottom: none; }
+.step-num {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    min-width: 1.5rem;
+    padding-top: 0.1rem;
+}
+.step-type {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    min-width: 3.5rem;
+    text-align: center;
+}
+.step-type-run { background: rgba(0, 229, 255, 0.1); color: var(--cyan); }
+.step-type-copy { background: rgba(255, 179, 0, 0.1); color: var(--amber); }
+.step-detail { color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; word-break: break-all; }
+.step-dest { color: var(--text-secondary); font-size: 0.72rem; display: block; margin-top: 0.15rem; }
+.disabled-banner {
+    background: rgba(255, 23, 68, 0.1);
+    border: 1px solid rgba(255, 23, 68, 0.3);
+    border-radius: 4px;
+    padding: 0.5rem 0.85rem;
+    color: var(--red);
+    font-size: 0.82rem;
+    margin-bottom: 1.25rem;
+}
+.card h3 { margin-bottom: 1rem; }
+{% endblock %}
+
+{% block content %}
+<div class="mod-header">
+    <a href="/admin" class="mod-back">&#8592; Admin</a>
+    <h1 class="mod-title" id="mod-name">Loading...</h1>
+    <span id="mod-difficulty-badge"></span>
+    <span id="mod-disabled-badge"></span>
+    <div style="margin-left: auto;">
+        <button class="btn" id="btn-toggle-disable" onclick="toggleDisable()" style="display:none;"></button>
+    </div>
+</div>
+
+<div id="disabled-banner" class="disabled-banner" style="display:none;">
+    This module is <strong>disabled</strong> and will be excluded from all new image builds and module selections.
+</div>
+
+<div class="mod-grid">
+    <!-- Overview -->
+    <div class="card">
+        <h3>Overview</h3>
+        <div class="detail-row">
+            <span class="detail-label">ID</span>
+            <span class="detail-value" id="ov-id" style="font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: var(--text-secondary);">—</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Type</span>
+            <span class="detail-value" id="ov-type">—</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Difficulty</span>
+            <span class="detail-value" id="ov-difficulty">—</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Points</span>
+            <span class="detail-value" id="ov-points">—</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Category</span>
+            <span class="detail-value" id="ov-category">—</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Tags</span>
+            <div class="detail-value"><div class="tag-list" id="ov-tags"></div></div>
+        </div>
+        <div class="description-text" id="ov-description"></div>
+    </div>
+
+    <!-- Dependencies -->
+    <div class="card">
+        <h3>Dependencies</h3>
+        <div style="margin-bottom: 1rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Requires</div>
+            <div id="dep-requires"></div>
+        </div>
+        <div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Conflicts With</div>
+            <div id="dep-conflicts"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Verification -->
+<div class="card" style="margin-bottom: 1.25rem;" id="card-verification">
+    <h3>Verification</h3>
+    <div id="verification-content"></div>
+</div>
+
+<!-- Suggested Fix -->
+<div class="card" id="card-fix" style="display:none; margin-bottom: 1.25rem;">
+    <h3>Suggested Fix</h3>
+    <div style="display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap;">
+        <div class="code-block" id="fix-command" style="flex: 1;"></div>
+        <button class="copy-btn" onclick="copyFix()">Copy</button>
+    </div>
+</div>
+
+<!-- Hints -->
+<div class="card" style="margin-bottom: 1.25rem;" id="card-hints">
+    <h3>Hints</h3>
+    <div id="hints-content"></div>
+</div>
+
+<!-- MITRE ATT&CK / Caldera -->
+<div class="card" id="card-caldera" style="display:none; margin-bottom: 1.25rem;">
+    <h3>MITRE ATT&CK / Caldera</h3>
+    <div id="caldera-content"></div>
+</div>
+
+<!-- Build Steps -->
+<div class="card" id="card-steps">
+    <h3>Build Steps</h3>
+    <div id="steps-content"></div>
+</div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+var MODULE_ID = {{ module_id | tojson }};
+var moduleData = null;
+
+function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+}
+
+function loadModule() {
+    fetch('/admin/modules/' + encodeURIComponent(MODULE_ID))
+        .then(function(r) {
+            if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error || 'Not found'); }); }
+            return r.json();
+        })
+        .then(function(data) {
+            moduleData = data;
+            renderModule(data);
+        })
+        .catch(function(e) {
+            document.getElementById('mod-name').textContent = 'Error: ' + e.message;
+        });
+}
+
+function renderModule(m) {
+    document.title = m.name + ' — CTF Platform';
+    document.getElementById('mod-name').textContent = m.name;
+
+    document.getElementById('mod-difficulty-badge').innerHTML =
+        '<span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span>';
+
+    if (m.disabled) {
+        document.getElementById('mod-disabled-badge').innerHTML =
+            '<span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--red); border: 1px solid rgba(255,23,68,0.4); padding: 0.15rem 0.5rem; border-radius: 3px;">DISABLED</span>';
+        document.getElementById('disabled-banner').style.display = 'block';
+    }
+
+    var btn = document.getElementById('btn-toggle-disable');
+    btn.style.display = 'inline-block';
+    if (m.disabled) {
+        btn.textContent = 'Enable Module';
+        btn.className = 'btn btn-primary';
+    } else {
+        btn.textContent = 'Disable Module';
+        btn.className = 'btn btn-danger';
+    }
+
+    // Overview
+    document.getElementById('ov-id').textContent = m.id;
+    document.getElementById('ov-type').textContent = m.type;
+    document.getElementById('ov-difficulty').innerHTML =
+        '<span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span>';
+    document.getElementById('ov-points').textContent = m.points;
+    document.getElementById('ov-category').textContent = m.category;
+
+    var tagsEl = document.getElementById('ov-tags');
+    if (m.tags && m.tags.length) {
+        tagsEl.innerHTML = m.tags.map(function(t) {
+            return '<span class="tag">' + esc(t) + '</span>';
+        }).join('');
+    } else {
+        tagsEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem;">none</span>';
+    }
+    document.getElementById('ov-description').textContent = m.description || '';
+
+    // Dependencies
+    var reqEl = document.getElementById('dep-requires');
+    if (m.requires && m.requires.length) {
+        reqEl.innerHTML = m.requires.map(function(id) {
+            return '<a href="/admin/module/' + encodeURIComponent(id) + '" class="module-id-link">' + esc(id) + '</a>';
+        }).join('<br>');
+    } else {
+        reqEl.innerHTML = '<span class="empty-list">None</span>';
+    }
+
+    var confEl = document.getElementById('dep-conflicts');
+    if (m.conflicts && m.conflicts.length) {
+        confEl.innerHTML = m.conflicts.map(function(id) {
+            return '<a href="/admin/module/' + encodeURIComponent(id) + '" class="module-id-link">' + esc(id) + '</a>';
+        }).join('<br>');
+    } else {
+        confEl.innerHTML = '<span class="empty-list">None</span>';
+    }
+
+    // Verification
+    var verEl = document.getElementById('verification-content');
+    if (m.verification && Object.keys(m.verification).length) {
+        var rows = Object.entries(m.verification).map(function(kv) {
+            return '<div class="detail-row">' +
+                '<span class="detail-label">' + esc(kv[0]) + '</span>' +
+                '<span class="detail-value" style="font-family: \'JetBrains Mono\', monospace; font-size: 0.8rem;">' + esc(String(kv[1])) + '</span>' +
+            '</div>';
+        }).join('');
+        verEl.innerHTML = '<div class="verify-block">' + rows + '</div>';
+    } else {
+        verEl.innerHTML = '<span class="empty-list">No verification spec defined.</span>';
+    }
+
+    // Suggested fix
+    if (m.suggested_fix) {
+        document.getElementById('card-fix').style.display = 'block';
+        document.getElementById('fix-command').textContent = m.suggested_fix;
+    }
+
+    // Hints
+    var hintsEl = document.getElementById('hints-content');
+    if (m.hints && m.hints.length) {
+        hintsEl.innerHTML = m.hints.map(function(hint, idx) {
+            return '<div class="hint-item">' +
+                '<div class="hint-header" onclick="toggleHint(' + idx + ')">' +
+                    '<span>Hint ' + (idx + 1) + ' of ' + m.hints.length + '</span>' +
+                    '<span id="hint-toggle-' + idx + '" style="font-size: 0.7rem;">&#9654; Reveal</span>' +
+                '</div>' +
+                '<div class="hint-body" id="hint-body-' + idx + '">' + esc(hint) + '</div>' +
+            '</div>';
+        }).join('');
+    } else {
+        hintsEl.innerHTML = '<span class="empty-list">No hints defined.</span>';
+    }
+
+    // Caldera
+    if (m.caldera) {
+        var cal = m.caldera;
+        document.getElementById('card-caldera').style.display = 'block';
+        var calEl = document.getElementById('caldera-content');
+        var html = '';
+        if (cal.tactic) {
+            html += '<div class="detail-row"><span class="detail-label">Tactic</span><span class="detail-value">' + esc(cal.tactic) + '</span></div>';
+        }
+        if (cal.technique) {
+            var techName = cal.technique.name || '';
+            var techId = cal.technique.attack_id || '';
+            html += '<div class="detail-row"><span class="detail-label">Technique</span><span class="detail-value">' +
+                (techId ? '<span style="font-family: \'JetBrains Mono\', monospace; font-size: 0.8rem; color: var(--amber);">' + esc(techId) + '</span> ' : '') +
+                esc(techName) + '</span></div>';
+        }
+        if (cal.recon) {
+            html += '<div style="margin-top: 0.85rem;">' +
+                '<div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">Recon Command</div>';
+            if (cal.recon.description) {
+                html += '<div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">' + esc(cal.recon.description) + '</div>';
+            }
+            html += '<div class="code-block">' + esc((cal.recon.command || '').trim()) + '</div></div>';
+        }
+        if (cal.exploit) {
+            html += '<div style="margin-top: 0.85rem;">' +
+                '<div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">Exploit Command</div>';
+            if (cal.exploit.description) {
+                html += '<div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.35rem;">' + esc(cal.exploit.description) + '</div>';
+            }
+            html += '<div class="code-block">' + esc((cal.exploit.command || '').trim()) + '</div></div>';
+        }
+        calEl.innerHTML = html;
+    }
+
+    // Build steps
+    var stepsEl = document.getElementById('steps-content');
+    if (m.steps && m.steps.length) {
+        stepsEl.innerHTML = m.steps.map(function(step, idx) {
+            var typeClass = 'step-type-' + esc(step.type);
+            var detail = '';
+            if (step.type === 'run') {
+                detail = '<span class="step-detail">' + esc(step.script) + '</span>';
+            } else if (step.type === 'copy') {
+                detail = '<span class="step-detail">' + esc(step.src) +
+                    '<span class="step-dest">&#8594; ' + esc(step.dest) + (step.mode ? ' (mode: ' + esc(step.mode) + ')' : '') + '</span>' +
+                '</span>';
+            }
+            return '<div class="step-item">' +
+                '<span class="step-num">' + (idx + 1) + '.</span>' +
+                '<span class="step-type ' + typeClass + '">' + esc(step.type) + '</span>' +
+                detail +
+            '</div>';
+        }).join('');
+    } else {
+        stepsEl.innerHTML = '<span class="empty-list">No build steps defined.</span>';
+    }
+}
+
+function toggleHint(idx) {
+    var body = document.getElementById('hint-body-' + idx);
+    var toggle = document.getElementById('hint-toggle-' + idx);
+    body.classList.toggle('visible');
+    toggle.innerHTML = body.classList.contains('visible') ? '&#9660; Hide' : '&#9654; Reveal';
+}
+
+function copyFix() {
+    var text = document.getElementById('fix-command').textContent;
+    navigator.clipboard.writeText(text).then(function() {
+        showToast('Copied to clipboard');
+    });
+}
+
+function toggleDisable() {
+    if (!moduleData) return;
+    var newDisabled = !moduleData.disabled;
+    var action = newDisabled ? 'disable' : 'enable';
+    if (!confirm((newDisabled ? 'Disable' : 'Enable') + ' module "' + moduleData.id + '"?' +
+        (newDisabled ? ' It will be excluded from all new image builds.' : ''))) return;
+
+    fetch('/admin/modules/' + encodeURIComponent(MODULE_ID) + '/disable', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({disabled: newDisabled})
+    })
+    .then(function(r) {
+        if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error); }); }
+        return r.json();
+    })
+    .then(function(data) {
+        moduleData.disabled = data.disabled;
+        showToast('Module ' + (data.disabled ? 'disabled' : 'enabled'));
+
+        var btn = document.getElementById('btn-toggle-disable');
+        var badge = document.getElementById('mod-disabled-badge');
+        var banner = document.getElementById('disabled-banner');
+
+        if (data.disabled) {
+            btn.textContent = 'Enable Module';
+            btn.className = 'btn btn-primary';
+            badge.innerHTML = '<span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--red); border: 1px solid rgba(255,23,68,0.4); padding: 0.15rem 0.5rem; border-radius: 3px;">DISABLED</span>';
+            banner.style.display = 'block';
+        } else {
+            btn.textContent = 'Disable Module';
+            btn.className = 'btn btn-danger';
+            badge.innerHTML = '';
+            banner.style.display = 'none';
+        }
+    })
+    .catch(function(e) {
+        showToast('Error: ' + e.message);
+    });
+}
+
+loadModule();
+</script>
+{% endblock %}

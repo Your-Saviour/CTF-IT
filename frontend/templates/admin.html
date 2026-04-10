@@ -51,6 +51,10 @@
     border-color: var(--green);
     color: var(--green);
 }
+.btn-outline:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
 
 /* Event form */
 #event-form-panel {
@@ -454,6 +458,25 @@
 <!-- Modules -->
 <div class="card">
     <h3>Module Library</h3>
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; align-items: center;">
+        <input id="mod-search" type="text" placeholder="Search by name, ID, description..." oninput="filterModules()"
+            style="flex: 1; min-width: 180px; background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-primary); padding: 0.35rem 0.6rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; outline: none;">
+        <select id="mod-filter-type" onchange="filterModules()"
+            style="background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-primary); padding: 0.35rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem;">
+            <option value="">All Types</option>
+        </select>
+        <select id="mod-filter-difficulty" onchange="filterModules()"
+            style="background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-primary); padding: 0.35rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem;">
+            <option value="">All Difficulties</option>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+        </select>
+        <select id="mod-filter-category" onchange="filterModules()"
+            style="background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-primary); padding: 0.35rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem;">
+            <option value="">All Categories</option>
+        </select>
+    </div>
     <table>
         <thead>
             <tr>
@@ -463,12 +486,14 @@
                 <th>Difficulty</th>
                 <th>Points</th>
                 <th>Category</th>
+                <th>Tags</th>
             </tr>
         </thead>
         <tbody id="modules-body">
-            <tr><td colspan="6" style="color: var(--text-secondary);">Loading...</td></tr>
+            <tr><td colspan="7" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+    <div id="modules-count" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
 </div>
 {% endblock %}
 
@@ -741,6 +766,41 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
 
 // ── Event Actions ──
 
+var calderaSetupInProgress = null;
+
+function setupCaldera(eventId) {
+    if (calderaSetupInProgress) return;
+    if (!confirm('Setup Caldera for this event? This will restart the Caldera container and may take up to 2 minutes.')) return;
+
+    calderaSetupInProgress = eventId;
+    loadEvents();
+    showToast('Caldera setup started. This may take up to 2 minutes...', 10000);
+
+    fetch('/admin/caldera-setup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event_id: eventId})
+    })
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+        calderaSetupInProgress = null;
+        if (res.ok) {
+            var msg = 'Caldera ready: ' + res.data.plugin.abilities_loaded + ' abilities loaded';
+            if (res.data.operation) msg += ', operation created';
+            if (res.data.status === 'partial') msg += ' (operation failed)';
+            showToast(msg, 8000);
+        } else {
+            showToast('Caldera setup failed: ' + (res.data.error || 'Unknown error'), 6000);
+        }
+        loadEvents();
+    })
+    .catch(function() {
+        calderaSetupInProgress = null;
+        showToast('Caldera setup failed: network error', 5000);
+        loadEvents();
+    });
+}
+
 function startEvent(id) {
     fetch('/admin/events/' + id + '/start', { method: 'POST' })
         .then(function(r) {
@@ -787,6 +847,9 @@ function loadEvents() {
             body.innerHTML = data.map(function(e) {
                 var actions = '<div class="event-actions">';
                 actions += '<button class="btn-outline" onclick="editEvent(' + e.id + ')">Edit</button>';
+                actions += '<button class="btn-outline" onclick="setupCaldera(' + e.id + ')"'
+                    + (calderaSetupInProgress === e.id ? ' disabled' : '')
+                    + '>' + (calderaSetupInProgress === e.id ? 'Setting up\u2026' : 'Caldera') + '</button>';
                 if (e.status === 'draft' || e.status === 'stopped') {
                     actions += '<button class="btn-outline success" onclick="startEvent(' + e.id + ')">Start</button>';
                 }
@@ -1029,6 +1092,53 @@ fetch('/admin/registry')
 
 // ── Load Modules (also populates quota form dropdowns) ──
 
+function renderModulesTable(data) {
+    var body = document.getElementById('modules-body');
+    var countEl = document.getElementById('modules-count');
+    if (!data.length) {
+        body.innerHTML = '<tr><td colspan="7" style="color: var(--text-muted);">No modules match the current filter.</td></tr>';
+        countEl.textContent = '';
+        return;
+    }
+    body.innerHTML = data.map(function(m) {
+        var disabledStyle = m.disabled ? ' style="opacity: 0.45;"' : '';
+        var disabledBadge = m.disabled ? ' <span style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase; color: var(--red); border: 1px solid rgba(255,23,68,0.4); padding: 0.05rem 0.35rem; border-radius: 3px; vertical-align: middle;">OFF</span>' : '';
+        var tags = (m.tags || []).map(function(t) {
+            return '<span style="background: rgba(0,229,255,0.07); color: var(--cyan-dim); border: 1px solid rgba(0,229,255,0.15); border-radius: 3px; padding: 0.05rem 0.3rem; font-size: 0.7rem; margin-right: 0.25rem; white-space: nowrap;">' + esc(t) + '</span>';
+        }).join('');
+        return '<tr' + disabledStyle + '>' +
+            '<td style="color: var(--text-secondary); font-size: 0.82rem; font-family: \'JetBrains Mono\', monospace;">' + esc(m.id) + '</td>' +
+            '<td><a href="/admin/module/' + encodeURIComponent(m.id) + '" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" onmouseover="this.style.color=\'var(--cyan)\'" onmouseout="this.style.color=\'var(--text-primary)\'">' + esc(m.name) + '</a>' + disabledBadge + '</td>' +
+            '<td style="font-size: 0.85rem;">' + esc(m.type) + '</td>' +
+            '<td><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
+            '<td>' + m.points + '</td>' +
+            '<td style="font-size: 0.85rem;">' + esc(m.category) + '</td>' +
+            '<td>' + (tags || '<span style="color: var(--text-muted); font-size: 0.75rem;">—</span>') + '</td>' +
+        '</tr>';
+    }).join('');
+    var total = modulesData.length;
+    countEl.textContent = data.length < total ? ('Showing ' + data.length + ' of ' + total + ' modules') : (total + ' module' + (total === 1 ? '' : 's'));
+}
+
+function filterModules() {
+    var search = (document.getElementById('mod-search').value || '').toLowerCase();
+    var typeVal = document.getElementById('mod-filter-type').value;
+    var diffVal = document.getElementById('mod-filter-difficulty').value;
+    var catVal = document.getElementById('mod-filter-category').value;
+
+    var filtered = modulesData.filter(function(m) {
+        if (typeVal && m.type !== typeVal) return false;
+        if (diffVal && m.difficulty !== diffVal) return false;
+        if (catVal && m.category !== catVal) return false;
+        if (search) {
+            var haystack = (m.id + ' ' + m.name + ' ' + (m.description || '') + ' ' + m.category + ' ' + (m.tags || []).join(' ')).toLowerCase();
+            if (haystack.indexOf(search) === -1) return false;
+        }
+        return true;
+    });
+    renderModulesTable(filtered);
+}
+
 fetch('/admin/modules')
     .then(r => r.json())
     .then(data => {
@@ -1046,17 +1156,25 @@ fetch('/admin/modules')
         allCategories = Object.keys(catSet).sort();
         allTags = Object.keys(tagSet).sort();
 
-        var body = document.getElementById('modules-body');
-        body.innerHTML = data.map(m =>
-            '<tr>' +
-                '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(m.id) + '</td>' +
-                '<td><strong>' + esc(m.name) + '</strong></td>' +
-                '<td>' + esc(m.type) + '</td>' +
-                '<td><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
-                '<td>' + m.points + '</td>' +
-                '<td>' + esc(m.category) + '</td>' +
-            '</tr>'
-        ).join('');
+        // Populate type filter dropdown
+        var typeSelect = document.getElementById('mod-filter-type');
+        allTypes.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t.replace(/_/g, ' ');
+            typeSelect.appendChild(opt);
+        });
+
+        // Populate category filter dropdown
+        var catSelect = document.getElementById('mod-filter-category');
+        allCategories.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            catSelect.appendChild(opt);
+        });
+
+        renderModulesTable(data);
     });
 </script>
 {% endblock %}

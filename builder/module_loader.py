@@ -59,6 +59,7 @@ class Module:
     suggested_fix: Optional[str] = None
     caldera: Optional[dict] = None
     source_dir: Path = field(default_factory=Path)
+    disabled: bool = False
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
@@ -87,5 +88,6 @@ def load_all_modules() -> list[Module]:
             suggested_fix=data.get("suggested_fix"),
             caldera=data.get("caldera"),
             source_dir=yaml_path.parent,
+            disabled=bool(data.get("disabled", False)),
         ))
     return modules
