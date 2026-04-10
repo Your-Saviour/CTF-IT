@@ -477,14 +477,24 @@
             <option value="">All Categories</option>
         </select>
     </div>
-    <table>
+    <div style="overflow-x: auto;">
+    <table style="table-layout: fixed; width: 100%;">
+        <colgroup>
+            <col style="width: 160px;">
+            <col style="width: auto;">
+            <col style="width: 90px;">
+            <col style="width: 90px;">
+            <col style="width: 60px;">
+            <col style="width: 110px;">
+            <col style="width: 180px;">
+        </colgroup>
         <thead>
             <tr>
                 <th>ID</th>
                 <th>Name</th>
                 <th>Type</th>
                 <th>Difficulty</th>
-                <th>Points</th>
+                <th>Pts</th>
                 <th>Category</th>
                 <th>Tags</th>
             </tr>
@@ -493,6 +503,7 @@
             <tr><td colspan="7" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+    </div>
     <div id="modules-count" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
 </div>
 {% endblock %}
@@ -1106,14 +1117,15 @@ function renderModulesTable(data) {
         var tags = (m.tags || []).map(function(t) {
             return '<span style="background: rgba(0,229,255,0.07); color: var(--cyan-dim); border: 1px solid rgba(0,229,255,0.15); border-radius: 3px; padding: 0.05rem 0.3rem; font-size: 0.7rem; margin-right: 0.25rem; white-space: nowrap;">' + esc(t) + '</span>';
         }).join('');
+        var typeShort = esc(m.type).replace('application_external', 'app/ext').replace('application_internal', 'app/int');
         return '<tr' + disabledStyle + '>' +
-            '<td style="color: var(--text-secondary); font-size: 0.82rem; font-family: \'JetBrains Mono\', monospace;">' + esc(m.id) + '</td>' +
-            '<td><a href="/admin/module/' + encodeURIComponent(m.id) + '" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" onmouseover="this.style.color=\'var(--cyan)\'" onmouseout="this.style.color=\'var(--text-primary)\'">' + esc(m.name) + '</a>' + disabledBadge + '</td>' +
-            '<td style="font-size: 0.85rem;">' + esc(m.type) + '</td>' +
-            '<td><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
-            '<td>' + m.points + '</td>' +
-            '<td style="font-size: 0.85rem;">' + esc(m.category) + '</td>' +
-            '<td>' + (tags || '<span style="color: var(--text-muted); font-size: 0.75rem;">—</span>') + '</td>' +
+            '<td style="color: var(--text-secondary); font-size: 0.78rem; font-family: \'JetBrains Mono\', monospace; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;">' + esc(m.id) + '</td>' +
+            '<td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;"><a href="/admin/module/' + encodeURIComponent(m.id) + '" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" onmouseover="this.style.color=\'var(--cyan)\'" onmouseout="this.style.color=\'var(--text-primary)\'">' + esc(m.name) + '</a>' + disabledBadge + '</td>' +
+            '<td style="font-size: 0.8rem; white-space: nowrap; color: var(--text-secondary);">' + typeShort + '</td>' +
+            '<td style="white-space: nowrap;"><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
+            '<td style="white-space: nowrap;">' + m.points + '</td>' +
+            '<td style="font-size: 0.82rem; white-space: nowrap;">' + esc(m.category) + '</td>' +
+            '<td style="max-width: 180px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">' + (tags || '<span style="color: var(--text-muted); font-size: 0.75rem;">—</span>') + '</td>' +
         '</tr>';
     }).join('');
     var total = modulesData.length;
