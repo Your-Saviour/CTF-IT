@@ -24,7 +24,8 @@ CALDERA_CONTAINER_NAME = os.environ.get("CALDERA_CONTAINER_NAME", "ctf-caldera")
 CALDERA_STARTUP_TIMEOUT = int(os.environ.get("CALDERA_STARTUP_TIMEOUT", "120"))
 
 # Caldera's atomic planner and default source UUIDs
-_ATOMIC_PLANNER_ID = "788f0f7e-96f0-4545-a0d1-0c587db5f2ee"
+# Caldera's atomic planner name (ID varies by instance; we match by name as fallback)
+_ATOMIC_PLANNER_NAME = "atomic"
 _DEFAULT_SOURCE_ID = "ed32b9c3-9593-4c33-b0db-e2007315096b"
 
 
@@ -92,6 +93,43 @@ async def _wait_for_caldera(api_key: str, timeout: int = CALDERA_STARTUP_TIMEOUT
     raise TimeoutError(f"Caldera did not become healthy within {timeout}s")
 
 
+async def _get_atomic_planner_id(api_key: str) -> str:
+    """Return the ID of the 'atomic' planner in this Caldera instance."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{CALDERA_INTERNAL_URL}/api/v2/planners",
+            headers={"KEY": api_key},
+        )
+        resp.raise_for_status()
+    for p in resp.json():
+        if p.get("name") == _ATOMIC_PLANNER_NAME:
+            return p["id"]
+    raise ValueError(f"No '{_ATOMIC_PLANNER_NAME}' planner found in Caldera")
+
+
+async def _ensure_basic_source(api_key: str) -> None:
+    """Create the 'basic' fact source if it doesn't exist.
+
+    Caldera's operation API falls back to a source named 'basic' when the
+    requested source ID is missing.  Without this the POST /api/v2/operations
+    raises a 500 (IndexError on empty list).
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            f"{CALDERA_INTERNAL_URL}/api/v2/sources",
+            headers={"KEY": api_key},
+        )
+        resp.raise_for_status()
+        sources = resp.json()
+        if any(s.get("id") == _DEFAULT_SOURCE_ID for s in sources):
+            return
+        await client.post(
+            f"{CALDERA_INTERNAL_URL}/api/v2/sources",
+            headers={"KEY": api_key},
+            json={"name": "basic", "id": _DEFAULT_SOURCE_ID, "facts": [], "rules": [], "relationships": []},
+        )
+
+
 async def _get_ctf_abilities(api_key: str) -> list:
     """Return all CTF abilities (those with 'Recon:' or 'Exploit:' in name)."""
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -116,11 +154,11 @@ async def _get_adversaries(api_key: str) -> list:
     return resp.json()
 
 
-async def _create_operation(api_key: str, adversary_id: str) -> dict:
+async def _create_operation(api_key: str, adversary_id: str, planner_id: str) -> dict:
     payload = {
         "name": "CTF Red Team Emulation",
         "adversary": {"adversary_id": adversary_id},
-        "planner": {"id": _ATOMIC_PLANNER_ID},
+        "planner": {"id": planner_id},
         "source": {"id": _DEFAULT_SOURCE_ID},
         "group": "red",
         "auto_close": False,
@@ -239,11 +277,23 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
                 status_code=500,
             )
 
-        # Step 9: Create operation
+        # Step 9: Ensure basic fact source exists (required by Caldera operation API)
+        try:
+            await _ensure_basic_source(api_key)
+        except httpx.HTTPError as e:
+            return JSONResponse({"error": f"Failed to ensure basic source: {e}"}, status_code=502)
+
+        # Step 10: Get atomic planner ID for this Caldera instance
+        try:
+            planner_id = await _get_atomic_planner_id(api_key)
+        except (httpx.HTTPError, ValueError) as e:
+            return JSONResponse({"error": f"Failed to locate atomic planner: {e}"}, status_code=502)
+
+        # Step 11: Create operation
         operation_result = None
         operation_error = None
         try:
-            operation_result = await _create_operation(api_key, ctf_adversary["adversary_id"])
+            operation_result = await _create_operation(api_key, ctf_adversary["adversary_id"], planner_id)
         except httpx.HTTPError as e:
             operation_error = str(e)
 
