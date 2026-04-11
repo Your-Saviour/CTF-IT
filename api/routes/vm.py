@@ -1047,6 +1047,7 @@ def _run_vultr_create(vm_id: int) -> None:
             "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
             "ssh_key_name": "ctf-platform",
             "ssh_public_key": public_key,
+            "vultr_api_key": VULTR_API_KEY,
         }
         if CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
             extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
@@ -1239,6 +1240,7 @@ def _run_vultr_destroy(vm_id: int) -> None:
         extra_vars: dict = {
             "instance_label": vm.hostname or f"ctf-vm-{vm_id}",
             "instance_region": vm.vultr_region or VULTR_DEFAULT_REGION,
+            "vultr_api_key": VULTR_API_KEY,
         }
         if vm.cloudflare_record_id and CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
             extra_vars["dns_hostname"] = vm.hostname or ""

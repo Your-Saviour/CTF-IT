@@ -180,6 +180,27 @@ class SemaphoreClient:
             )
         return resp.json()["id"]
 
+    # ── Environments ──────────────────────────────────────────────────────────
+
+    def create_environment(self, project_id: int, name: str, env_vars: dict) -> int:
+        """Create a Semaphore environment (env vars passed to Ansible) and return its ID."""
+        import json as _json
+        resp = self._client.post(
+            f"/api/project/{project_id}/environment",
+            json={
+                "name": name,
+                "project_id": project_id,
+                "password": None,
+                "json": _json.dumps(env_vars),
+                "env": None,
+            },
+        )
+        if resp.status_code not in (200, 201):
+            raise SemaphoreError(
+                f"create_environment failed ({resp.status_code}): {resp.text[:200]}"
+            )
+        return resp.json()["id"]
+
     # ── Templates ─────────────────────────────────────────────────────────────
 
     def create_template(
@@ -191,10 +212,12 @@ class SemaphoreClient:
         repository_id: int,
         key_id: int,
         extra_vars: dict | None = None,
+        environment_id: int | None = None,
     ) -> int:
         """Create a job template and return its ID.
 
         extra_vars: optional dict passed as ``-e '{...}'`` ansible-playbook argument.
+        environment_id: optional Semaphore environment ID for env var injection.
         """
         import json as _json
         if extra_vars:
@@ -208,7 +231,7 @@ class SemaphoreClient:
                 "project_id": project_id,
                 "inventory_id": inventory_id,
                 "repository_id": repository_id,
-                "environment_id": None,
+                "environment_id": environment_id,
                 "playbook": playbook,
                 "arguments": arguments,
                 "allow_override_args_in_task": False,

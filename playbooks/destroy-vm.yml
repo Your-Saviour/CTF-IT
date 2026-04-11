@@ -10,8 +10,8 @@
 #   domain_name         - Domain for DNS (e.g. "example.com")
 #   cloudflare_api_key  - Cloudflare API token
 #
-# Environment (must be set in the Semaphore container):
-#   VULTR_API_KEY   - Vultr API key
+# Required extra vars (continued):
+#   vultr_api_key   - Vultr API key
 
 - name: Destroy Vultr VM
   hosts: localhost
@@ -19,7 +19,7 @@
   gather_facts: false
 
   environment:
-    VULTR_API_KEY: "{{ lookup('env', 'VULTR_API_KEY') }}"
+    VULTR_API_KEY: "{{ vultr_api_key }}"
 
   tasks:
 
