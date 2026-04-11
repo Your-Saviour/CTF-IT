@@ -47,6 +47,9 @@ See `.env.example` for full documentation. Key variables:
 - `API_HOST` — address shown in the dashboard verify command (default `host.docker.internal:8080`). Set to server IP/domain for LAN/VPS
 - `API_PORT` — port the API is exposed on (default `8080`)
 - `DOCKER_PLATFORM` — target platform for image builds (e.g. `linux/arm64`). Set when build server and users have different architectures
+- `SEMAPHORE_URL` / `SEMAPHORE_ADMIN` / `SEMAPHORE_ADMIN_PASSWORD` — Ansible Semaphore connection (internal service; defaults work with docker-compose stack)
+- `VULTR_API_KEY` / `VULTR_DEFAULT_REGION` — Vultr cloud provisioning (optional; enables VM create/destroy from admin UI)
+- `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_DOMAIN` — Cloudflare DNS (optional; auto-creates DNS A records for provisioned VMs)
 
 ## Architecture
 
@@ -56,14 +59,15 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Key Components
 
-- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `vm` (Team/VM CRUD).
-- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images.
+- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `vm` (Team/VM CRUD).
+- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), and internal applications (`application_internal/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`templates/playbook.yml.j2`** — Jinja2 template for Ansible playbook export. Generates tasks using `ansible.builtin.script` and `ansible.builtin.copy` to apply the same modules on bare machines.
 - **`base/`** — Base Docker image (Ubuntu 22.04 + common tools). All user images inherit from `ctf-base:latest`.
 - **`audit.py`** — Runs inside user containers. Performs a broad security audit (file permissions, configs, services, packages, ports, HTTP responses, processes, shadow hashes) and outputs a JSON system snapshot. Contains no module-specific logic — the server matches the snapshot against the user's assigned modules.
 - **`frontend/templates/`** — Jinja2 HTML templates. Dark theme, client-side polling for build status.
+- **`playbooks/`** — Ansible playbooks for Vultr VM lifecycle management. `create-vm.yml` provisions a Vultr VPS and optionally creates a Cloudflare DNS A record; `destroy-vm.yml` removes the instance and DNS record. `collections/requirements.yml` lists the `vultr.cloud` and `community.general` collections — Semaphore installs these automatically before running either playbook.
 
 ### Module System
 
@@ -108,9 +112,50 @@ An alternative to Docker image builds — generates Ansible playbooks that apply
 - **No Docker artifacts**: Flag, audit.py, state.json, and build_snapshot.py are excluded — those are Docker-specific verification concerns.
 - **Output structure**: `ansible_exports/{export_id}/playbook.yml` + `scripts/{module_id}__{script}.sh` + `files/{module_id}__{filename}`.
 
+### Caldera Integration
+
+An optional red team emulation layer using MITRE Caldera. Generates a Caldera plugin containing exploit abilities for each vulnerability module, loads it into a running Caldera instance, and creates an adversary operation.
+
+- **`POST /admin/caldera-export`** — Download the Caldera plugin as a zip (abilities YAML + adversary definition). Accepts `{"quota": {...}}` or `{"event_id": N}`. Manual alternative to `caldera-setup`.
+- **`POST /admin/caldera-setup`** — Fully automated: generates the plugin, copies it to the shared bind mount, patches `local.yml` to enable the `ctf-exploit` plugin, restarts the Caldera container, waits for health, and creates a "CTF Red Team Emulation" operation using the "CTF Full Exploit Chain" adversary.
+- **`builder/caldera.py`** — Generates the plugin: iterates selected modules, creates one ability YAML per module (recon + exploit steps), and bundles an adversary that chains all abilities.
+- **Caldera env vars** (internal container-to-container, set in docker-compose): `CALDERA_PLUGIN_DIR` (bind mount path, default `/caldera-plugin/ctf-exploit`), `CALDERA_CONFIG_PATH` (default `/caldera-config/local.yml`), `CALDERA_INTERNAL_URL` (default `http://ctf-caldera:8888`), `CALDERA_CONTAINER_NAME` (default `ctf-caldera`), `CALDERA_STARTUP_TIMEOUT` (seconds, default `120`).
+
+### Semaphore Integration
+
+Ansible Semaphore is used to provision VMs by running the module playbook remotely. The client lives in `api/services/semaphore.py`.
+
+- **`SEMAPHORE_URL`** — Base URL of the Semaphore instance (default `http://ctf-semaphore:3000`).
+- **`SEMAPHORE_ADMIN`** / **`SEMAPHORE_ADMIN_PASSWORD`** — Semaphore admin credentials.
+- Semaphore project IDs are stored on the `Event` model (`semaphore_project_id`, `semaphore_key_id`) and reused across VM provisions for the same event.
+- Per-VM provisioning state is tracked in `VM.provision_step`, `VM.provision_error`, `VM.semaphore_project_id`, `VM.semaphore_task_id`, and `VM.agent_status`.
+
+### Vultr VM Provisioning
+
+When `VULTR_API_KEY` is set, admins can create and destroy Vultr VPS instances directly from the admin panel. The flow runs through Semaphore (localhost playbooks, `connection: local`).
+
+**Create flow:**
+1. Admin submits "Create on Vultr" form (hostname, team, OS, plan)
+2. API creates a `VM` record with `status="creating"` and kicks off `_run_vultr_create()` as a background task
+3. Background task stages `playbooks/create-vm.yml` + `collections/requirements.yml` to a temp dir in `/shared/playbooks/`
+4. Creates a Semaphore localhost project/inventory/repo/template, passes extra vars (hostname, plan, OS, region, SSH key, Cloudflare token) via template arguments
+5. Runs the Semaphore task and polls until complete
+6. Parses `VULTR_RESULT={"ip": "...", "vultr_id": "...", "dns_record_id": "..."}` from task output
+7. Updates `VM` with IP, `vultr_id`, `cloudflare_record_id`; sets `status="registered"`
+
+**Destroy flow:** `POST /admin/vms/{id}/destroy-vultr` → stages `destroy-vm.yml` → runs via Semaphore → deletes VM record on success.
+
+**Status polling:** `GET /admin/vms/{vm_id}/create-status` returns `provision_step`, `provision_error`, and current IP. The VM detail page polls this every 4 s while `status === "creating"`.
+
+**Reference endpoints:**
+- `GET /admin/vultr/plans` — proxies Vultr API, returns vc2 plan list for OS/plan dropdowns
+- `GET /admin/vultr/os` — proxies Vultr API, returns OS list
+
+**Secrets:** `VULTR_API_KEY` is injected into the Semaphore container environment (docker-compose); all other secrets (Cloudflare token, SSH public key) are passed as Semaphore template extra vars at runtime.
+
 ### Team and VM Management
 
-The platform supports VM-based deployments alongside the existing per-user Docker flow. VMs are team-scoped (not per-user) and will eventually be auto-provisioned; for now admins register them manually.
+The platform supports VM-based deployments alongside the existing per-user Docker flow. VMs are team-scoped (not per-user). Admins can provision new VPS instances directly from the admin UI ("Create on Vultr") or register existing machines manually ("Register Existing").
 
 - **Team**: groups of users within an event. `Team` has `name`, `event_id` FK. Admin CRUD at `GET/POST /admin/teams`, `PUT/DELETE /admin/teams/{id}`. Teams cannot be deleted while they have VMs.
 - **VM**: a registered target machine. Fields: `hostname`, `ip_address`, `os`, `status` (registered/active/stopped/failed), `ssh_port`, `ssh_user`, `notes`, `team_id`, `event_id` (denormalized from team for query convenience), timestamps. Admin CRUD at `/admin/vms` and `/admin/vms/{id}`.
@@ -120,4 +165,4 @@ The platform supports VM-based deployments alongside the existing per-user Docke
 
 ### Database Models (api/models.py)
 
-Seven models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, status, description, welcome_message, time_limit_minutes), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id), `VMModule` (mirrors UserModule — completion tracking per module per VM). A default "open" event is created at startup if none exists.
+Eight models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`), `VMModule` (mirrors UserModule — completion tracking per module per VM), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.

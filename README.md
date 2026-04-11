@@ -66,8 +66,9 @@ Built images are automatically pushed to the local registry. Users pull images w
 ```
 CTF-IT/
   api/                  # FastAPI application
-    routes/             # auth, images, verify, scoreboard, admin, ansible_export
-    models.py           # User, UserImage, UserModule, Event
+    routes/             # auth, images, verify, scoreboard, admin, ansible_export, caldera_export, caldera_setup, vm
+    services/           # semaphore.py — Ansible Semaphore REST client
+    models.py           # User, UserImage, UserModule, Event, Team, VM, VMModule, PlatformSettings
     main.py             # App entry point
   base/                 # Base Docker image (Ubuntu 22.04 + systemd)
   builder/              # Image build orchestration
@@ -75,6 +76,7 @@ CTF-IT/
     selector.py         # Module selection with quota/conflicts/deps
     renderer.py         # Dockerfile + manifest generation
     ansible.py          # Ansible playbook export generation
+    caldera.py          # MITRE Caldera plugin export generation
     registry.py         # Image tagging, push to local registry
     module_loader.py    # YAML module parsing
   modules/              # Module definitions
@@ -88,6 +90,11 @@ CTF-IT/
     playbook.yml.j2     # Jinja2 template for Ansible playbook export
   frontend/
     templates/          # Jinja2 HTML templates
+  playbooks/            # Ansible playbooks for Vultr VM lifecycle (run via Semaphore)
+    create-vm.yml       # Provision Vultr VPS + optional Cloudflare DNS A record
+    destroy-vm.yml      # Destroy Vultr instance + remove DNS record
+    collections/
+      requirements.yml  # vultr.cloud + community.general (auto-installed by Semaphore)
   audit.py              # In-container audit script (broad system snapshot)
   docker-compose.yml    # Production deployment
   requirements.txt      # Python dependencies
@@ -235,6 +242,45 @@ ctf-playbook/
     inventory_dashboard__app.py
     inventory_dashboard__inventory.service
 ```
+
+## Vultr VM Provisioning
+
+When `VULTR_API_KEY` is set, admins can provision and destroy Vultr VPS instances directly from the admin panel. Playbooks run via the existing Ansible Semaphore integration — no external dependencies beyond the environment variables below.
+
+### Prerequisites
+
+Set in `.env` (see `.env.example` for details):
+
+```bash
+VULTR_API_KEY=your-vultr-api-key
+VULTR_DEFAULT_REGION=ewr          # Vultr region code for new instances
+
+# Optional — auto-creates hostname.domain DNS A records
+CLOUDFLARE_API_TOKEN=your-cf-token
+CLOUDFLARE_DOMAIN=example.com
+```
+
+The Semaphore container also needs `VULTR_API_KEY` — the `deploy/docker-compose.yml` passes it through automatically via `${VULTR_API_KEY:-}`.
+
+### Create a VM
+
+1. Admin panel → Teams & VMs → **Create VM** → select **Create on Vultr** tab
+2. Choose team, OS, and plan (dropdowns populated live from the Vultr API)
+3. Submit — CTF-IT stages `playbooks/create-vm.yml`, runs it via Semaphore, and polls for the result
+4. The VM detail page shows a live step-by-step progress card while the instance is being created
+5. Once complete, the VM is registered with its IP address (and DNS record if Cloudflare is configured) and ready for module assignment
+
+### Destroy a VM
+
+On the VM detail page, click **Destroy on Vultr** (appears when `vultr_id` is set). CTF-IT runs `playbooks/destroy-vm.yml` via Semaphore, which deletes the Vultr instance and the Cloudflare DNS record, then removes the VM from the database.
+
+### Register an Existing VM
+
+Use the **Register Existing** tab on the Create VM form to add a machine you've already provisioned elsewhere (bare metal, another cloud, etc.). Only the IP address and connection details are needed — no Vultr API key required.
+
+### Ansible Collections
+
+`playbooks/collections/requirements.yml` lists the `vultr.cloud` and `community.general` collections. Semaphore installs them automatically before the first playbook run — no manual setup needed.
 
 ## Key Design Decisions
 
