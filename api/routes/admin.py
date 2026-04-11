@@ -491,16 +491,24 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     if not event:
         return JSONResponse({"error": "not found"}, status_code=404)
 
-    quota = body.quota or json.loads(event.quota)
-    vm_quota = body.vm_quota or (json.loads(event.vm_quota) if event.vm_quota else None)
+    try:
+        quota = body.quota or json.loads(event.quota)
+        vm_quota = body.vm_quota or (json.loads(event.vm_quota) if event.vm_quota else None)
+    except (json.JSONDecodeError, TypeError) as e:
+        return JSONResponse({"error": f"invalid quota JSON: {e}"}, status_code=422)
 
     if not vm_quota:
         return JSONResponse({"error": "no vm_quota configured"}, status_code=422)
 
+    from builder.vm_quota_validation import validate_vm_quota
+    vm_quota_errors = validate_vm_quota(vm_quota)
+    if vm_quota_errors:
+        return JSONResponse({"error": "invalid vm_quota", "details": vm_quota_errors}, status_code=422)
+
     from api.models import Team
     teams = db.query(Team).filter(Team.event_id == event_id).all()
     if not teams:
-        return JSONResponse({"error": "no teams defined for this event"}, status_code=422)
+        return JSONResponse({"error": "no teams defined"}, status_code=422)
 
     from builder.module_loader import load_all_modules
     from builder.selector import select_modules
@@ -516,11 +524,11 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     vultr_key = os.environ.get("VULTR_API_KEY")
     if vultr_key:
         try:
-            resp = httpx.get(
-                "https://api.vultr.com/v2/plans?type=vc2&per_page=500",
-                headers={"Authorization": f"Bearer {vultr_key}"},
-                timeout=10,
-            )
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.vultr.com/v2/plans?type=vc2&per_page=500",
+                    headers={"Authorization": f"Bearer {vultr_key}"},
+                )
             for p in resp.json().get("plans", []):
                 if p["id"].startswith("vc2-"):
                     available_plans.append({
@@ -570,7 +578,10 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                 hostname = f"{team.name}-{type_key}-{i + 1}"
 
                 if role == "target":
-                    selected = select_modules(quota, library_list)
+                    try:
+                        selected = select_modules(quota, library_list)
+                    except ValueError as e:
+                        return JSONResponse({"error": str(e)}, status_code=422)
                     sized_plan = plan_for_vm(selected, default_plan, available_plans) if available_plans else default_plan
                     module_objs = [library[m.id] for m in selected if m.id in library]
                     tree = build_attack_tree(module_objs)
