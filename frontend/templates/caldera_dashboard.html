@@ -1,0 +1,661 @@
+{% extends "base.html" %}
+{% block title %}Red Team Operations - CTF Platform{% endblock %}
+{% block extra_style %}
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+.page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+.back-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+.back-link:hover {
+    color: var(--cyan);
+    border-color: var(--cyan);
+}
+.op-state-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.op-state-finished {
+    background: rgba(0, 230, 118, 0.12);
+    color: var(--green);
+    border-left: 3px solid var(--green);
+}
+.op-state-running {
+    background: rgba(0, 229, 255, 0.12);
+    color: var(--cyan);
+    border-left: 3px solid var(--cyan);
+    animation: status-pulse 1.5s ease-in-out infinite;
+}
+.op-state-cleanup {
+    background: rgba(255, 179, 0, 0.12);
+    color: var(--amber);
+    border-left: 3px solid var(--amber);
+}
+.op-state-other {
+    background: rgba(122, 133, 153, 0.12);
+    color: var(--text-secondary);
+    border-left: 3px solid var(--text-secondary);
+}
+.tactic-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(0, 229, 255, 0.08);
+    color: var(--cyan-dim);
+    border: 1px solid rgba(0, 229, 255, 0.15);
+}
+.phase-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(122, 133, 153, 0.1);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+.vm-defended {
+    background: rgba(0, 230, 118, 0.12);
+    color: var(--green);
+    border-left: 3px solid var(--green);
+}
+.vm-vulnerable {
+    background: rgba(255, 23, 68, 0.12);
+    color: var(--red);
+    border-left: 3px solid var(--red);
+}
+.vm-unknown {
+    background: rgba(122, 133, 153, 0.12);
+    color: var(--text-secondary);
+    border-left: 3px solid var(--text-secondary);
+}
+.detail-meta {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.detail-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.detail-meta-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+.detail-meta-value {
+    color: var(--text-primary);
+}
+.output-toggle {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    padding: 0;
+    text-decoration: underline;
+    transition: color 0.2s;
+}
+.output-toggle:hover { color: var(--cyan); }
+.output-pre {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    max-height: 140px;
+    overflow-y: auto;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin-top: 0.4rem;
+    display: none;
+}
+.btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transition: all 0.25s;
+}
+.btn-outline:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.btn-outline.danger:hover {
+    border-color: var(--red);
+    color: var(--red);
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal-box {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6);
+}
+.modal-box h3 { margin-bottom: 1rem; }
+.form-group { margin-bottom: 0.85rem; }
+.modal-footer { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.25rem; }
+{% endblock %}
+
+{% block content %}
+
+{% if op_id %}
+<!-- ===== DETAIL VIEW ===== -->
+<div class="page-header">
+    <a href="/admin/caldera" class="back-link">&#8592; Operations</a>
+    <h1 class="page-title" id="op-name">Loading...</h1>
+    <span id="op-state-badge"></span>
+</div>
+
+<!-- Operation metadata -->
+<div class="card" id="op-meta-card">
+    <div class="detail-meta" id="op-meta-row">
+        <div class="detail-meta-item">
+            <span class="detail-meta-label">Adversary</span>
+            <span class="detail-meta-value" id="dm-adversary">—</span>
+        </div>
+        <div class="detail-meta-item">
+            <span class="detail-meta-label">Group</span>
+            <span class="detail-meta-value"><code id="dm-group">—</code></span>
+        </div>
+        <div class="detail-meta-item">
+            <span class="detail-meta-label">Started</span>
+            <span class="detail-meta-value" id="dm-start">—</span>
+        </div>
+        <div class="detail-meta-item">
+            <span class="detail-meta-label">Finished</span>
+            <span class="detail-meta-value" id="dm-finish">—</span>
+        </div>
+    </div>
+</div>
+
+<!-- Agent summary -->
+<div class="card">
+    <h3>Agent Summary</h3>
+    <table id="agents-table">
+        <thead>
+            <tr>
+                <th>VM / Hostname</th>
+                <th>Succeeded</th>
+                <th>Failed</th>
+                <th>Pending</th>
+            </tr>
+        </thead>
+        <tbody id="agents-body">
+            <tr><td colspan="4" style="color: var(--text-muted); text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Ability results -->
+<div class="card">
+    <h3>Ability Results</h3>
+    <table id="chain-table">
+        <thead>
+            <tr>
+                <th>VM</th>
+                <th>Module</th>
+                <th>Tactic</th>
+                <th>Phase</th>
+                <th>Result</th>
+                <th>Time</th>
+                <th>Output</th>
+            </tr>
+        </thead>
+        <tbody id="chain-body">
+            <tr><td colspan="7" style="color: var(--text-muted); text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<!-- ===== LIST VIEW ===== -->
+<div class="page-header">
+    <h1 class="page-title">Red Team Operations</h1>
+    <button class="btn btn-primary btn-sm" onclick="openCreateModal()">+ Create Operation</button>
+</div>
+
+<!-- Operations table -->
+<div class="card">
+    <h3>Operations</h3>
+    <table id="ops-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>State</th>
+                <th>Group</th>
+                <th>Started</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="ops-body">
+            <tr><td colspan="5" style="color: var(--text-muted); text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- VM Red Team Status -->
+<div class="card">
+    <h3>VM Red Team Status</h3>
+    <table id="vm-summary-table">
+        <thead>
+            <tr>
+                <th>VM</th>
+                <th>Team</th>
+                <th>Total Attacks</th>
+                <th>Exploits Succeeded</th>
+                <th>Exploits Failed</th>
+                <th>Last Activity</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="vm-summary-body">
+            <tr><td colspan="7" style="color: var(--text-muted); text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Create Operation Modal -->
+<div class="modal-overlay" id="create-modal">
+    <div class="modal-box">
+        <h3>Create Operation</h3>
+        <div class="form-group">
+            <label>Scope</label>
+            <select id="scope-select" onchange="onScopeChange()">
+                <option value="event">Event</option>
+                <option value="vm">VM</option>
+            </select>
+        </div>
+        <div class="form-group" id="event-id-group">
+            <label>Event ID</label>
+            <input type="number" id="event-id-input" placeholder="e.g. 1">
+        </div>
+        <div class="form-group" id="vm-id-group" style="display:none;">
+            <label>VM ID</label>
+            <input type="number" id="vm-id-input" placeholder="e.g. 3">
+        </div>
+        <div class="form-group">
+            <label>Adversary Name</label>
+            <input type="text" id="adversary-name-input" value="CTF Full Exploit Chain">
+        </div>
+        <div class="modal-footer">
+            <button class="btn-outline" onclick="closeCreateModal()">Cancel</button>
+            <button class="btn btn-primary btn-sm" onclick="submitCreateOp()">Create</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_script %}
+<script>
+(function () {
+    var AUTO_REFRESH_INTERVAL = 10000;
+    var refreshTimer = null;
+
+    {% if op_id %}
+    var OP_ID = {{ op_id | tojson }};
+    {% else %}
+    var OP_ID = null;
+    {% endif %}
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    function fmtTime(ts) {
+        if (!ts) return '—';
+        try {
+            return new Date(ts).toLocaleString();
+        } catch (e) { return ts; }
+    }
+
+    function stateBadgeHtml(state) {
+        if (!state) return '';
+        var cls = 'op-state-other';
+        if (state === 'finished') cls = 'op-state-finished';
+        else if (state === 'running') cls = 'op-state-running';
+        else if (state === 'cleanup') cls = 'op-state-cleanup';
+        return '<span class="op-state-badge ' + cls + '">' + escHtml(state) + '</span>';
+    }
+
+    function resultHtml(status) {
+        if (status === 1) return '<span style="color:#f85149">&#x2717; Exploited</span>';
+        if (status === -1 || status === -3) return '<span style="color:#3fb950">&#x2713; Defended</span>';
+        return '<span style="color:#8b949e">&#x23F3; Pending</span>';
+    }
+
+    function escHtml(s) {
+        if (s == null) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function apiFetch(url, opts) {
+        return fetch(url, opts).then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.statusText); });
+            return r.json();
+        });
+    }
+
+    // ── Detail view ──────────────────────────────────────────────────────────
+
+    function loadOpDetail() {
+        if (!OP_ID) return;
+        apiFetch('/admin/caldera/operations/' + OP_ID)
+            .then(function (op) {
+                document.getElementById('op-name').textContent = op.name || ('Operation ' + OP_ID);
+                document.getElementById('op-state-badge').innerHTML = stateBadgeHtml(op.state);
+                document.getElementById('dm-adversary').textContent = op.adversary || '—';
+                document.getElementById('dm-group').textContent = op.group || '—';
+                document.getElementById('dm-start').textContent = fmtTime(op.start);
+                document.getElementById('dm-finish').textContent = fmtTime(op.finish) || '—';
+
+                renderAgents(op.agents || []);
+                renderChain(op.chain || []);
+            })
+            .catch(function (e) {
+                console.error('Failed to load operation detail:', e);
+            });
+    }
+
+    function renderAgents(agents) {
+        var tbody = document.getElementById('agents-body');
+        if (!agents.length) {
+            tbody.innerHTML = '<tr><td colspan="4" style="color: var(--text-muted); text-align: center;">No agents</td></tr>';
+            return;
+        }
+        tbody.innerHTML = agents.map(function (a) {
+            var vmLink = a.vm_id
+                ? '<a href="/admin/vm/' + escHtml(a.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(a.vm_hostname || a.paw) + '</a>'
+                : escHtml(a.vm_hostname || a.paw);
+            return '<tr>' +
+                '<td>' + vmLink + '</td>' +
+                '<td style="color:var(--green)">' + (a.success || 0) + '</td>' +
+                '<td style="color:var(--red)">' + (a.failed || 0) + '</td>' +
+                '<td style="color:var(--text-secondary)">' + (a.pending || 0) + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function renderChain(chain) {
+        var tbody = document.getElementById('chain-body');
+        if (!chain.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="color: var(--text-muted); text-align: center;">No abilities executed yet</td></tr>';
+            return;
+        }
+        tbody.innerHTML = chain.map(function (c, idx) {
+            var vmLink = c.vm_id
+                ? '<a href="/admin/vm/' + escHtml(c.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(c.vm_hostname || c.paw) + '</a>'
+                : escHtml(c.vm_hostname || c.paw);
+            var outId = 'out-' + idx;
+            var hasOutput = c.output && c.output.length > 0;
+            var outputCell = hasOutput
+                ? '<button class="output-toggle" onclick="toggleOutput(\'' + outId + '\')">show</button>' +
+                  '<pre class="output-pre" id="' + outId + '">' + escHtml(c.output) + '</pre>'
+                : '<span style="color:var(--text-muted)">—</span>';
+            return '<tr>' +
+                '<td>' + vmLink + '</td>' +
+                '<td>' + escHtml(c.module_name || c.ability_name) + '</td>' +
+                '<td><span class="tactic-badge">' + escHtml(c.tactic || '—') + '</span></td>' +
+                '<td><span class="phase-badge">' + escHtml(c.phase != null ? c.phase : '—') + '</span></td>' +
+                '<td>' + resultHtml(c.status) + '</td>' +
+                '<td style="color:var(--text-muted);font-size:0.75rem;">' + fmtTime(c.finish) + '</td>' +
+                '<td>' + outputCell + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function toggleOutput(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var btn = el.previousElementSibling;
+        if (el.style.display === 'none' || el.style.display === '') {
+            el.style.display = 'block';
+            if (btn) btn.textContent = 'hide';
+        } else {
+            el.style.display = 'none';
+            if (btn) btn.textContent = 'show';
+        }
+    }
+    window.toggleOutput = toggleOutput;
+
+    // ── List view ─────────────────────────────────────────────────────────────
+
+    function loadOpsList() {
+        apiFetch('/admin/caldera/operations')
+            .then(function (ops) {
+                renderOpsList(ops);
+                var hasRunning = ops.some(function (o) { return o.state === 'running'; });
+                if (hasRunning) {
+                    scheduleAutoRefresh();
+                } else {
+                    clearAutoRefresh();
+                }
+            })
+            .catch(function (e) {
+                console.error('Failed to load operations:', e);
+                document.getElementById('ops-body').innerHTML =
+                    '<tr><td colspan="5" style="color:var(--red);">Failed to load operations</td></tr>';
+            });
+        apiFetch('/admin/caldera/vm-summary')
+            .then(renderVmSummary)
+            .catch(function (e) {
+                console.error('Failed to load VM summary:', e);
+                document.getElementById('vm-summary-body').innerHTML =
+                    '<tr><td colspan="7" style="color:var(--red);">Failed to load VM summary</td></tr>';
+            });
+    }
+
+    function renderOpsList(ops) {
+        var tbody = document.getElementById('ops-body');
+        if (!ops.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="color: var(--text-muted); text-align: center;">No operations yet</td></tr>';
+            return;
+        }
+        tbody.innerHTML = ops.map(function (op) {
+            return '<tr>' +
+                '<td><a href="/admin/caldera/operation/' + escHtml(op.id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(op.name) + '</a></td>' +
+                '<td>' + stateBadgeHtml(op.state) + '</td>' +
+                '<td><code style="font-size:0.75rem;">' + escHtml(op.group || '—') + '</code></td>' +
+                '<td style="font-size:0.8rem;color:var(--text-secondary);">' + fmtTime(op.start) + '</td>' +
+                '<td><button class="btn-outline danger" onclick="deleteOp(' + JSON.stringify(op.id) + ')">Delete</button></td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function renderVmSummary(vms) {
+        var tbody = document.getElementById('vm-summary-body');
+        if (!vms.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="color: var(--text-muted); text-align: center;">No VM data yet</td></tr>';
+            return;
+        }
+        tbody.innerHTML = vms.map(function (v) {
+            var statusHtml;
+            if (v.total_attacks > 0 && v.exploits_succeeded === 0) {
+                statusHtml = '<span class="op-state-badge vm-defended">Defended</span>';
+            } else if (v.exploits_succeeded > 0) {
+                statusHtml = '<span class="op-state-badge vm-vulnerable">Vulnerable</span>';
+            } else {
+                statusHtml = '<span class="op-state-badge vm-unknown">Unknown</span>';
+            }
+            var vmLink = v.vm_id
+                ? '<a href="/admin/vm/' + escHtml(v.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(v.hostname) + '</a>'
+                : escHtml(v.hostname);
+            return '<tr>' +
+                '<td>' + vmLink + '</td>' +
+                '<td>' + escHtml(v.team_name || '—') + '</td>' +
+                '<td style="text-align:center;">' + (v.total_attacks || 0) + '</td>' +
+                '<td style="text-align:center;color:var(--red)">' + (v.exploits_succeeded || 0) + '</td>' +
+                '<td style="text-align:center;color:var(--green)">' + (v.exploits_failed || 0) + '</td>' +
+                '<td style="font-size:0.8rem;color:var(--text-secondary);">' + fmtTime(v.last_seen) + '</td>' +
+                '<td>' + statusHtml + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function deleteOp(opId) {
+        if (!confirm('Delete operation ' + opId + '? This cannot be undone.')) return;
+        fetch('/admin/caldera/operations/' + opId, { method: 'DELETE' })
+            .then(function (r) {
+                if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+                showToast('Operation deleted');
+                loadOpsList();
+            })
+            .catch(function (e) {
+                showToast('Delete failed: ' + e.message);
+            });
+    }
+    window.deleteOp = deleteOp;
+
+    function scheduleAutoRefresh() {
+        if (refreshTimer) return;
+        refreshTimer = setInterval(function () {
+            loadOpsList();
+        }, AUTO_REFRESH_INTERVAL);
+    }
+
+    function clearAutoRefresh() {
+        if (refreshTimer) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+    }
+
+    // ── Create Operation Modal ────────────────────────────────────────────────
+
+    function openCreateModal() {
+        document.getElementById('create-modal').classList.add('active');
+    }
+    window.openCreateModal = openCreateModal;
+
+    function closeCreateModal() {
+        document.getElementById('create-modal').classList.remove('active');
+    }
+    window.closeCreateModal = closeCreateModal;
+
+    function onScopeChange() {
+        var scope = document.getElementById('scope-select').value;
+        document.getElementById('event-id-group').style.display = scope === 'event' ? '' : 'none';
+        document.getElementById('vm-id-group').style.display = scope === 'vm' ? '' : 'none';
+    }
+    window.onScopeChange = onScopeChange;
+
+    function submitCreateOp() {
+        var scope = document.getElementById('scope-select').value;
+        var adversary = document.getElementById('adversary-name-input').value.trim();
+        var body = {};
+        if (adversary) body.adversary_name = adversary;
+
+        if (scope === 'event') {
+            var eid = parseInt(document.getElementById('event-id-input').value, 10);
+            if (!eid) { showToast('Please enter a valid Event ID'); return; }
+            body.event_id = eid;
+        } else {
+            var vid = parseInt(document.getElementById('vm-id-input').value, 10);
+            if (!vid) { showToast('Please enter a valid VM ID'); return; }
+            body.vm_id = vid;
+        }
+
+        fetch('/admin/caldera/operations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+            return r.json();
+        })
+        .then(function (op) {
+            closeCreateModal();
+            showToast('Operation created');
+            if (op && op.id) {
+                window.location.href = '/admin/caldera/operation/' + op.id;
+            } else {
+                loadOpsList();
+            }
+        })
+        .catch(function (e) {
+            showToast('Create failed: ' + e.message);
+        });
+    }
+    window.submitCreateOp = submitCreateOp;
+
+    // ── Close modal on overlay click ─────────────────────────────────────────
+
+    var overlay = document.getElementById('create-modal');
+    if (overlay) {
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) closeCreateModal();
+        });
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+
+    if (OP_ID) {
+        loadOpDetail();
+    } else {
+        loadOpsList();
+    }
+})();
+</script>
+{% endblock %}
