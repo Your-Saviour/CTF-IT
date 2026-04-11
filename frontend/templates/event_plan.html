@@ -1,0 +1,831 @@
+{% extends "base.html" %}
+{% block title %}Plan Preview — {{ event_name }}{% endblock %}
+{% block extra_style %}
+/* Preview badge */
+.preview-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--amber-glow); border: 1px solid var(--amber-dim);
+    color: var(--amber); padding: 5px 14px; border-radius: 20px;
+    font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+    margin: 16px 0;
+}
+.preview-dot {
+    width: 7px; height: 7px; background: var(--amber);
+    border-radius: 50%; animation: pulse-amber 1.4s ease-in-out infinite;
+}
+@keyframes pulse-amber { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* Page header */
+.plan-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; flex-wrap: wrap; gap: 12px; }
+.plan-header-left h1 { margin-bottom: 4px; }
+.plan-header-sub { color: var(--text-muted); font-size: 11px; letter-spacing: 0.5px; }
+.plan-header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn-outline {
+    display: inline-block; padding: 0.4rem 1rem; border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem; color: var(--text-secondary); background: transparent;
+    text-decoration: none; transition: all 0.25s;
+}
+.btn-outline:hover { border-color: var(--cyan); color: var(--cyan); }
+
+/* Stats bar */
+.plan-stats { display: grid; grid-template-columns: repeat(5,1fr); gap: 12px; margin-bottom: 20px; }
+.plan-stat-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+.plan-stat-value { font-size: 26px; color: var(--cyan); font-weight: bold; }
+.plan-stat-value.amber { color: var(--amber); }
+.plan-stat-label { font-size: 10px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+/* Quota drawer */
+.quota-drawer { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
+.quota-drawer-header { background: var(--bg-surface); padding: 10px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+.quota-drawer-header .chevron { transition: transform 0.2s; }
+.quota-drawer.open .quota-drawer-header .chevron { transform: rotate(180deg); }
+.quota-drawer-body { background: var(--bg-elevated); padding: 16px; display: none; }
+.quota-drawer.open .quota-drawer-body { display: block; }
+.quota-textareas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+.quota-textarea { width: 100%; background: var(--bg-deep); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 8px; resize: vertical; min-height: 80px; }
+.quota-textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 8px var(--cyan-glow); }
+.quota-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+
+/* Tabs */
+.plan-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.plan-tab { padding: 10px 20px; font-size: 12px; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; letter-spacing: 0.5px; transition: color 0.2s; }
+.plan-tab:hover { color: var(--text-secondary); }
+.plan-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.plan-panel { display: none; }
+.plan-panel.active { display: block; }
+
+/* VM type cards */
+.vm-type-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 14px; overflow: hidden; }
+.vm-type-header { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.2s; }
+.vm-type-header:hover { background: var(--bg-elevated); }
+.vm-type-header-left { display: flex; flex-direction: column; gap: 3px; }
+.vm-type-name { font-size: 14px; color: var(--text-primary); font-weight: bold; }
+.vm-type-meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.vm-type-header-right { display: flex; align-items: center; gap: 8px; }
+.vm-type-body { padding: 18px; display: none; }
+.vm-type-card.open .vm-type-body { display: block; }
+.vm-type-chevron { color: var(--text-muted); transition: transform 0.2s; font-size: 12px; }
+.vm-type-card.open .vm-type-chevron { transform: rotate(180deg); }
+
+/* Badges */
+.badge { padding: 3px 10px; border-radius: 20px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.badge-cyan { background: rgba(0,229,255,0.1); border: 1px solid rgba(0,229,255,0.3); color: var(--cyan); }
+.badge-amber { background: var(--amber-glow); border: 1px solid var(--amber-dim); color: var(--amber); }
+.badge-red { background: rgba(255,23,68,0.1); border: 1px solid rgba(255,23,68,0.3); color: var(--red); }
+.badge-gray { background: var(--bg-overlay); border: 1px solid var(--border); color: var(--text-muted); }
+.badge-green { background: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.3); color: var(--green); }
+
+/* Module grid */
+.module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 8px; }
+.module-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.module-card.dependency { border-color: rgba(0,229,255,0.15); background: rgba(0,229,255,0.03); }
+.module-name { font-size: 11px; color: var(--text-primary); font-weight: bold; margin-bottom: 4px; }
+.module-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.diff-easy { color: var(--green); font-size: 10px; }
+.diff-medium { color: var(--amber); font-size: 10px; }
+.diff-hard { color: var(--red); font-size: 10px; }
+.module-type-label { color: var(--text-muted); font-size: 10px; }
+.module-pts { color: var(--cyan); font-size: 10px; }
+
+/* View toggle */
+.view-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; width: fit-content; margin-bottom: 16px; }
+.view-toggle-btn { padding: 7px 18px; font-size: 11px; font-family: 'JetBrains Mono', monospace; cursor: pointer; border: none; background: transparent; color: var(--text-muted); transition: all 0.2s; }
+.view-toggle-btn.active { background: rgba(0,229,255,0.1); color: var(--cyan); }
+
+/* Team rows */
+.team-section { margin-bottom: 20px; }
+.team-section-header { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+.team-section-name { font-size: 13px; color: var(--text-primary); font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+.team-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.vm-row { display: flex; align-items: center; gap: 12px; padding: 9px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.vm-hostname { color: var(--text-primary); font-size: 12px; min-width: 180px; }
+.vm-plan-label { color: var(--text-muted); font-size: 11px; min-width: 90px; }
+.vm-modules-summary { color: var(--text-secondary); font-size: 11px; flex: 1; }
+
+/* Topology container */
+.topology-container { position: relative; background: var(--bg-deep); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.topology-svg { width: 100%; height: 500px; display: block; cursor: grab; }
+.topology-svg:active { cursor: grabbing; }
+.topo-link { stroke: var(--border); stroke-width: 1.5; fill: none; stroke-dasharray: 4 4; opacity: 0.3; }
+.node-label { text-anchor: middle; font-family: 'JetBrains Mono', monospace; fill: var(--text-primary); pointer-events: none; user-select: none; }
+.node-label-type { text-anchor: middle; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; text-transform: uppercase; pointer-events: none; user-select: none; }
+.topo-tooltip { position: absolute; background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 11px; font-family: 'JetBrains Mono', monospace; pointer-events: none; opacity: 0; transition: opacity 0.15s; white-space: nowrap; z-index: 100; }
+.topo-tooltip.visible { opacity: 1; }
+.topo-tooltip-row { display: flex; gap: 12px; justify-content: space-between; margin-bottom: 3px; }
+.topo-tooltip-label { color: var(--text-muted); }
+.topo-tooltip-value { color: var(--text-primary); }
+.topo-preview-watermark { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-20deg); font-size: 64px; color: rgba(255,179,0,0.04); font-weight: bold; pointer-events: none; user-select: none; letter-spacing: 12px; white-space: nowrap; font-family: 'Rajdhani', sans-serif; text-transform: uppercase; }
+.topo-context-menu { position: absolute; background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 6px; padding: 4px 0; font-size: 12px; font-family: 'JetBrains Mono', monospace; z-index: 200; display: none; min-width: 180px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+.topo-context-menu.visible { display: block; }
+.topo-context-header { padding: 6px 14px; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.topo-context-item { padding: 7px 14px; cursor: pointer; color: var(--text-secondary); }
+.topo-context-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.topo-context-item.disabled { color: var(--text-muted); cursor: default; font-style: italic; }
+.topo-context-item.disabled:hover { background: transparent; color: var(--text-muted); }
+
+/* Attack path cards */
+.vm-attack-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+.vm-attack-header { padding: 10px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
+.vm-attack-hostname { color: var(--text-primary); font-size: 12px; font-weight: bold; flex: 1; }
+.reroll-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; }
+.reroll-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.vm-attack-body { padding: 16px; min-height: 80px; }
+.vm-type-section { margin-bottom: 24px; }
+.vm-type-section-header { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.vm-type-section-title { font-size: 13px; color: var(--text-primary); font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+.no-modules-placeholder { color: var(--text-muted); font-style: italic; font-size: 12px; padding: 16px; }
+
+/* Loading overlay */
+.plan-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text-muted); font-size: 12px; }
+.plan-spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Error banner */
+.plan-error { background: rgba(255,23,68,0.08); border: 1px solid rgba(255,23,68,0.3); border-radius: 6px; padding: 12px 16px; color: var(--red); font-size: 12px; margin-bottom: 16px; display: none; }
+
+/* Responsive */
+@media (max-width: 768px) {
+    .plan-stats { grid-template-columns: repeat(2, 1fr); }
+    .plan-header { flex-direction: column; }
+    .quota-textareas { grid-template-columns: 1fr; }
+}
+{% endblock %}
+
+{% block content %}
+<!-- Page header -->
+<div class="plan-header">
+    <div class="plan-header-left">
+        <h1>Plan Preview &mdash; {{ event_name }}</h1>
+        <div class="plan-header-sub">Dry-run preview. Nothing is deployed.</div>
+    </div>
+    <div class="plan-header-actions">
+        <a href="/admin" class="btn-outline">&larr; Back to Admin</a>
+        <button class="btn-outline" id="reroll-all-btn" onclick="loadPreview()">&#127922; Re-roll All</button>
+        <a href="/admin" class="btn btn-primary btn-sm">&#9654; Start Event</a>
+    </div>
+</div>
+
+<!-- Preview badge -->
+<div class="preview-badge">
+    <span class="preview-dot"></span>
+    Preview mode &mdash; no resources provisioned
+</div>
+
+<!-- Error banner -->
+<div class="plan-error" id="plan-error"></div>
+
+<!-- Stats bar -->
+<div class="plan-stats" id="plan-stats">
+    <div class="plan-stat-card"><div class="plan-stat-value" id="stat-vms">--</div><div class="plan-stat-label">Total VMs</div></div>
+    <div class="plan-stat-card"><div class="plan-stat-value" id="stat-teams">--</div><div class="plan-stat-label">Teams</div></div>
+    <div class="plan-stat-card"><div class="plan-stat-value amber" id="stat-cost">--</div><div class="plan-stat-label">Est. Cost/mo</div></div>
+    <div class="plan-stat-card"><div class="plan-stat-value" id="stat-modules">--</div><div class="plan-stat-label">Total Modules</div></div>
+    <div class="plan-stat-card"><div class="plan-stat-value" id="stat-attacks">--</div><div class="plan-stat-label">Attack Paths</div></div>
+</div>
+
+<!-- Quota drawer -->
+<div class="quota-drawer" id="quota-drawer">
+    <div class="quota-drawer-header" onclick="document.getElementById('quota-drawer').classList.toggle('open')">
+        <span>Quota Override</span>
+        <span class="chevron">&#9660;</span>
+    </div>
+    <div class="quota-drawer-body">
+        <div class="quota-textareas">
+            <div>
+                <div class="quota-label">Module Quota (JSON)</div>
+                <textarea class="quota-textarea" id="quota-module" rows="5" placeholder='{"vulnerability": {"easy": 2, "medium": 3}}'></textarea>
+            </div>
+            <div>
+                <div class="quota-label">VM Quota (JSON)</div>
+                <textarea class="quota-textarea" id="quota-vm" rows="5" placeholder='{"ubuntu_target": {"os": "...", "count": 3}}'></textarea>
+            </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="generateFromQuota()">Generate Preview</button>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="plan-tabs">
+    <div class="plan-tab active" data-tab="vms" onclick="switchTab('vms')">VM Plan</div>
+    <div class="plan-tab" data-tab="topology" onclick="switchTab('topology')">Network Topology</div>
+    <div class="plan-tab" data-tab="attacks" onclick="switchTab('attacks')">Attack Paths</div>
+</div>
+
+<!-- Tab panels -->
+<div class="plan-panel active" id="panel-vms">
+    <div class="plan-loading" id="vms-loading"><div class="plan-spinner"></div> Loading preview...</div>
+    <div id="vms-content"></div>
+</div>
+
+<div class="plan-panel" id="panel-topology">
+    <div class="topology-container">
+        <div class="topo-preview-watermark">PREVIEW</div>
+        <svg id="plan-topology-svg" class="topology-svg"></svg>
+        <div id="plan-topo-tooltip" class="topo-tooltip"></div>
+        <div id="plan-topo-context-menu" class="topo-context-menu"></div>
+    </div>
+</div>
+
+<div class="plan-panel" id="panel-attacks">
+    <div class="plan-loading" id="attacks-loading"><div class="plan-spinner"></div> Loading attack paths...</div>
+    <div id="attacks-content"></div>
+</div>
+
+<!-- Attack tree partial (hidden, loads JS) -->
+<div style="display:none">{% include "attack_tree_partial.html" %}</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function() {
+    const EVENT_ID = {{ event_id }};
+    let previewData = null;
+    let topoInitialized = false;
+    let topoSimulation = null;
+    let topoNodes = [];
+    let topoLinks = [];
+
+    const TEAM_COLORS = ['#00e5ff','#ff6d00','#aa00ff','#00e676','#ff1744','#ffd600','#2979ff','#d500f9','#1de9b6','#ff3d00'];
+
+    // ── Stats ────────────────────────────────────────────────────────────────
+    function updateStats(summary) {
+        document.getElementById('stat-vms').textContent = summary.total_vms || 0;
+        document.getElementById('stat-teams').textContent = summary.teams || 0;
+        document.getElementById('stat-cost').textContent = '$' + (summary.estimated_monthly_cost || 0).toFixed(2);
+        document.getElementById('stat-modules').textContent = summary.total_modules || 0;
+        document.getElementById('stat-attacks').textContent = summary.total_attack_paths || 0;
+    }
+
+    // ── Error ────────────────────────────────────────────────────────────────
+    function showError(msg) {
+        const el = document.getElementById('plan-error');
+        el.textContent = msg;
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 8000);
+    }
+
+    // ── Load preview ─────────────────────────────────────────────────────────
+    async function loadPreview(quotaOverride, vmQuotaOverride) {
+        document.getElementById('vms-loading').style.display = 'flex';
+        document.getElementById('attacks-loading').style.display = 'flex';
+        document.getElementById('plan-error').style.display = 'none';
+
+        const body = {};
+        if (quotaOverride) body.quota = quotaOverride;
+        if (vmQuotaOverride) body.vm_quota = vmQuotaOverride;
+
+        try {
+            const resp = await fetch(`/admin/events/${EVENT_ID}/plan-preview`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                showError(err.error || err.detail || 'Preview failed');
+                document.getElementById('vms-loading').style.display = 'none';
+                document.getElementById('attacks-loading').style.display = 'none';
+                return;
+            }
+
+            previewData = await resp.json();
+            updateStats(previewData.summary);
+            renderActiveTab();
+        } catch (e) {
+            showError('Network error: ' + e.message);
+            document.getElementById('vms-loading').style.display = 'none';
+            document.getElementById('attacks-loading').style.display = 'none';
+        }
+    }
+    window.loadPreview = loadPreview;
+
+    // ── Generate from quota textarea ─────────────────────────────────────────
+    window.generateFromQuota = function() {
+        let quota = null, vmQuota = null;
+        const moduleVal = document.getElementById('quota-module').value.trim();
+        const vmVal = document.getElementById('quota-vm').value.trim();
+
+        if (moduleVal) {
+            try { quota = JSON.parse(moduleVal); }
+            catch (e) { showError('Invalid Module Quota JSON: ' + e.message); return; }
+        }
+        if (vmVal) {
+            try { vmQuota = JSON.parse(vmVal); }
+            catch (e) { showError('Invalid VM Quota JSON: ' + e.message); return; }
+        }
+        loadPreview(quota, vmQuota);
+    };
+
+    // ── Tab switching ────────────────────────────────────────────────────────
+    window.switchTab = function(tab) {
+        document.querySelectorAll('.plan-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        document.querySelectorAll('.plan-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById('panel-' + tab).classList.add('active');
+        renderActiveTab();
+    };
+
+    function renderActiveTab() {
+        const active = document.querySelector('.plan-tab.active');
+        if (!active || !previewData) return;
+        const tab = active.dataset.tab;
+        if (tab === 'vms') renderVmPlan();
+        else if (tab === 'topology') renderTopology();
+        else if (tab === 'attacks') renderAttackPaths();
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function esc(s) {
+        if (!s) return '';
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function sanitizeId(hostname) {
+        return hostname.replace(/\./g, '-');
+    }
+
+    function diffClass(difficulty) {
+        if (!difficulty) return 'diff-easy';
+        const d = difficulty.toLowerCase();
+        if (d === 'hard') return 'diff-hard';
+        if (d === 'medium') return 'diff-medium';
+        return 'diff-easy';
+    }
+
+    function roleBadge(role) {
+        return role === 'attacker'
+            ? '<span class="badge badge-red">attacker</span>'
+            : '<span class="badge badge-cyan">target</span>';
+    }
+
+    function teamColor(teamName) {
+        if (!previewData || !previewData.teams) return TEAM_COLORS[0];
+        const idx = previewData.teams.indexOf(teamName);
+        return TEAM_COLORS[(idx >= 0 ? idx : 0) % TEAM_COLORS.length];
+    }
+
+    // ── VM Plan tab ──────────────────────────────────────────────────────────
+    let vmPlanView = 'type'; // 'type' or 'team'
+
+    function renderVmPlan() {
+        document.getElementById('vms-loading').style.display = 'none';
+        if (!previewData) return;
+
+        let html = `
+            <div class="view-toggle">
+                <button class="view-toggle-btn ${vmPlanView === 'type' ? 'active' : ''}" onclick="setVmView('type')">By VM Type</button>
+                <button class="view-toggle-btn ${vmPlanView === 'team' ? 'active' : ''}" onclick="setVmView('team')">By Team</button>
+            </div>
+        `;
+
+        if (vmPlanView === 'type') {
+            html += renderByType();
+        } else {
+            html += renderByTeam();
+        }
+
+        document.getElementById('vms-content').innerHTML = html;
+
+        // Wire up card toggles
+        document.querySelectorAll('.vm-type-header[data-toggle]').forEach(hdr => {
+            hdr.addEventListener('click', () => {
+                hdr.closest('.vm-type-card').classList.toggle('open');
+            });
+        });
+    }
+
+    window.setVmView = function(view) {
+        vmPlanView = view;
+        renderVmPlan();
+    };
+
+    function renderByType() {
+        let html = '';
+        previewData.vm_types.forEach(vt => {
+            const countLabel = `&times;${vt.count_per_team || vt.vms.length}/team = ${vt.total_count || vt.vms.length} total`;
+            html += `<div class="vm-type-card open">
+                <div class="vm-type-header" data-toggle>
+                    <div class="vm-type-header-left">
+                        <div class="vm-type-name">${esc(vt.type_key)}</div>
+                        <div class="vm-type-meta">${esc(vt.os || '')} &middot; ${esc(vt.default_plan || '')} &middot; ${countLabel}</div>
+                    </div>
+                    <div class="vm-type-header-right">
+                        ${roleBadge(vt.role)}
+                        <span class="badge badge-gray">${esc(vt.region || 'default')}</span>
+                        <span class="vm-type-chevron">&#9660;</span>
+                    </div>
+                </div>
+                <div class="vm-type-body">`;
+
+            if (vt.role === 'attacker') {
+                html += '<div class="no-modules-placeholder">No modules &mdash; attacker role</div>';
+            } else {
+                // Show modules from the first VM as representative, or all unique
+                const allModules = [];
+                const seen = new Set();
+                vt.vms.forEach(vm => {
+                    (vm.modules || []).forEach(m => {
+                        if (!seen.has(m.id)) {
+                            seen.add(m.id);
+                            allModules.push(m);
+                        }
+                    });
+                });
+
+                if (allModules.length === 0) {
+                    html += '<div class="no-modules-placeholder">No modules assigned</div>';
+                } else {
+                    html += '<div class="module-grid">';
+                    allModules.forEach(m => {
+                        const dc = diffClass(m.difficulty);
+                        html += `<div class="module-card">
+                            <div class="module-name">${esc(m.name)}</div>
+                            <div class="module-meta">
+                                <span class="${dc}">${esc(m.difficulty || 'easy')}</span>
+                                <span class="module-type-label">${esc(m.type)}</span>
+                                ${m.points ? '<span class="module-pts">' + m.points + ' pts</span>' : ''}
+                            </div>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+            }
+            html += '</div></div>';
+        });
+        return html;
+    }
+
+    function renderByTeam() {
+        let html = '';
+        (previewData.teams || []).forEach((team, idx) => {
+            const color = TEAM_COLORS[idx % TEAM_COLORS.length];
+            html += `<div class="team-section">
+                <div class="team-section-header">
+                    <span class="team-dot" style="background:${color}"></span>
+                    <span class="team-section-name">${esc(team)}</span>
+                </div>`;
+
+            // Collect all VMs for this team across all vm_types
+            previewData.vm_types.forEach(vt => {
+                (vt.vms || []).filter(vm => vm.team === team).forEach(vm => {
+                    const moduleNames = (vm.modules || []).slice(0, 2).map(m => esc(m.name)).join(', ');
+                    const moreCount = (vm.modules || []).length - 2;
+                    const moduleSummary = vm.modules && vm.modules.length > 0
+                        ? `${vm.modules.length} modules: ${moduleNames}${moreCount > 0 ? ' +' + moreCount + ' more' : ''}`
+                        : '';
+
+                    html += `<div class="vm-row">
+                        <span class="vm-hostname">${esc(vm.hostname)}</span>
+                        <span class="vm-plan-label">${esc(vm.plan || vt.default_plan || '')}</span>
+                        <span class="vm-modules-summary">${moduleSummary}</span>`;
+
+                    if (vt.role === 'attacker') {
+                        html += '<span class="badge badge-red">attacker</span>';
+                    } else {
+                        html += '<span class="badge badge-amber">projected</span>';
+                    }
+                    html += '</div>';
+                });
+            });
+            html += '</div>';
+        });
+        return html;
+    }
+
+    // ── Network Topology tab ─────────────────────────────────────────────────
+    const STATUS_COLORS = {
+        active: '#00e676',
+        registered: '#888',
+        creating: '#ffc800',
+        provisioning: '#ffc800',
+        stopped: '#888',
+        failed: '#ff1744',
+        destroying: '#ff1744',
+        open: '#00e5ff',
+        draft: '#888',
+        projected: '#ffb300'
+    };
+    const NODE_RADIUS = { event: 50, team: 35, vm: 22 };
+
+    function topoStatusColor(status) {
+        return STATUS_COLORS[status] || '#888';
+    }
+
+    function osBadge(os) {
+        if (!os) return '>';
+        const lower = os.toLowerCase();
+        if (lower.includes('ubuntu') || lower.includes('linux') || lower.includes('debian') ||
+            lower.includes('centos') || lower.includes('fedora') || lower.includes('rhel')) return '\u{1F427}';
+        if (lower.includes('windows')) return '\u229E';
+        return '>';
+    }
+
+    function renderTopology() {
+        if (!previewData || !previewData.topology) return;
+
+        const svgEl = document.getElementById('plan-topology-svg');
+        const tooltipEl = document.getElementById('plan-topo-tooltip');
+        const ctxMenuEl = document.getElementById('plan-topo-context-menu');
+
+        // Clear and reinit every time data changes
+        if (topoSimulation) { topoSimulation.stop(); topoSimulation = null; }
+        svgEl.innerHTML = '';
+        topoInitialized = false;
+
+        const width = svgEl.clientWidth || 800;
+        const height = svgEl.clientHeight || 500;
+
+        if (!width || !height) {
+            // SVG not visible yet, retry shortly
+            setTimeout(renderTopology, 100);
+            return;
+        }
+
+        const svg = d3.select(svgEl);
+        const container = svg.append('g');
+        const linkGroup = container.append('g').attr('class', 'links');
+        const nodeGroup = container.append('g').attr('class', 'nodes');
+
+        // Zoom
+        const zoomBehavior = d3.zoom()
+            .scaleExtent([0.2, 4])
+            .on('zoom', (event) => { container.attr('transform', event.transform); });
+        svg.call(zoomBehavior);
+        svg.on('click', () => { ctxMenuEl.classList.remove('visible'); });
+
+        topoNodes = previewData.topology.nodes.map(n => ({ ...n }));
+        topoLinks = previewData.topology.links.map(l => ({ ...l }));
+
+        topoSimulation = d3.forceSimulation(topoNodes)
+            .force('link', d3.forceLink(topoLinks).id(d => d.id)
+                .distance(d => {
+                    const src = typeof d.source === 'object' ? d.source : topoNodes.find(n => n.id === d.source);
+                    return src && src.type === 'event' ? 180 : 100;
+                }))
+            .force('charge', d3.forceManyBody().strength(-300))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(d => NODE_RADIUS[d.type] + 15))
+            .on('tick', () => {
+                linkGroup.selectAll('line')
+                    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+                nodeGroup.selectAll('.node-group')
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+        // Links
+        linkGroup.selectAll('line')
+            .data(topoLinks).enter().append('line')
+            .attr('class', 'topo-link')
+            .attr('stroke', d => {
+                const target = typeof d.target === 'object' ? d.target : topoNodes.find(n => n.id === d.target);
+                return (target && target.color) || '#00e5ff';
+            })
+            .attr('stroke-width', 1);
+
+        // Nodes
+        const groups = nodeGroup.selectAll('.node-group')
+            .data(topoNodes, d => d.id).enter().append('g')
+            .attr('class', 'node-group')
+            .style('cursor', 'pointer')
+            .call(d3.drag()
+                .on('start', (event, d) => {
+                    if (!event.active) topoSimulation.alphaTarget(0.3).restart();
+                    d.fx = d.x; d.fy = d.y;
+                })
+                .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+                .on('end', (event, d) => {
+                    if (!event.active) topoSimulation.alphaTarget(0);
+                    d.fx = null; d.fy = null;
+                }))
+            .on('mouseover', (event, d) => {
+                let html = '';
+                if (d.type === 'vm') {
+                    html = `
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Hostname</span><span class="topo-tooltip-value">${esc(d.hostname || d.label)}</span></div>
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">OS</span><span class="topo-tooltip-value">${esc(d.os || '-')}</span></div>
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${topoStatusColor(d.status)}">${esc(d.status)}</span></div>
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${d.modules_completed || 0}/${d.modules_total || 0}</span></div>
+                    `;
+                } else if (d.type === 'team') {
+                    html = `
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Team</span><span class="topo-tooltip-value">${esc(d.label)}</span></div>
+                    `;
+                } else if (d.type === 'event') {
+                    html = `
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Event</span><span class="topo-tooltip-value">${esc(d.label)}</span></div>
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value">${esc(d.status)}</span></div>
+                    `;
+                }
+                tooltipEl.innerHTML = html;
+                tooltipEl.classList.add('visible');
+            })
+            .on('mousemove', (event) => {
+                const rect = svgEl.closest('.topology-container').getBoundingClientRect();
+                tooltipEl.style.left = (event.clientX - rect.left + 14) + 'px';
+                tooltipEl.style.top = (event.clientY - rect.top + 14) + 'px';
+            })
+            .on('mouseout', () => { tooltipEl.classList.remove('visible'); })
+            .on('contextmenu', (event, d) => {
+                event.preventDefault();
+                event.stopPropagation();
+                tooltipEl.classList.remove('visible');
+
+                let items = '';
+                if (d.type === 'vm') {
+                    items = `
+                        <div class="topo-context-header">${esc(d.label)} (projected)</div>
+                        <div class="topo-context-item disabled">VM not yet deployed</div>
+                    `;
+                } else if (d.type === 'team') {
+                    items = `
+                        <div class="topo-context-header">${esc(d.label)}</div>
+                        <div class="topo-context-item disabled">Preview mode</div>
+                    `;
+                } else {
+                    items = `
+                        <div class="topo-context-header">${esc(d.label)}</div>
+                        <div class="topo-context-item disabled">Preview mode</div>
+                    `;
+                }
+
+                ctxMenuEl.innerHTML = items;
+                const rect = svgEl.closest('.topology-container').getBoundingClientRect();
+                ctxMenuEl.style.left = (event.clientX - rect.left) + 'px';
+                ctxMenuEl.style.top = (event.clientY - rect.top) + 'px';
+                ctxMenuEl.classList.add('visible');
+            });
+
+        // Close context menu on escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') ctxMenuEl.classList.remove('visible');
+        });
+
+        // Event nodes
+        groups.filter(d => d.type === 'event').each(function(d) {
+            const g = d3.select(this);
+            g.append('circle')
+                .attr('r', NODE_RADIUS.event)
+                .attr('fill', 'rgba(0,229,255,0.08)')
+                .attr('stroke', topoStatusColor(d.status))
+                .attr('stroke-width', 2)
+                .style('filter', 'drop-shadow(0 0 12px rgba(0,229,255,0.3))');
+            g.append('text').attr('class', 'node-label-type')
+                .attr('y', -8).attr('fill', '#00e5ff').text('EVENT');
+            g.append('text').attr('class', 'node-label')
+                .attr('y', 8).attr('font-size', '11px').text(d.label);
+        });
+
+        // Team nodes
+        groups.filter(d => d.type === 'team').each(function(d) {
+            const g = d3.select(this);
+            const color = d.color || '#ffb400';
+            g.append('circle')
+                .attr('r', NODE_RADIUS.team)
+                .attr('fill', `${color}18`)
+                .attr('stroke', color)
+                .attr('stroke-width', 2)
+                .style('filter', `drop-shadow(0 0 10px ${color}40)`);
+            g.append('text').attr('class', 'node-label-type')
+                .attr('y', -6).attr('fill', color).text('TEAM');
+            g.append('text').attr('class', 'node-label')
+                .attr('y', 8).attr('font-size', '10px').text(d.label);
+        });
+
+        // VM nodes (projected)
+        groups.filter(d => d.type === 'vm').each(function(d) {
+            const g = d3.select(this);
+            const color = topoStatusColor(d.status);
+            const size = 44;
+            const half = size / 2;
+
+            g.append('rect')
+                .attr('class', 'vm-bg')
+                .attr('x', -half).attr('y', -half)
+                .attr('width', size).attr('height', size)
+                .attr('rx', 10)
+                .attr('fill', `${color}14`)
+                .attr('stroke', color)
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', d.status === 'projected' ? '5,3' : 'none')
+                .style('filter', `drop-shadow(0 0 6px ${color}50)`);
+
+            // Server rack
+            const rackW = 20, rackH = 5, rackGap = 3;
+            const startY = -half + 10;
+            for (let i = 0; i < 3; i++) {
+                const ry = startY + i * (rackH + rackGap);
+                g.append('rect').attr('class', 'vm-rack')
+                    .attr('x', -rackW / 2).attr('y', ry)
+                    .attr('width', rackW).attr('height', rackH)
+                    .attr('rx', 1.5)
+                    .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 0.8);
+                g.append('circle').attr('class', 'vm-led')
+                    .attr('cx', rackW / 2 - 3).attr('cy', ry + rackH / 2)
+                    .attr('r', 1.5).attr('fill', color);
+            }
+
+            // OS badge
+            const badgeX = half - 6, badgeY = half - 6;
+            g.append('circle').attr('cx', badgeX).attr('cy', badgeY)
+                .attr('r', 7).attr('fill', 'var(--bg-deep)')
+                .attr('stroke', color).attr('stroke-width', 0.8);
+            g.append('text').attr('x', badgeX).attr('y', badgeY + 3.5)
+                .attr('text-anchor', 'middle').attr('font-size', '8px')
+                .attr('fill', color).text(osBadge(d.os));
+
+            // Label
+            g.append('text').attr('class', 'node-label')
+                .attr('y', half + 14).attr('font-size', '9px').text(d.label);
+        });
+
+        topoInitialized = true;
+    }
+
+    // ── Attack Paths tab ─────────────────────────────────────────────────────
+    function renderAttackPaths() {
+        document.getElementById('attacks-loading').style.display = 'none';
+        if (!previewData) return;
+
+        let html = '';
+        previewData.vm_types.forEach(vt => {
+            html += `<div class="vm-type-section">
+                <div class="vm-type-section-header">
+                    <span class="vm-type-section-title">${esc(vt.type_key)}</span>
+                    <span class="badge badge-gray">${vt.total_count || vt.vms.length} VMs</span>
+                    ${roleBadge(vt.role)}
+                </div>`;
+
+            if (vt.role === 'attacker') {
+                html += '<div class="no-modules-placeholder">No modules &mdash; attacker role</div>';
+            } else {
+                vt.vms.forEach(vm => {
+                    const sid = sanitizeId(vm.hostname);
+                    html += `<div class="vm-attack-card">
+                        <div class="vm-attack-header">
+                            <span class="vm-attack-hostname">${esc(vm.hostname)}</span>
+                            <span class="badge badge-amber">${esc(vm.team)}</span>
+                            <span class="badge badge-gray">${esc(vm.plan || vt.default_plan || '')}</span>
+                            <button class="reroll-btn" data-hostname="${esc(vm.hostname)}" onclick="rerollVm(this)">&#127922; Re-roll</button>
+                        </div>
+                        <div class="vm-attack-body">
+                            <div id="tree-${sid}" class="attack-tree-wrap" style="min-height:200px;"></div>
+                        </div>
+                    </div>`;
+                });
+            }
+            html += '</div>';
+        });
+
+        document.getElementById('attacks-content').innerHTML = html;
+
+        // Render attack trees after DOM update
+        setTimeout(() => {
+            previewData.vm_types.forEach(vt => {
+                if (vt.role === 'attacker') return;
+                vt.vms.forEach(vm => {
+                    if (vm.attack_tree) {
+                        const sid = sanitizeId(vm.hostname);
+                        window.renderAttackTree('tree-' + sid, vm.attack_tree);
+                    }
+                });
+            });
+        }, 50);
+    }
+
+    // ── Per-VM re-roll ───────────────────────────────────────────────────────
+    window.rerollVm = async function(btn) {
+        const hostname = btn.dataset.hostname;
+        btn.textContent = '...';
+        btn.disabled = true;
+
+        await loadPreview();
+
+        // After reload, re-render attack tree for this specific VM
+        if (previewData) {
+            setTimeout(() => {
+                previewData.vm_types.forEach(vt => {
+                    if (vt.role === 'attacker') return;
+                    vt.vms.forEach(vm => {
+                        if (vm.hostname === hostname && vm.attack_tree) {
+                            const sid = sanitizeId(vm.hostname);
+                            const container = document.getElementById('tree-' + sid);
+                            if (container) {
+                                window.renderAttackTree('tree-' + sid, vm.attack_tree);
+                            }
+                        }
+                    });
+                });
+            }, 100);
+        }
+    };
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        loadPreview();
+    });
+})();
+</script>
+{% endblock %}
