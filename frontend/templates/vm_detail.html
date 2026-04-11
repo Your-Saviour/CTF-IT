@@ -159,6 +159,9 @@
 }
 .inline-edit textarea { width: 100%; resize: vertical; }
 .card h3 { margin-bottom: 1rem; }
+.rt-result-exploited { color: var(--red); font-weight: 700; }
+.rt-result-defended  { color: var(--green); font-weight: 700; }
+.rt-result-pending   { color: var(--text-muted); }
 {% endblock %}
 
 {% block content %}
@@ -304,6 +307,17 @@
     <div id="provision-log-wrap" style="display:none;">
         <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">Playbook Output (last 20 lines)</div>
         <div class="provision-log" id="provision-log"></div>
+    </div>
+</div>
+
+<!-- Red Team Status -->
+<div class="card" style="margin-bottom: 1.25rem;">
+    <h3 style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+        <span>Red Team Status</span>
+        <button class="btn btn-primary btn-sm" onclick="runAttack()">Run Attack</button>
+    </h3>
+    <div id="rt-content">
+        <span style="color: var(--text-muted); font-size: 0.85rem;">Loading...</span>
     </div>
 </div>
 
@@ -919,7 +933,93 @@ function testConnection() {
         });
 }
 
+// ── Red Team Status ───────────────────────────────────────────────────────────
+
+function loadRedTeamStatus() {
+    var vmId = window.location.pathname.split('/').pop();
+    fetch('/admin/caldera/vm/' + vmId + '/results')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderRedTeamStatus(data);
+        })
+        .catch(function(e) {
+            document.getElementById('rt-content').innerHTML =
+                '<span style="color: var(--text-muted); font-size: 0.85rem;">Failed to load results.</span>';
+        });
+}
+
+function renderRedTeamStatus(data) {
+    var el = document.getElementById('rt-content');
+
+    if (data.message && (!data.results || !data.results.length)) {
+        el.innerHTML = '<span style="color: var(--amber); font-size: 0.85rem;">' + esc(data.message) + '</span>';
+        return;
+    }
+
+    if (!data.results || !data.results.length) {
+        el.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No attack results yet.</span>';
+        return;
+    }
+
+    var opLink = '';
+    if (data.operation_id) {
+        opLink = '<div style="margin-bottom: 0.75rem; font-size: 0.82rem;">' +
+            '<span style="color: var(--text-secondary);">Operation: </span>' +
+            '<a href="/admin/caldera/operation/' + esc(data.operation_id) + '" ' +
+            'style="color: var(--cyan);">' + esc(data.operation_name || data.operation_id) + '</a>' +
+            '</div>';
+    }
+
+    var rows = data.results.map(function(r) {
+        var phaseBadge = '<span class="badge">' + esc(r.phase || '—') + '</span>';
+        var resultHtml;
+        if (r.status === 1) {
+            resultHtml = '<span class="rt-result-exploited">&#10007; Exploited</span>';
+        } else if (r.status === -1 || r.status === -3) {
+            resultHtml = '<span class="rt-result-defended">&#10003; Defended</span>';
+        } else {
+            resultHtml = '<span class="rt-result-pending">&#8987; Pending</span>';
+        }
+        var timeStr = r.finish ? new Date(r.finish).toLocaleString() : '—';
+        return '<tr>' +
+            '<td><strong>' + esc(r.module_name || r.ability_name || '—') + '</strong></td>' +
+            '<td>' + phaseBadge + '</td>' +
+            '<td>' + resultHtml + '</td>' +
+            '<td style="font-size: 0.8rem; color: var(--text-secondary);">' + esc(timeStr) + '</td>' +
+            '</tr>';
+    }).join('');
+
+    el.innerHTML = opLink +
+        '<table>' +
+        '<thead><tr><th>Module</th><th>Phase</th><th>Result</th><th>Time</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '</table>';
+}
+
+function runAttack() {
+    var vmId = window.location.pathname.split('/').pop();
+    if (!confirm('Launch a Caldera red team attack against this VM?')) return;
+    fetch('/admin/caldera/operations', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({vm_id: parseInt(vmId, 10)})
+    })
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok) {
+                showToast('Attack operation started');
+                loadRedTeamStatus();
+            } else {
+                showToast('Error: ' + (res.data.error || 'Unknown error'));
+            }
+        })
+        .catch(function(e) {
+            showToast('Error: ' + e.message);
+        });
+}
+
 loadVM();
 loadModuleOptions();
+loadRedTeamStatus();
 </script>
 {% endblock %}
