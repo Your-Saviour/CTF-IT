@@ -992,10 +992,13 @@ function renderRedTeamStatus(data) {
     var rows = data.results.map(function(r) {
         var phaseBadge = r.phase ? '<span class="badge bg-secondary">' + esc(r.phase) + '</span>' : '—';
         var resultHtml;
-        if (r.status === 1) {
+        // Caldera status: exit-code semantics after finish (0=success/exploited, non-0=fail/defended)
+        if (r.finish && r.status === 0) {
             resultHtml = '<span class="rt-result-exploited">&#10007; Exploited</span>';
-        } else if (r.status === -1 || r.status === -3) {
+        } else if (r.finish && r.status !== 0) {
             resultHtml = '<span class="rt-result-defended">&#10003; Defended</span>';
+        } else if (r.status === -3) {
+            resultHtml = '<span class="rt-result-pending">&#9654; Running</span>';
         } else {
             resultHtml = '<span class="rt-result-pending">&#8987; Pending</span>';
         }

@@ -177,7 +177,7 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
             "module_id": module_info.get("module_id"),
             "module_name": module_info.get("module_name"),
             "phase": module_info.get("phase"),
-            "status": link.get("status"),  # -3=timeout, -2=discarded, -1=fail, 0=queued, 1=success
+            "status": link.get("status"),  # exit-code: 0=success, >0=fail; -3=collecting, -2=caldera-fail, -5=discard
             "output": (link.get("output") or "")[:500],  # truncate long outputs
             "collect": link.get("collect"),
             "finish": link.get("finish"),
@@ -197,9 +197,10 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
                 "pending": 0,
             }
         s = link["status"]
-        if s == 1:
+        f = link.get("finish")
+        if f and s == 0:
             agent_summary[paw]["success"] += 1
-        elif s in (-1, -3):
+        elif f and (s != 0):
             agent_summary[paw]["failed"] += 1
         else:
             agent_summary[paw]["pending"] += 1
@@ -233,16 +234,17 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
                 status = link["status"]
                 output = link.get("output", "")
                 # Classify: check if output indicates skip
+                finish = link.get("finish")
                 if output and output.startswith("SKIPPED:"):
                     classified = "skipped"
-                elif status == 1:
+                elif finish and status == 0:
                     classified = "succeeded"
-                elif status in (-1, -3):
+                elif finish and status != 0:
                     classified = "failed"
-                elif status == 0:
-                    classified = "pending"
+                elif status == -3:
+                    classified = "pending"  # collecting/in-progress
                 else:
-                    classified = "unknown"
+                    classified = "pending"
                 # For a module, prefer exploit status over recon status
                 phase = link.get("phase", "")
                 if mid not in module_status or phase == "exploit":
@@ -355,9 +357,10 @@ async def vm_attack_summary(request: Request, db: Session = Depends(get_db)):
                 }
             vm_stats[vm_id]["total_attacks"] += 1
             s = link.get("status")
-            if s == 1:
+            f = link.get("finish")
+            if f and s == 0:
                 vm_stats[vm_id]["exploits_succeeded"] += 1
-            elif s in (-1, -3):
+            elif f and s != 0:
                 vm_stats[vm_id]["exploits_failed"] += 1
             finish = link.get("finish")
             if finish and (not vm_stats[vm_id]["last_seen"] or finish > vm_stats[vm_id]["last_seen"]):

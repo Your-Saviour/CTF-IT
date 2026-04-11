@@ -386,9 +386,11 @@
         return '<span class="op-state-badge ' + cls + '">' + escHtml(state) + '</span>';
     }
 
-    function resultHtml(status) {
-        if (status === 1) return '<span style="color:#f85149">&#x2717; Exploited</span>';
-        if (status === -1 || status === -3) return '<span style="color:#3fb950">&#x2713; Defended</span>';
+    function resultHtml(status, finish) {
+        // Caldera exit-code semantics: 0=success, non-0=fail; finish=null means not yet run
+        if (finish && status === 0) return '<span style="color:#f85149">&#x2717; Exploited</span>';
+        if (finish && status !== 0) return '<span style="color:#3fb950">&#x2713; Defended</span>';
+        if (status === -3) return '<span style="color:#8b949e">&#x25B6; Running</span>';
         return '<span style="color:#8b949e">&#x23F3; Pending</span>';
     }
 
@@ -492,7 +494,7 @@
                 '<td>' + escHtml(c.module_name || c.ability_name) + '</td>' +
                 '<td><span class="tactic-badge">' + escHtml(c.tactic || '—') + '</span></td>' +
                 '<td><span class="phase-badge">' + escHtml(c.phase != null ? c.phase : '—') + '</span></td>' +
-                '<td>' + resultHtml(c.status) + '</td>' +
+                '<td>' + resultHtml(c.status, c.finish) + '</td>' +
                 '<td style="color:var(--text-muted);font-size:0.75rem;">' + fmtTime(c.finish) + '</td>' +
                 '<td>' + outputCell + '</td>' +
                 '</tr>';
