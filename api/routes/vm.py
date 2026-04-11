@@ -23,6 +23,14 @@ _log = logging.getLogger(__name__)
 SHARED_PLAYBOOK_DIR = os.environ.get("SHARED_PLAYBOOK_DIR", "/shared/playbooks")
 CALDERA_INTERNAL_URL = os.environ.get("CALDERA_INTERNAL_URL", "http://ctf-caldera:8888")
 CALDERA_AGENT_URL = os.environ.get("CALDERA_AGENT_URL", "http://localhost:8888")
+VULTR_API_KEY = os.environ.get("VULTR_API_KEY", "")
+VULTR_DEFAULT_REGION = os.environ.get("VULTR_DEFAULT_REGION", "ewr")
+CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+CLOUDFLARE_DOMAIN = os.environ.get("CLOUDFLARE_DOMAIN", "")
+
+# Path to the bundled VM provisioning playbooks (relative to project root)
+_HERE = Path(__file__).parent.parent.parent
+PLAYBOOKS_DIR = _HERE / "playbooks"
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -189,6 +197,13 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "modules": modules,
         "created_at": vm.created_at.isoformat() if vm.created_at else None,
         "updated_at": vm.updated_at.isoformat() if vm.updated_at else None,
+        # Vultr provisioning fields
+        "vultr_id": vm.vultr_id,
+        "vultr_plan": vm.vultr_plan,
+        "vultr_region": vm.vultr_region,
+        "cloudflare_record_id": vm.cloudflare_record_id,
+        "provision_step": vm.provision_step,
+        "provision_error": vm.provision_error,
     }
 
 
@@ -911,3 +926,401 @@ async def agent_status(vm_id: int, request: Request, db: Session = Depends(get_d
             pass
 
     return result
+
+
+# ── Vultr Reference Data ───────────────────────────────────────────────────────
+
+@router.get("/vultr/plans")
+async def vultr_plans(request: Request, db: Session = Depends(get_db)):
+    """Return Vultr vc2 plans for the VM creation dropdown."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if not VULTR_API_KEY:
+        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
+
+    try:
+        import httpx as _httpx
+        resp = _httpx.get(
+            "https://api.vultr.com/v2/plans",
+            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
+            params={"type": "vc2", "per_page": 500},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        plans = resp.json().get("plans", [])
+        result = sorted(
+            [
+                {
+                    "id": p["id"],
+                    "vcpu_count": p["vcpu_count"],
+                    "ram": p["ram"],
+                    "disk": p["disk"],
+                    "monthly_cost": p["monthly_cost"],
+                    "label": (
+                        f"{p['id']} — {p['vcpu_count']} vCPU, "
+                        f"{p['ram'] // 1024}GB RAM, {p['disk']}GB disk "
+                        f"(${p['monthly_cost']}/mo)"
+                    ),
+                }
+                for p in plans
+                if p.get("id", "").startswith("vc2-")
+            ],
+            key=lambda x: x["monthly_cost"],
+        )
+        return {"plans": result}
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to fetch Vultr plans: {exc}"}, status_code=502)
+
+
+@router.get("/vultr/os")
+async def vultr_os_list(request: Request, db: Session = Depends(get_db)):
+    """Return Vultr OS options for the VM creation dropdown."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if not VULTR_API_KEY:
+        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
+
+    try:
+        import httpx as _httpx
+        resp = _httpx.get(
+            "https://api.vultr.com/v2/os",
+            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
+            params={"per_page": 500},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        os_list = resp.json().get("os", [])
+        result = sorted(
+            [{"id": o["id"], "name": o["name"], "family": o.get("family", "")} for o in os_list],
+            key=lambda x: x["name"],
+        )
+        return {"os": result}
+    except Exception as exc:
+        return JSONResponse({"error": f"Failed to fetch Vultr OS list: {exc}"}, status_code=502)
+
+
+# ── Vultr VM Creation ──────────────────────────────────────────────────────────
+
+def _run_vultr_create(vm_id: int) -> None:
+    """Synchronous background task: create a Vultr VPS and update the VM record.
+
+    Runs the bundled create-vm.yml Ansible playbook via Semaphore, then
+    parses task output to extract the assigned IP and Vultr instance ID.
+    """
+    import re as _re
+    import shutil as _shutil
+
+    from api.database import SessionLocal
+    from api.models import utcnow
+    from api.services.semaphore import SemaphoreClient
+    from api.services.ssh_keys import get_or_create_platform_keypair
+
+    db = SessionLocal()
+    playbook_dir = None
+    try:
+        vm = db.query(VM).filter(VM.id == vm_id).first()
+        if not vm:
+            return
+
+        # ── Step 1: Stage playbook files ─────────────────────────────────────
+        _update_provision_step(db, vm, "staging_playbook")
+
+        export_id = f"vultr_{vm_id}_{uuid.uuid4().hex[:8]}"
+        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
+        playbook_dir.mkdir(parents=True, exist_ok=True)
+
+        _shutil.copy(PLAYBOOKS_DIR / "create-vm.yml", playbook_dir / "create-vm.yml")
+        collections_dir = playbook_dir / "collections"
+        collections_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            PLAYBOOKS_DIR / "collections" / "requirements.yml",
+            collections_dir / "requirements.yml",
+        )
+
+        # ── Step 2: Build extra vars ──────────────────────────────────────────
+        _update_provision_step(db, vm, "configuring_semaphore")
+
+        private_key, public_key = get_or_create_platform_keypair(db)
+
+        extra_vars: dict = {
+            "vm_hostname": vm.hostname or f"ctf-vm-{vm_id}",
+            "vm_plan": vm.vultr_plan or "vc2-1c-1gb",
+            "vm_os": vm.os or "Ubuntu 24.04 LTS x64",
+            "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
+            "ssh_key_name": "ctf-platform",
+            "ssh_public_key": public_key,
+        }
+        if CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
+            extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
+            extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
+
+        # ── Step 3: Create Semaphore project + run playbook ───────────────────
+        _update_provision_step(db, vm, "creating_instance")
+
+        with SemaphoreClient() as client:
+            client.login()
+
+            project_id = client.create_project(f"CTF Vultr Create VM {vm_id}")
+            key_id = client.create_key(project_id, "platform-key", private_key)
+            inventory_id = client.create_localhost_inventory(project_id, "localhost", key_id)
+            repo_id = client.create_repository(
+                project_id, f"create-vm-{vm_id}", str(playbook_dir), key_id
+            )
+            template_id = client.create_template(
+                project_id, f"create-vm-{vm_id}", "create-vm.yml",
+                inventory_id, repo_id, key_id,
+                extra_vars=extra_vars,
+            )
+
+            task_id = client.run_task(project_id, template_id)
+            vm.semaphore_task_id = task_id
+            vm.updated_at = utcnow()
+            db.commit()
+
+            # Poll until complete
+            while True:
+                status = client.get_task_status(project_id, task_id)
+                if status == "success":
+                    break
+                elif status in ("error", "stopped"):
+                    output_lines = client.get_task_output(project_id, task_id)
+                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
+                    raise RuntimeError(f"create-vm.yml failed (status={status}):\n{tail}")
+                time.sleep(10)
+
+            output_lines = client.get_task_output(project_id, task_id)
+
+        # ── Step 4: Extract results from playbook output ──────────────────────
+        _update_provision_step(db, vm, "extracting_results")
+
+        vultr_result = None
+        for line in reversed(output_lines):
+            match = _re.search(r'VULTR_RESULT=(\{.*\})', line)
+            if match:
+                try:
+                    vultr_result = json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
+                break
+
+        if not vultr_result or not vultr_result.get("ip"):
+            raise RuntimeError(
+                "Could not extract VM IP from playbook output. "
+                "Check Semaphore task logs for details."
+            )
+
+        vm.ip_address = vultr_result["ip"]
+        vm.vultr_id = vultr_result.get("vultr_id", "")
+        vm.cloudflare_record_id = vultr_result.get("dns_record_id") or None
+        vm.status = "registered"
+        vm.provision_step = "completed"
+        vm.updated_at = utcnow()
+        db.commit()
+
+    except Exception as exc:
+        from api.models import utcnow as _utcnow
+        _log.exception("Vultr VM creation failed for VM %d", vm_id)
+        try:
+            vm.status = "failed"
+            vm.provision_step = "failed"
+            vm.provision_error = str(exc)
+            vm.updated_at = _utcnow()
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+        if playbook_dir and playbook_dir.exists():
+            shutil.rmtree(playbook_dir, ignore_errors=True)
+
+
+@router.post("/vms/create-vultr")
+async def create_vm_on_vultr(request: Request, db: Session = Depends(get_db)):
+    """Create a new Vultr VPS and register it as a VM."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if not VULTR_API_KEY:
+        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
+
+    body = await request.json()
+    team_id = body.get("team_id")
+    if not team_id:
+        return JSONResponse({"error": "team_id is required"}, status_code=422)
+
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        return JSONResponse({"error": "Team not found"}, status_code=404)
+
+    hostname = (body.get("hostname") or "").strip()
+    if not hostname:
+        return JSONResponse({"error": "hostname is required"}, status_code=422)
+
+    vultr_plan = (body.get("vultr_plan") or "").strip()
+    if not vultr_plan:
+        return JSONResponse({"error": "vultr_plan is required"}, status_code=422)
+
+    from api.models import utcnow
+    vm = VM(
+        hostname=hostname,
+        os=body.get("vultr_os") or "Ubuntu 24.04 LTS x64",
+        status="creating",
+        ssh_user=body.get("ssh_user") or "root",
+        ssh_port=22,
+        notes=body.get("notes") or None,
+        team_id=team_id,
+        event_id=team.event_id,
+        vultr_plan=vultr_plan,
+        vultr_region=VULTR_DEFAULT_REGION,
+        provision_step="staging_playbook",
+    )
+    db.add(vm)
+    db.commit()
+    db.refresh(vm)
+
+    asyncio.create_task(asyncio.to_thread(_run_vultr_create, vm.id))
+    return {"status": "creating", "id": vm.id}
+
+
+@router.get("/vms/{vm_id}/create-status")
+async def create_status(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    """Poll Vultr VM creation progress."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+
+    return {
+        "status": vm.status,
+        "provision_step": vm.provision_step,
+        "provision_error": vm.provision_error,
+        "ip_address": vm.ip_address,
+        "vultr_id": vm.vultr_id,
+    }
+
+
+# ── Vultr VM Destruction ───────────────────────────────────────────────────────
+
+def _run_vultr_destroy(vm_id: int) -> None:
+    """Synchronous background task: destroy a Vultr VPS and clean up DNS."""
+    import shutil as _shutil
+
+    from api.database import SessionLocal
+    from api.models import utcnow
+    from api.services.semaphore import SemaphoreClient
+    from api.services.ssh_keys import get_or_create_platform_keypair
+
+    db = SessionLocal()
+    playbook_dir = None
+    try:
+        vm = db.query(VM).filter(VM.id == vm_id).first()
+        if not vm:
+            return
+
+        if not vm.vultr_id and not vm.hostname:
+            raise ValueError("VM has no Vultr ID or hostname — cannot destroy")
+
+        export_id = f"vultr_destroy_{vm_id}_{uuid.uuid4().hex[:8]}"
+        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
+        playbook_dir.mkdir(parents=True, exist_ok=True)
+
+        _shutil.copy(PLAYBOOKS_DIR / "destroy-vm.yml", playbook_dir / "destroy-vm.yml")
+        collections_dir = playbook_dir / "collections"
+        collections_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            PLAYBOOKS_DIR / "collections" / "requirements.yml",
+            collections_dir / "requirements.yml",
+        )
+
+        private_key, _ = get_or_create_platform_keypair(db)
+
+        extra_vars: dict = {
+            "instance_label": vm.hostname or f"ctf-vm-{vm_id}",
+            "instance_region": vm.vultr_region or VULTR_DEFAULT_REGION,
+        }
+        if vm.cloudflare_record_id and CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
+            extra_vars["dns_hostname"] = vm.hostname or ""
+            extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
+            extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
+
+        with SemaphoreClient() as client:
+            client.login()
+
+            project_id = client.create_project(f"CTF Vultr Destroy VM {vm_id}")
+            key_id = client.create_key(project_id, "platform-key", private_key)
+            inventory_id = client.create_localhost_inventory(project_id, "localhost", key_id)
+            repo_id = client.create_repository(
+                project_id, f"destroy-vm-{vm_id}", str(playbook_dir), key_id
+            )
+            template_id = client.create_template(
+                project_id, f"destroy-vm-{vm_id}", "destroy-vm.yml",
+                inventory_id, repo_id, key_id,
+                extra_vars=extra_vars,
+            )
+            task_id = client.run_task(project_id, template_id)
+
+            while True:
+                status = client.get_task_status(project_id, task_id)
+                if status == "success":
+                    break
+                elif status in ("error", "stopped"):
+                    output_lines = client.get_task_output(project_id, task_id)
+                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
+                    raise RuntimeError(f"destroy-vm.yml failed (status={status}):\n{tail}")
+                time.sleep(10)
+
+        db.delete(vm)
+        db.commit()
+
+    except Exception as exc:
+        from api.models import utcnow as _utcnow
+        _log.exception("Vultr VM destruction failed for VM %d", vm_id)
+        try:
+            vm.status = "failed"
+            vm.provision_error = str(exc)
+            vm.updated_at = _utcnow()
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+        if playbook_dir and playbook_dir.exists():
+            shutil.rmtree(playbook_dir, ignore_errors=True)
+
+
+@router.post("/vms/{vm_id}/destroy-vultr")
+async def destroy_vm_on_vultr(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    """Destroy the Vultr VPS backing this VM and delete the VM record."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+
+    if not vm.vultr_id and not vm.hostname:
+        return JSONResponse(
+            {"error": "VM has no Vultr instance associated"}, status_code=422
+        )
+
+    if vm.status in ("creating", "destroying"):
+        return JSONResponse(
+            {"error": f"VM is currently {vm.status}, cannot destroy now"}, status_code=409
+        )
+
+    from api.models import utcnow
+    vm.status = "destroying"
+    vm.updated_at = utcnow()
+    db.commit()
+
+    asyncio.create_task(asyncio.to_thread(_run_vultr_destroy, vm_id))
+    return {"status": "destroying", "vm_id": vm_id}

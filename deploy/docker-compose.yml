@@ -235,6 +235,8 @@ services:
       SEMAPHORE_ADMIN_NAME: ${SEMAPHORE_ADMIN_NAME:-Admin}
       SEMAPHORE_ADMIN_EMAIL: ${SEMAPHORE_ADMIN_EMAIL:-admin@example.com}
       SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${SEMAPHORE_ACCESS_KEY_ENCRYPTION:?Please set SEMAPHORE_ACCESS_KEY_ENCRYPTION in your .env file}
+      # Vultr API key — needed by create-vm.yml / destroy-vm.yml playbooks
+      VULTR_API_KEY: ${VULTR_API_KEY:-}
     volumes:
       - ctf-semaphore_data:/var/lib/semaphore
       # Shared playbooks: Semaphore reads playbook files staged here by the CTF API

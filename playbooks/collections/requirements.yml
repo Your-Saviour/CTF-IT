@@ -1,0 +1,4 @@
+---
+collections:
+  - name: vultr.cloud
+  - name: community.general

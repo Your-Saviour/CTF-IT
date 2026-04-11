@@ -140,6 +140,26 @@ class SemaphoreClient:
             )
         return resp.json()["id"]
 
+    def create_localhost_inventory(self, project_id: int, name: str, key_id: int) -> int:
+        """Create a localhost inventory for local-connection playbooks."""
+        inventory_ini = "localhost ansible_connection=local\n"
+        resp = self._client.post(
+            f"/api/project/{project_id}/inventory",
+            json={
+                "name": name,
+                "project_id": project_id,
+                "type": "static",
+                "inventory": inventory_ini,
+                "ssh_key_id": key_id,
+                "become_key_id": None,
+            },
+        )
+        if resp.status_code not in (200, 201):
+            raise SemaphoreError(
+                f"create_localhost_inventory failed ({resp.status_code}): {resp.text[:200]}"
+            )
+        return resp.json()["id"]
+
     # ── Repositories ──────────────────────────────────────────────────────────
 
     def create_repository(self, project_id: int, name: str, local_path: str, key_id: int) -> int:
@@ -170,8 +190,17 @@ class SemaphoreClient:
         inventory_id: int,
         repository_id: int,
         key_id: int,
+        extra_vars: dict | None = None,
     ) -> int:
-        """Create a job template and return its ID."""
+        """Create a job template and return its ID.
+
+        extra_vars: optional dict passed as ``-e '{...}'`` ansible-playbook argument.
+        """
+        import json as _json
+        if extra_vars:
+            arguments = _json.dumps(["-e", _json.dumps(extra_vars)])
+        else:
+            arguments = "[]"
         resp = self._client.post(
             f"/api/project/{project_id}/templates",
             json={
@@ -181,7 +210,7 @@ class SemaphoreClient:
                 "repository_id": repository_id,
                 "environment_id": None,
                 "playbook": playbook,
-                "arguments": "[]",
+                "arguments": arguments,
                 "allow_override_args_in_task": False,
                 "become_authorization": "",
                 "type": "",

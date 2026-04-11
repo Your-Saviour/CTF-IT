@@ -337,40 +337,93 @@
     <!-- Inline VM Register Form -->
     <div id="vm-form-panel" style="display:none; margin-bottom: 1rem;">
         <div style="background: var(--bg-deep); padding: 1rem; border-radius: 4px; border: 1px solid var(--border);">
-            <h4 style="margin-bottom: 0.75rem; color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em;">Register VM</h4>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="vf-hostname" style="font-size: 0.8rem;">Hostname</label>
-                    <input type="text" id="vf-hostname" placeholder="e.g. target-01">
+            <!-- Tab switcher -->
+            <div style="display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                <button id="vm-tab-vultr" onclick="switchVMTab('vultr')"
+                    style="background: none; border: none; border-bottom: 2px solid var(--cyan); color: var(--cyan); padding: 0.4rem 0.9rem; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 600;">
+                    Create on Vultr
+                </button>
+                <button id="vm-tab-manual" onclick="switchVMTab('manual')"
+                    style="background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); padding: 0.4rem 0.9rem; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+                    Register Existing
+                </button>
+            </div>
+
+            <!-- Vultr creation form -->
+            <div id="vm-panel-vultr">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-vhostname" style="font-size: 0.8rem;">Hostname</label>
+                        <input type="text" id="vf-vhostname" placeholder="e.g. target-01">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-vteam" style="font-size: 0.8rem;">Team</label>
+                        <select id="vf-vteam" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-vos" style="font-size: 0.8rem;">Operating System</label>
+                        <select id="vf-vos" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">
+                            <option value="">Loading OS list...</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-vplan" style="font-size: 0.8rem;">Plan</label>
+                        <select id="vf-vplan" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">
+                            <option value="">Loading plans...</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-vsshuser" style="font-size: 0.8rem;">SSH User</label>
+                        <input type="text" id="vf-vsshuser" value="root">
+                    </div>
                 </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="vf-ip" style="font-size: 0.8rem;">IP Address</label>
-                    <input type="text" id="vf-ip" placeholder="e.g. 192.168.1.10">
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <label for="vf-vnotes" style="font-size: 0.8rem;">Notes</label>
+                    <textarea id="vf-vnotes" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
                 </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="vf-os" style="font-size: 0.8rem;">OS</label>
-                    <input type="text" id="vf-os" value="Ubuntu 22.04">
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="vf-team" style="font-size: 0.8rem;">Team</label>
-                    <select id="vf-team" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></select>
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="vf-sshuser" style="font-size: 0.8rem;">SSH User</label>
-                    <input type="text" id="vf-sshuser" value="root">
-                </div>
-                <div class="form-group" style="margin-bottom: 0;">
-                    <label for="vf-sshport" style="font-size: 0.8rem;">SSH Port</label>
-                    <input type="number" id="vf-sshport" value="22" style="width: 100%;">
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn btn-primary btn-sm" onclick="createVMOnVultr()">Create VM</button>
+                    <button class="btn-outline" onclick="hideVMForm()" style="padding: 0.35rem 0.75rem;">Cancel</button>
+                    <span id="vf-vconfigured" style="font-size: 0.75rem; color: var(--text-muted);"></span>
                 </div>
             </div>
-            <div class="form-group" style="margin-bottom: 0.75rem;">
-                <label for="vf-notes" style="font-size: 0.8rem;">Notes</label>
-                <textarea id="vf-notes" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-                <button class="btn btn-primary btn-sm" onclick="createVM()">Register</button>
-                <button class="btn-outline" onclick="hideVMForm()" style="padding: 0.35rem 0.75rem;">Cancel</button>
+
+            <!-- Manual registration form -->
+            <div id="vm-panel-manual" style="display: none;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-hostname" style="font-size: 0.8rem;">Hostname</label>
+                        <input type="text" id="vf-hostname" placeholder="e.g. target-01">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-ip" style="font-size: 0.8rem;">IP Address</label>
+                        <input type="text" id="vf-ip" placeholder="e.g. 192.168.1.10">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-os" style="font-size: 0.8rem;">OS</label>
+                        <input type="text" id="vf-os" value="Ubuntu 22.04">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-team" style="font-size: 0.8rem;">Team</label>
+                        <select id="vf-team" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-sshuser" style="font-size: 0.8rem;">SSH User</label>
+                        <input type="text" id="vf-sshuser" value="root">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="vf-sshport" style="font-size: 0.8rem;">SSH Port</label>
+                        <input type="number" id="vf-sshport" value="22" style="width: 100%;">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <label for="vf-notes" style="font-size: 0.8rem;">Notes</label>
+                    <textarea id="vf-notes" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-primary btn-sm" onclick="createVM()">Register</button>
+                    <button class="btn-outline" onclick="hideVMForm()" style="padding: 0.35rem 0.75rem;">Cancel</button>
+                </div>
             </div>
         </div>
     </div>
@@ -913,18 +966,99 @@ function showTeamForm() {
 }
 function hideTeamForm() { document.getElementById('team-form-panel').style.display = 'none'; }
 
+function switchVMTab(tab) {
+    var isVultr = tab === 'vultr';
+    document.getElementById('vm-panel-vultr').style.display = isVultr ? 'block' : 'none';
+    document.getElementById('vm-panel-manual').style.display = isVultr ? 'none' : 'block';
+    var tabVultr = document.getElementById('vm-tab-vultr');
+    var tabManual = document.getElementById('vm-tab-manual');
+    tabVultr.style.borderBottomColor = isVultr ? 'var(--cyan)' : 'transparent';
+    tabVultr.style.color = isVultr ? 'var(--cyan)' : 'var(--text-secondary)';
+    tabManual.style.borderBottomColor = isVultr ? 'transparent' : 'var(--cyan)';
+    tabManual.style.color = isVultr ? 'var(--text-secondary)' : 'var(--cyan)';
+}
+
+var _vultrDataLoaded = false;
+function loadVultrData() {
+    if (_vultrDataLoaded) return;
+    _vultrDataLoaded = true;
+    // Load OS options
+    fetch('/admin/vultr/os').then(function(r) { return r.json(); }).then(function(data) {
+        var sel = document.getElementById('vf-vos');
+        if (data.error) {
+            sel.innerHTML = '<option value="">' + esc(data.error) + '</option>';
+            document.getElementById('vf-vconfigured').textContent = 'Vultr not configured';
+            return;
+        }
+        sel.innerHTML = data.os.map(function(o) {
+            return '<option value="' + esc(o.name) + '">' + esc(o.name) + '</option>';
+        }).join('');
+    }).catch(function() {
+        document.getElementById('vf-vos').innerHTML = '<option value="">Failed to load OS list</option>';
+    });
+    // Load plan options
+    fetch('/admin/vultr/plans').then(function(r) { return r.json(); }).then(function(data) {
+        var sel = document.getElementById('vf-vplan');
+        if (data.error) {
+            sel.innerHTML = '<option value="">' + esc(data.error) + '</option>';
+            return;
+        }
+        sel.innerHTML = data.plans.map(function(p) {
+            return '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>';
+        }).join('');
+    }).catch(function() {
+        document.getElementById('vf-vplan').innerHTML = '<option value="">Failed to load plans</option>';
+    });
+}
+
 function showVMForm() {
-    // Populate team dropdown
-    var sel = document.getElementById('vf-team');
-    sel.innerHTML = teamsData.map(function(t) {
+    // Populate team dropdowns (both forms)
+    var teamOptions = teamsData.map(function(t) {
         return '<option value="' + t.id + '">' + esc(t.name) + ' (' + esc(t.event_name || '') + ')</option>';
     }).join('');
-    if (teamsData.length === 0) {
-        sel.innerHTML = '<option value="">— create a team first —</option>';
-    }
+    var emptyOption = '<option value="">— create a team first —</option>';
+    var html = teamsData.length ? teamOptions : emptyOption;
+    document.getElementById('vf-team').innerHTML = html;
+    document.getElementById('vf-vteam').innerHTML = html;
+
     document.getElementById('vm-form-panel').style.display = 'block';
+    loadVultrData();
 }
 function hideVMForm() { document.getElementById('vm-form-panel').style.display = 'none'; }
+
+function createVMOnVultr() {
+    var hostname = document.getElementById('vf-vhostname').value.trim();
+    var team_id = parseInt(document.getElementById('vf-vteam').value);
+    var vultr_os = document.getElementById('vf-vos').value;
+    var vultr_plan = document.getElementById('vf-vplan').value;
+    if (!hostname) { showToast('Hostname is required'); return; }
+    if (!team_id) { showToast('Select a team'); return; }
+    if (!vultr_os) { showToast('Select an OS'); return; }
+    if (!vultr_plan) { showToast('Select a plan'); return; }
+    var body = {
+        hostname: hostname,
+        team_id: team_id,
+        vultr_os: vultr_os,
+        vultr_plan: vultr_plan,
+        ssh_user: document.getElementById('vf-vsshuser').value.trim() || 'root',
+        notes: document.getElementById('vf-vnotes').value.trim() || null,
+    };
+    fetch('/admin/vms/create-vultr', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    }).then(function(r) {
+        if (r.ok) {
+            r.json().then(function(d) {
+                showToast('VM creation started');
+                hideVMForm();
+                window.location.href = '/admin/vm/' + d.id;
+            });
+        } else {
+            r.json().then(function(d) { showToast('Error: ' + (d.error || 'Unknown error')); });
+        }
+    });
+}
 
 function loadTeams() {
     fetch('/admin/teams')

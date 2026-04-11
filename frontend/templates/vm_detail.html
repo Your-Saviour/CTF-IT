@@ -68,6 +68,8 @@
 .vm-status-registered { color: var(--text-secondary); font-weight: 700; text-transform: uppercase; }
 .vm-status-active { color: var(--green); font-weight: 700; text-transform: uppercase; }
 .vm-status-provisioning { color: var(--cyan); font-weight: 700; text-transform: uppercase; animation: status-pulse 1.5s ease-in-out infinite; }
+.vm-status-creating { color: var(--cyan); font-weight: 700; text-transform: uppercase; animation: status-pulse 1.5s ease-in-out infinite; }
+.vm-status-destroying { color: var(--amber); font-weight: 700; text-transform: uppercase; animation: status-pulse 1.5s ease-in-out infinite; }
 .vm-status-stopped { color: var(--red); font-weight: 700; text-transform: uppercase; }
 .vm-status-failed { color: var(--red); font-weight: 700; text-transform: uppercase; }
 .provision-steps {
@@ -187,6 +189,14 @@
                 <span class="detail-label">SSH Port</span>
                 <span class="detail-value" id="ci-port">—</span>
             </div>
+            <div class="detail-row" id="ci-vultr-row" style="display:none;">
+                <span class="detail-label">Vultr Plan</span>
+                <span class="detail-value" id="ci-vultr-plan">—</span>
+            </div>
+            <div class="detail-row" id="ci-region-row" style="display:none;">
+                <span class="detail-label">Region</span>
+                <span class="detail-value" id="ci-vultr-region">—</span>
+            </div>
         </div>
         <div class="detail-row">
             <span class="detail-label">Agent</span>
@@ -279,6 +289,13 @@
     </table>
 </div>
 
+<!-- VM Creation Status (shown while Vultr creates the instance) -->
+<div class="card" id="create-card" style="display:none; margin-bottom: 1.25rem;">
+    <h3>VM Creation Status</h3>
+    <div class="provision-steps" id="create-steps"></div>
+    <div id="create-error-box" style="display:none; color: var(--red); font-size: 0.85rem; margin-bottom: 0.5rem;"></div>
+</div>
+
 <!-- Provisioning Status (shown during/after provisioning) -->
 <div class="card" id="provision-card" style="display:none; margin-bottom: 1.25rem;">
     <h3>Provisioning Status</h3>
@@ -297,6 +314,7 @@
         <button class="btn btn-primary" id="btn-provision" onclick="startProvision()">Provision VM</button>
         <button class="btn" id="btn-deploy-agent" onclick="deployAgent()">Deploy Agent</button>
         <button class="btn btn-primary" onclick="exportAnsible()">Export Ansible Playbook</button>
+        <button class="btn btn-danger" id="btn-destroy-vultr" style="display:none;" onclick="destroyVultrVM()">Destroy on Vultr</button>
         <button class="btn btn-danger" onclick="deleteVM()">Delete VM</button>
     </div>
     <div id="platform-key-section" style="display:none;">
@@ -316,6 +334,7 @@ var VM_ID = {{ vm_id }};
 var vmData = null;
 var allModules = [];
 var provisionPollTimer = null;
+var createPollTimer = null;
 
 function esc(s) {
     if (!s) return '';
@@ -338,8 +357,11 @@ function loadVM() {
         .then(function(data) {
             vmData = data;
             renderVM(data);
-            // Auto-start polling if page loads while provisioning
-            if (data.status === 'provisioning' && !provisionPollTimer) {
+            // Auto-start polling based on VM status
+            if (data.status === 'creating' && !createPollTimer) {
+                showCreateCard();
+                startCreatePoll();
+            } else if (data.status === 'provisioning' && !provisionPollTimer) {
                 showProvisionCard();
                 startProvisionPoll();
             }
@@ -366,6 +388,16 @@ function renderVM(data) {
     document.getElementById('ci-created').textContent = fmtDate(data.created_at);
     document.getElementById('ci-updated').textContent = fmtDate(data.updated_at);
 
+    // Vultr info
+    if (data.vultr_plan) {
+        document.getElementById('ci-vultr-plan').textContent = data.vultr_plan;
+        document.getElementById('ci-vultr-row').style.display = 'flex';
+    }
+    if (data.vultr_region) {
+        document.getElementById('ci-vultr-region').textContent = data.vultr_region;
+        document.getElementById('ci-region-row').style.display = 'flex';
+    }
+
     var sshCmd = data.ip_address
         ? 'ssh ' + (data.ssh_user || 'root') + '@' + data.ip_address + (data.ssh_port && data.ssh_port !== 22 ? ' -p ' + data.ssh_port : '')
         : '— no IP assigned —';
@@ -387,7 +419,14 @@ function renderVM(data) {
     document.getElementById('as-notes').value = data.notes || '';
 
     // Button states
-    document.getElementById('btn-provision').disabled = (data.status === 'provisioning');
+    document.getElementById('btn-provision').disabled = (data.status === 'provisioning' || data.status === 'creating');
+    // Show "Destroy on Vultr" only when a Vultr instance exists and we're not mid-operation
+    var destroyBtn = document.getElementById('btn-destroy-vultr');
+    if (data.vultr_id && data.status !== 'creating' && data.status !== 'destroying') {
+        destroyBtn.style.display = 'inline-flex';
+    } else {
+        destroyBtn.style.display = 'none';
+    }
 
     // Modules
     renderModules(data.modules || []);
@@ -559,6 +598,112 @@ function deleteVM() {
                 setTimeout(function() { window.location.href = '/admin'; }, 1000);
             } else {
                 r.json().then(function(d) { showToast('Error: ' + d.error); });
+            }
+        });
+}
+
+// ── Vultr VM Creation ─────────────────────────────────────────────────────────
+
+var CREATE_STEPS = [
+    {key: 'staging_playbook',      label: 'Staging playbook'},
+    {key: 'configuring_semaphore', label: 'Configuring Semaphore'},
+    {key: 'creating_instance',     label: 'Creating Vultr instance'},
+    {key: 'extracting_results',    label: 'Extracting IP / DNS'},
+    {key: 'completed',             label: 'VM ready'},
+];
+
+function showCreateCard() {
+    document.getElementById('create-card').style.display = 'block';
+}
+
+function startCreatePoll() {
+    if (createPollTimer) return;
+    createPollTimer = setInterval(pollCreateStatus, 4000);
+    pollCreateStatus();
+}
+
+function stopCreatePoll() {
+    if (createPollTimer) {
+        clearInterval(createPollTimer);
+        createPollTimer = null;
+    }
+}
+
+function pollCreateStatus() {
+    fetch('/admin/vms/' + VM_ID + '/create-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            renderCreateSteps(data.provision_step, data.status);
+
+            if (data.provision_error) {
+                var errBox = document.getElementById('create-error-box');
+                errBox.textContent = data.provision_error;
+                errBox.style.display = 'block';
+            }
+
+            if (data.status !== 'creating') {
+                stopCreatePoll();
+                if (data.status === 'registered') {
+                    showToast('VM created! IP: ' + (data.ip_address || '?'));
+                } else if (data.status === 'failed') {
+                    showToast('VM creation failed');
+                }
+                loadVM();
+            }
+        })
+        .catch(function() {});
+}
+
+function renderCreateSteps(currentStep, vmStatus) {
+    var container = document.getElementById('create-steps');
+    var isFailed = (vmStatus === 'failed' && currentStep === 'failed');
+    var currentIdx = -1;
+    for (var i = 0; i < CREATE_STEPS.length; i++) {
+        if (CREATE_STEPS[i].key === currentStep) { currentIdx = i; break; }
+    }
+    container.innerHTML = CREATE_STEPS.map(function(step, idx) {
+        var cls = 'provision-step';
+        var icon = '○';
+        if (isFailed && idx <= currentIdx) {
+            cls += ' failed'; icon = '✗';
+        } else if (idx < currentIdx || currentStep === 'completed') {
+            cls += ' done'; icon = '✓';
+        } else if (idx === currentIdx) {
+            cls += ' active'; icon = '⟳';
+        }
+        return '<div class="' + cls + '"><span class="step-icon">' + icon + '</span>' + esc(step.label) + '</div>';
+    }).join('');
+}
+
+function destroyVultrVM() {
+    if (!confirm('Destroy this VM on Vultr? This will permanently delete the VPS and remove the VM record. This cannot be undone.')) return;
+    fetch('/admin/vms/' + VM_ID + '/destroy-vultr', {method: 'POST'})
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok) {
+                showToast('Destroying VM...');
+                document.getElementById('btn-destroy-vultr').disabled = true;
+                // Poll loadVM until VM is gone (will get 404 and redirect)
+                var pollDestroy = setInterval(function() {
+                    fetch('/admin/vms/' + VM_ID)
+                        .then(function(r) {
+                            if (r.status === 404) {
+                                clearInterval(pollDestroy);
+                                window.location.href = '/admin';
+                            } else {
+                                return r.json().then(function(d) {
+                                    if (d.status === 'failed') {
+                                        clearInterval(pollDestroy);
+                                        showToast('Destroy failed: ' + (d.provision_error || ''));
+                                        loadVM();
+                                    }
+                                });
+                            }
+                        })
+                        .catch(function() { clearInterval(pollDestroy); });
+                }, 5000);
+            } else {
+                showToast('Error: ' + (res.data.error || 'Unknown error'));
             }
         });
 }

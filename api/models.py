@@ -109,6 +109,11 @@ class VM(Base):
     semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
     semaphore_task_id: Mapped[int] = mapped_column(Integer, nullable=True)
     agent_status: Mapped[str] = mapped_column(String(16), nullable=True)
+    # Vultr cloud provisioning
+    vultr_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    vultr_plan: Mapped[str] = mapped_column(String(64), nullable=True)
+    vultr_region: Mapped[str] = mapped_column(String(16), nullable=True)
+    cloudflare_record_id: Mapped[str] = mapped_column(String(64), nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")

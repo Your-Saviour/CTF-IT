@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
                 "semaphore_project_id": "INTEGER",
                 "semaphore_task_id": "INTEGER",
                 "agent_status": "VARCHAR(16)",
+                "vultr_id": "VARCHAR(64)",
+                "vultr_plan": "VARCHAR(64)",
+                "vultr_region": "VARCHAR(16)",
+                "cloudflare_record_id": "VARCHAR(64)",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
