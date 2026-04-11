@@ -746,7 +746,7 @@ def _run_deploy_agent(vm_id: int) -> None:
         sandcat_path.write_bytes(sandcat_binary)
 
         # Write minimal deploy playbook
-        caldera_group = "red"
+        caldera_group = f"event-{vm.event_id}" if vm.event_id else "red"
         deploy_playbook = f"""---
 - hosts: all
   become: true
@@ -855,14 +855,8 @@ def _run_deploy_agent(vm_id: int) -> None:
 
 def _get_caldera_api_key() -> str:
     """Read Caldera API key from local.yml config file."""
-    import yaml as _yaml
-
-    config_path = os.environ.get("CALDERA_CONFIG_PATH", "/caldera-config/local.yml")
-    if not os.path.exists(config_path):
-        return ""
-    with open(config_path) as f:
-        config = _yaml.safe_load(f)
-    return config.get("api_key_red", "")
+    from api.services.caldera import get_caldera_api_key as _get_key
+    return _get_key()
 
 
 @router.post("/vms/{vm_id}/deploy-agent")
