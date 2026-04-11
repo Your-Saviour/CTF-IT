@@ -241,6 +241,8 @@
     const EVENT_ID = {{ event_id }};
     let previewData = null;
     let topoInitialized = false;
+    let topoDataVersion = 0;
+    let topoRenderedVersion = -1;
     let topoSimulation = null;
     let topoNodes = [];
     let topoLinks = [];
@@ -270,6 +272,10 @@
         document.getElementById('attacks-loading').style.display = 'flex';
         document.getElementById('plan-error').style.display = 'none';
 
+        // Track overrides so per-VM re-roll can reuse them
+        window._currentQuota = quotaOverride || null;
+        window._currentVmQuota = vmQuotaOverride || null;
+
         const body = {};
         if (quotaOverride) body.quota = quotaOverride;
         if (vmQuotaOverride) body.vm_quota = vmQuotaOverride;
@@ -290,6 +296,7 @@
             }
 
             previewData = await resp.json();
+            topoDataVersion++;
             updateStats(previewData.summary);
             renderActiveTab();
         } catch (e) {
@@ -529,7 +536,10 @@
         const tooltipEl = document.getElementById('plan-topo-tooltip');
         const ctxMenuEl = document.getElementById('plan-topo-context-menu');
 
-        // Clear and reinit every time data changes
+        // If already rendered with current data, do nothing (lazy init — no re-render on tab switch)
+        if (topoInitialized && topoRenderedVersion === topoDataVersion) return;
+
+        // Full init (first open, or data changed after re-roll/generate preview)
         if (topoSimulation) { topoSimulation.stop(); topoSimulation = null; }
         svgEl.innerHTML = '';
         topoInitialized = false;
@@ -742,6 +752,7 @@
         });
 
         topoInitialized = true;
+        topoRenderedVersion = topoDataVersion;
     }
 
     // ── Attack Paths tab ─────────────────────────────────────────────────────
@@ -801,24 +812,45 @@
         btn.textContent = '...';
         btn.disabled = true;
 
-        await loadPreview();
+        try {
+            // Fetch a fresh full preview (re-rolls all VM module draws)
+            const body = {};
+            if (window._currentQuota) body.quota = window._currentQuota;
+            if (window._currentVmQuota) body.vm_quota = window._currentVmQuota;
 
-        // After reload, re-render attack tree for this specific VM
-        if (previewData) {
-            setTimeout(() => {
-                previewData.vm_types.forEach(vt => {
-                    if (vt.role === 'attacker') return;
-                    vt.vms.forEach(vm => {
-                        if (vm.hostname === hostname && vm.attack_tree) {
-                            const sid = sanitizeId(vm.hostname);
-                            const container = document.getElementById('tree-' + sid);
-                            if (container) {
-                                window.renderAttackTree('tree-' + sid, vm.attack_tree);
-                            }
+            const resp = await fetch(`/admin/events/${EVENT_ID}/plan-preview`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) { btn.textContent = '⚠'; return; }
+
+            const newData = await resp.json();
+
+            // Patch previewData in-place (preserves other rendered trees)
+            previewData = newData;
+            topoDataVersion++;
+
+            // Re-render only this VM's attack tree
+            previewData.vm_types.forEach(vt => {
+                if (vt.role === 'attacker') return;
+                vt.vms.forEach(vm => {
+                    if (vm.hostname === hostname && vm.attack_tree) {
+                        const sid = sanitizeId(vm.hostname);
+                        const container = document.getElementById('tree-' + sid);
+                        if (container) {
+                            container.innerHTML = '';
+                            setTimeout(() => window.renderAttackTree('tree-' + sid, vm.attack_tree), 50);
                         }
-                    });
+                    }
                 });
-            }, 100);
+            });
+
+            // Update stats (module counts may differ)
+            updateStats(newData.summary);
+        } finally {
+            btn.textContent = '🎲 Re-roll';
+            btn.disabled = false;
         }
     };
 
