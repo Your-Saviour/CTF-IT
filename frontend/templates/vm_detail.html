@@ -936,7 +936,7 @@ function testConnection() {
 // ── Red Team Status ───────────────────────────────────────────────────────────
 
 function loadRedTeamStatus() {
-    var vmId = window.location.pathname.split('/').pop();
+    var vmId = VM_ID;
     fetch('/admin/caldera/vm/' + vmId + '/results')
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -971,7 +971,7 @@ function renderRedTeamStatus(data) {
     }
 
     var rows = data.results.map(function(r) {
-        var phaseBadge = '<span class="badge">' + esc(r.phase || '—') + '</span>';
+        var phaseBadge = r.phase ? '<span class="badge bg-secondary">' + esc(r.phase) + '</span>' : '—';
         var resultHtml;
         if (r.status === 1) {
             resultHtml = '<span class="rt-result-exploited">&#10007; Exploited</span>';
@@ -997,7 +997,7 @@ function renderRedTeamStatus(data) {
 }
 
 function runAttack() {
-    var vmId = window.location.pathname.split('/').pop();
+    var vmId = VM_ID;
     if (!confirm('Launch a Caldera red team attack against this VM?')) return;
     fetch('/admin/caldera/operations', {
         method: 'POST',

@@ -247,10 +247,17 @@ async def vm_attack_summary(request: Request, db: Session = Depends(get_db)):
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
+    import asyncio as _asyncio
     async with _make_client() as caldera:
         try:
             operations = await caldera.list_operations()
             agents = await caldera.list_agents()
+            # Fetch chain data for each operation concurrently (list API omits chains)
+            ops_with_chain = await _asyncio.gather(
+                *[caldera.get_operation(op["id"], include_chain=True) for op in operations],
+                return_exceptions=True,
+            )
+            operations = [op for op in ops_with_chain if not isinstance(op, Exception)]
         except Exception as e:
             return JSONResponse({"error": f"Caldera unavailable: {e}"}, status_code=502)
 

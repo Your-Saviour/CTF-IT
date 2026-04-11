@@ -99,6 +99,7 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
 
     body = await request.json()
 
+    _event_id = body.get("event_id")  # used for operation group targeting
     if "event_id" in body:
         event = db.query(Event).filter(Event.id == body["event_id"]).first()
         if not event:
@@ -203,11 +204,12 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             operation_result = None
             operation_error = None
             try:
+                op_group = f"event-{_event_id}" if _event_id else "red"
                 operation_result = await caldera.create_operation(
                     name="CTF Red Team Emulation",
                     adversary_id=ctf_adversary["adversary_id"],
                     planner_id=planner_id,
-                    group="red",
+                    group=op_group,
                 )
             except Exception as e:
                 operation_error = str(e)
