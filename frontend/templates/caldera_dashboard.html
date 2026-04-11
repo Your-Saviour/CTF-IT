@@ -412,7 +412,7 @@
 
     function loadOpDetail() {
         if (!OP_ID) return;
-        apiFetch('/admin/caldera/operations/' + OP_ID)
+        apiFetch('/admin/caldera/operations/' + OP_ID + '?include_tree=true')
             .then(function (op) {
                 document.getElementById('op-name').textContent = op.name || ('Operation ' + OP_ID);
                 document.getElementById('op-state-badge').innerHTML = stateBadgeHtml(op.state);
@@ -423,29 +423,32 @@
 
                 renderAgents(op.agents || []);
                 renderChain(op.chain || []);
-            })
-            .catch(function (e) {
-                console.error('Failed to load operation detail:', e);
-            });
 
-        // Load attack tree for this operation
-        apiFetch('/admin/caldera/operations/' + OP_ID + '/attack-tree')
-            .then(function (data) {
+                // Render attack tree from operation response
                 var section = document.getElementById('op-attack-tree-section');
                 var container = document.getElementById('op-attack-tree-container');
-                if (data.tree && data.tree.nodes && data.tree.nodes.length > 0) {
-                    section.style.display = 'none';
-                    container.style.display = 'block';
-                    renderAttackTree('op-attack-tree-container', data.tree);
+                var trees = op.attack_trees;
+                if (trees) {
+                    // Render the first VM's tree (or merge if needed)
+                    var vmIds = Object.keys(trees);
+                    if (vmIds.length > 0) {
+                        var firstTree = trees[vmIds[0]];
+                        if (firstTree && firstTree.nodes && firstTree.nodes.length > 0) {
+                            section.style.display = 'none';
+                            container.style.display = 'block';
+                            renderAttackTree('op-attack-tree-container', firstTree);
+                        } else {
+                            section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No attack tree data available.</span>';
+                        }
+                    } else {
+                        section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No attack tree data available.</span>';
+                    }
                 } else {
                     section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No attack tree data available.</span>';
                 }
             })
             .catch(function (e) {
-                var section = document.getElementById('op-attack-tree-section');
-                if (section) {
-                    section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Attack tree unavailable.</span>';
-                }
+                console.error('Failed to load operation detail:', e);
             });
     }
 

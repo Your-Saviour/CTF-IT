@@ -468,8 +468,8 @@ class TestSerializeTree:
 # ── Edge cases ──
 
 class TestEdgeCases:
-    def test_hardening_modules_excluded(self):
-        """Hardening modules are never included in the tree."""
+    def test_hardening_modules_with_caldera_included(self):
+        """Hardening modules with caldera metadata are included in the tree."""
         h = _mod("h1", type="hardening", caldera=_caldera("persistence"))
         tree = build_attack_tree([h])
         # Hardening modules have caldera but type != vulnerability

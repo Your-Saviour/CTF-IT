@@ -7,7 +7,7 @@ adversary generation and UI rendering.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -82,9 +82,9 @@ def _find_subtrees(nodes: dict[str, AttackNode]) -> dict[str | None, set[str]]:
 
     for root in roots:
         tree_members: set[str] = set()
-        queue = [root]
+        queue: deque[str] = deque([root])
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             if current in tree_members:
                 continue
             tree_members.add(current)
@@ -361,7 +361,7 @@ def extract_paths(tree: AttackTree, max_paths: int = 20) -> list[list[str]]:
 
 def _prune_paths(paths: list[list[str]], max_paths: int) -> list[list[str]]:
     """Prune paths to max_paths, prioritizing longer kill chains and deduplicating."""
-    # Sort by number of distinct phases covered (longer = more valuable), descending
+    # Sort by path length descending (equivalent to phase count due to one-per-phase constraint)
     paths.sort(key=lambda p: len(p), reverse=True)
 
     # Deduplicate shared suffixes: if two paths share the same suffix, keep the longer one
