@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import Event
 from api.routes.admin import require_admin
-from api.services.caldera import CalderaClient, get_caldera_api_key
+from api.services.caldera import CalderaClient
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
