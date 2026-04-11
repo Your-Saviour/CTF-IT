@@ -217,6 +217,17 @@ async def vm_detail_page(vm_id: int, request: Request, db: Session = Depends(get
     })
 
 
+@app.get("/admin/topology", response_class=HTMLResponse)
+async def topology_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+
+    return templates.TemplateResponse(request, "topology.html", {
+        "user": user,
+    })
+
+
 @app.get("/admin/caldera", response_class=HTMLResponse)
 async def caldera_dashboard_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)

@@ -311,6 +311,7 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <h3 style="margin-bottom: 0;">Teams &amp; VMs</h3>
         <div style="display: flex; gap: 0.5rem;">
+            <a href="/admin/topology" class="btn btn-sm" style="border: 1px solid var(--cyan); color: var(--cyan); text-decoration: none;">⬡ Network Topology</a>
             <button class="btn btn-sm btn-primary" onclick="showTeamForm()">+ New Team</button>
             <button class="btn btn-sm btn-primary" onclick="showVMForm()">+ Register VM</button>
         </div>
@@ -547,7 +548,7 @@
         <colgroup>
             <col style="width: 160px;">
             <col style="width: auto;">
-            <col style="width: 90px;">
+            <col style="width: 120px;">
             <col style="width: 90px;">
             <col style="width: 60px;">
             <col style="width: 110px;">
@@ -1267,7 +1268,7 @@ function renderModulesTable(data) {
         return '<tr' + disabledStyle + '>' +
             '<td style="color: var(--text-secondary); font-size: 0.78rem; font-family: \'JetBrains Mono\', monospace; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;">' + esc(m.id) + '</td>' +
             '<td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;"><a href="/admin/module/' + encodeURIComponent(m.id) + '" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" onmouseover="this.style.color=\'var(--cyan)\'" onmouseout="this.style.color=\'var(--text-primary)\'">' + esc(m.name) + '</a>' + disabledBadge + '</td>' +
-            '<td style="font-size: 0.8rem; white-space: nowrap; color: var(--text-secondary);">' + typeShort + '</td>' +
+            '<td style="font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary);">' + typeShort + '</td>' +
             '<td style="white-space: nowrap;"><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
             '<td style="white-space: nowrap;">' + m.points + '</td>' +
             '<td style="font-size: 0.82rem; white-space: nowrap;">' + esc(m.category) + '</td>' +

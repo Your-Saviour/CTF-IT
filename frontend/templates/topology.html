@@ -1,0 +1,854 @@
+{% extends "base.html" %}
+{% block title %}Network Topology - CTF Platform{% endblock %}
+{% block extra_style %}
+.topology-container {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 80px);
+    overflow: hidden;
+    background: var(--bg-deep);
+}
+.topology-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(0, 229, 255, 0.15);
+    background: rgba(15, 17, 23, 0.95);
+    z-index: 10;
+    position: relative;
+}
+.topology-toolbar-left {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.topology-toolbar-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.topology-title {
+    color: var(--cyan);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+.topology-back {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+.topology-back:hover {
+    color: var(--cyan);
+    border-color: var(--cyan);
+}
+.topology-select {
+    background: var(--bg-elevated);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    color: var(--text-primary);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+}
+.topology-badge {
+    background: rgba(0, 229, 255, 0.1);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace;
+}
+.topology-live {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.topology-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: live-pulse 2s ease-in-out infinite;
+}
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--green); }
+    50% { opacity: 0.4; box-shadow: none; }
+}
+
+/* SVG canvas */
+.topology-svg {
+    width: 100%;
+    height: calc(100% - 45px);
+    cursor: grab;
+}
+.topology-svg:active {
+    cursor: grabbing;
+}
+
+/* Node labels */
+.node-label {
+    font-family: 'JetBrains Mono', monospace;
+    fill: var(--text-primary);
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+}
+.node-label-type {
+    font-family: 'JetBrains Mono', monospace;
+    text-anchor: middle;
+    text-transform: uppercase;
+    pointer-events: none;
+    user-select: none;
+    font-size: 8px;
+}
+
+/* Links */
+.topo-link {
+    stroke-dasharray: 4 4;
+    fill: none;
+    opacity: 0.3;
+}
+
+/* Tooltip */
+.topo-tooltip {
+    position: absolute;
+    background: var(--bg-elevated);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-primary);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 100;
+    max-width: 250px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+.topo-tooltip.visible {
+    opacity: 1;
+}
+.topo-tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 3px;
+}
+.topo-tooltip-label {
+    color: var(--text-secondary);
+}
+.topo-tooltip-value {
+    color: var(--text-primary);
+}
+.topo-tooltip-progress {
+    margin-top: 6px;
+    height: 4px;
+    background: var(--bg-overlay);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.topo-tooltip-progress-bar {
+    height: 100%;
+    background: var(--cyan);
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+/* Context menu */
+.topo-context-menu {
+    position: absolute;
+    background: var(--bg-elevated);
+    border: 1px solid rgba(0, 229, 255, 0.3);
+    border-radius: 6px;
+    padding: 4px 0;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    min-width: 170px;
+    z-index: 200;
+    display: none;
+}
+.topo-context-menu.visible {
+    display: block;
+}
+.topo-context-header {
+    padding: 6px 14px;
+    color: var(--cyan);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.topo-context-item {
+    padding: 6px 14px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.topo-context-item:hover {
+    background: rgba(0, 229, 255, 0.08);
+}
+.topo-context-item.danger {
+    color: var(--red);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.topo-context-item.danger:hover {
+    background: rgba(255, 23, 68, 0.08);
+}
+
+/* Legend */
+.topo-legend {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: rgba(15, 17, 23, 0.92);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    z-index: 10;
+}
+.topo-legend-title {
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 9px;
+    margin-bottom: 6px;
+    letter-spacing: 1px;
+}
+.topo-legend-items {
+    display: flex;
+    gap: 12px;
+}
+.topo-legend-item {
+    color: var(--text-secondary);
+}
+.topo-legend-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+/* Node status pulse */
+@keyframes node-status-pulse {
+    0% { filter: drop-shadow(0 0 4px currentColor); }
+    50% { filter: drop-shadow(0 0 12px currentColor); }
+    100% { filter: drop-shadow(0 0 4px currentColor); }
+}
+.node-pulse {
+    animation: node-status-pulse 1.5s ease-in-out 3;
+}
+
+/* Empty state */
+.topo-empty {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--text-secondary);
+}
+.topo-empty h3 {
+    color: var(--text-muted);
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+{% endblock %}
+
+{% block content %}
+<div class="topology-container">
+    <div class="topology-toolbar">
+        <div class="topology-toolbar-left">
+            <a href="/admin" class="topology-back">&larr; Admin</a>
+            <span class="topology-title">Network Topology</span>
+            <select id="event-filter" class="topology-select">
+                <option value="">All Events</option>
+            </select>
+        </div>
+        <div class="topology-toolbar-right">
+            <span id="zoom-badge" class="topology-badge">ZOOM: 100%</span>
+            <span class="topology-badge topology-live"><span class="topology-live-dot"></span> LIVE</span>
+        </div>
+    </div>
+
+    <svg id="topology-svg" class="topology-svg"></svg>
+
+    <div id="topo-tooltip" class="topo-tooltip"></div>
+    <div id="topo-context-menu" class="topo-context-menu"></div>
+
+    <div class="topo-legend">
+        <div class="topo-legend-title">Status</div>
+        <div class="topo-legend-items">
+            <span class="topo-legend-item"><span class="topo-legend-dot" style="background: #00e676;"></span>Active</span>
+            <span class="topo-legend-item"><span class="topo-legend-dot" style="background: #ffc800;"></span>Creating</span>
+            <span class="topo-legend-item"><span class="topo-legend-dot" style="background: #ff1744;"></span>Failed</span>
+            <span class="topo-legend-item"><span class="topo-legend-dot" style="background: #888;"></span>Stopped</span>
+        </div>
+    </div>
+</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function() {
+    // ── Constants ──────────────────────────────────────────────────────────────
+    const STATUS_COLORS = {
+        active: '#00e676',
+        registered: '#888',
+        creating: '#ffc800',
+        provisioning: '#ffc800',
+        stopped: '#888',
+        failed: '#ff1744',
+        destroying: '#ff1744',
+        open: '#00e5ff',
+        draft: '#888',
+    };
+
+    const NODE_RADIUS = { event: 50, team: 35, vm: 22 };
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let currentNodes = [];
+    let currentLinks = [];
+    let simulation = null;
+    let pollTimer = null;
+    let currentEventFilter = '';
+
+    // ── DOM refs ──────────────────────────────────────────────────────────────
+    const svgEl = document.getElementById('topology-svg');
+    const tooltip = document.getElementById('topo-tooltip');
+    const contextMenu = document.getElementById('topo-context-menu');
+    const eventFilter = document.getElementById('event-filter');
+    const zoomBadge = document.getElementById('zoom-badge');
+
+    const svg = d3.select(svgEl);
+    const container = svg.append('g');
+    const linkGroup = container.append('g').attr('class', 'links');
+    const nodeGroup = container.append('g').attr('class', 'nodes');
+
+    // ── Zoom ──────────────────────────────────────────────────────────────────
+    const zoomBehavior = d3.zoom()
+        .scaleExtent([0.2, 4])
+        .on('zoom', (event) => {
+            container.attr('transform', event.transform);
+            const pct = Math.round(event.transform.k * 100);
+            zoomBadge.textContent = `ZOOM: ${pct}%`;
+        });
+    svg.call(zoomBehavior);
+
+    // Close context menu on click
+    svg.on('click', () => hideContextMenu());
+
+    // ── Helper: status color ──────────────────────────────────────────────────
+    function statusColor(status) {
+        return STATUS_COLORS[status] || '#888';
+    }
+
+    // ── Helper: OS badge character ────────────────────────────────────────────
+    function osBadge(os) {
+        if (!os) return '>';
+        const lower = os.toLowerCase();
+        if (lower.includes('ubuntu') || lower.includes('linux') || lower.includes('debian') ||
+            lower.includes('centos') || lower.includes('fedora') || lower.includes('rhel')) return '\u{1F427}';
+        if (lower.includes('windows')) return '\u229E';
+        return '>';
+    }
+
+    // ── Fetch topology data ───────────────────────────────────────────────────
+    async function fetchData(eventId) {
+        let url = '/admin/topology-data';
+        if (eventId) url += `?event_id=${eventId}`;
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        return resp.json();
+    }
+
+    // ── Fetch events for filter ───────────────────────────────────────────────
+    async function loadEventFilter() {
+        const resp = await fetch('/admin/events');
+        if (!resp.ok) return;
+        const events = await resp.json();
+        events.forEach(e => {
+            const opt = document.createElement('option');
+            opt.value = e.id;
+            opt.textContent = `${e.name} (${e.status})`;
+            eventFilter.appendChild(opt);
+        });
+    }
+
+    // ── Build / update graph ──────────────────────────────────────────────────
+    function updateGraph(data) {
+        if (!data) return;
+
+        const width = svgEl.clientWidth;
+        const height = svgEl.clientHeight;
+
+        // If node set changed structurally, rebuild simulation
+        const oldIds = new Set(currentNodes.map(n => n.id));
+        const newIds = new Set(data.nodes.map(n => n.id));
+        const structureChanged = data.nodes.length !== currentNodes.length ||
+            data.nodes.some(n => !oldIds.has(n.id));
+
+        if (structureChanged) {
+            // Preserve positions of existing nodes
+            const posMap = {};
+            currentNodes.forEach(n => { posMap[n.id] = { x: n.x, y: n.y, fx: n.fx, fy: n.fy }; });
+
+            currentNodes = data.nodes.map(n => {
+                const existing = posMap[n.id];
+                return existing ? { ...n, x: existing.x, y: existing.y, fx: existing.fx, fy: existing.fy } : { ...n };
+            });
+            currentLinks = data.links.map(l => ({ ...l }));
+
+            if (simulation) simulation.stop();
+            simulation = d3.forceSimulation(currentNodes)
+                .force('link', d3.forceLink(currentLinks).id(d => d.id)
+                    .distance(d => {
+                        const src = typeof d.source === 'object' ? d.source : currentNodes.find(n => n.id === d.source);
+                        return src && src.type === 'event' ? 180 : 100;
+                    }))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(d => NODE_RADIUS[d.type] + 15))
+                .on('tick', ticked);
+
+            renderLinks();
+            renderNodes();
+        } else {
+            // Just update status/data on existing nodes
+            data.nodes.forEach(newNode => {
+                const existing = currentNodes.find(n => n.id === newNode.id);
+                if (existing) {
+                    const statusChanged = existing.status !== newNode.status;
+                    Object.assign(existing, newNode, { x: existing.x, y: existing.y, fx: existing.fx, fy: existing.fy });
+                    if (statusChanged) {
+                        // Trigger pulse animation
+                        nodeGroup.selectAll('.node-group')
+                            .filter(d => d.id === existing.id)
+                            .classed('node-pulse', true)
+                            .each(function() {
+                                setTimeout(() => d3.select(this).classed('node-pulse', false), 4500);
+                            });
+                    }
+                }
+            });
+            updateNodeVisuals();
+        }
+    }
+
+    // ── Render links ──────────────────────────────────────────────────────────
+    function renderLinks() {
+        linkGroup.selectAll('line').remove();
+        linkGroup.selectAll('line')
+            .data(currentLinks)
+            .enter()
+            .append('line')
+            .attr('class', 'topo-link')
+            .attr('stroke', d => {
+                const target = typeof d.target === 'object' ? d.target : currentNodes.find(n => n.id === d.target);
+                return (target && target.color) || '#00e5ff';
+            })
+            .attr('stroke-width', 1);
+    }
+
+    // ── Render nodes ──────────────────────────────────────────────────────────
+    function renderNodes() {
+        nodeGroup.selectAll('.node-group').remove();
+
+        const groups = nodeGroup.selectAll('.node-group')
+            .data(currentNodes, d => d.id)
+            .enter()
+            .append('g')
+            .attr('class', 'node-group')
+            .style('cursor', 'pointer')
+            .call(d3.drag()
+                .on('start', dragStarted)
+                .on('drag', dragged)
+                .on('end', dragEnded))
+            .on('mouseover', showTooltip)
+            .on('mousemove', moveTooltip)
+            .on('mouseout', hideTooltip)
+            .on('contextmenu', showContextMenu)
+            .on('dblclick', (event, d) => {
+                event.preventDefault();
+                if (d.type === 'vm') window.location = `/admin/vm/${d.id.replace('vm-', '')}`;
+                else if (d.type === 'event') window.location = '/admin';
+            });
+
+        // Event nodes — large circle
+        groups.filter(d => d.type === 'event').each(function(d) {
+            const g = d3.select(this);
+            g.append('circle')
+                .attr('r', NODE_RADIUS.event)
+                .attr('fill', 'rgba(0, 229, 255, 0.08)')
+                .attr('stroke', () => statusColor(d.status))
+                .attr('stroke-width', 2)
+                .style('filter', 'drop-shadow(0 0 12px rgba(0, 229, 255, 0.3))');
+            g.append('text').attr('class', 'node-label-type')
+                .attr('y', -8).attr('fill', '#00e5ff').text('EVENT');
+            g.append('text').attr('class', 'node-label')
+                .attr('y', 8).attr('font-size', '11px').text(d.label);
+        });
+
+        // Team nodes — medium circle
+        groups.filter(d => d.type === 'team').each(function(d) {
+            const g = d3.select(this);
+            const color = d.color || '#ffb400';
+            g.append('circle')
+                .attr('r', NODE_RADIUS.team)
+                .attr('fill', color.replace(')', ', 0.1)').replace('rgb', 'rgba').replace('#', ''))
+                .attr('fill', `${color}18`)
+                .attr('stroke', color)
+                .attr('stroke-width', 2)
+                .style('filter', `drop-shadow(0 0 10px ${color}40)`);
+            g.append('text').attr('class', 'node-label-type')
+                .attr('y', -6).attr('fill', color).text('TEAM');
+            g.append('text').attr('class', 'node-label')
+                .attr('y', 8).attr('font-size', '10px').text(d.label);
+        });
+
+        // VM nodes — rounded-square with server rack icon + OS badge
+        groups.filter(d => d.type === 'vm').each(function(d) {
+            const g = d3.select(this);
+            const color = statusColor(d.status);
+            const size = 44;
+            const half = size / 2;
+
+            // Background rect
+            g.append('rect')
+                .attr('class', 'vm-bg')
+                .attr('x', -half).attr('y', -half)
+                .attr('width', size).attr('height', size)
+                .attr('rx', 10)
+                .attr('fill', `${color}14`)
+                .attr('stroke', color)
+                .attr('stroke-width', 1.5)
+                .style('filter', `drop-shadow(0 0 6px ${color}50)`)
+                .style('transition', 'stroke 0.3s, fill 0.3s, filter 0.3s');
+
+            // Server rack: 3 stacked rectangles
+            const rackW = 20, rackH = 5, rackGap = 3;
+            const startY = -half + 10;
+            for (let i = 0; i < 3; i++) {
+                const ry = startY + i * (rackH + rackGap);
+                g.append('rect')
+                    .attr('class', 'vm-rack')
+                    .attr('x', -rackW / 2).attr('y', ry)
+                    .attr('width', rackW).attr('height', rackH)
+                    .attr('rx', 1.5)
+                    .attr('fill', 'none')
+                    .attr('stroke', color)
+                    .attr('stroke-width', 0.8)
+                    .style('transition', 'stroke 0.3s');
+                // LED dot
+                g.append('circle')
+                    .attr('class', 'vm-led')
+                    .attr('cx', rackW / 2 - 3)
+                    .attr('cy', ry + rackH / 2)
+                    .attr('r', 1.5)
+                    .attr('fill', color)
+                    .style('transition', 'fill 0.3s');
+            }
+
+            // OS badge (bottom-right corner)
+            const badgeX = half - 6;
+            const badgeY = half - 6;
+            g.append('circle')
+                .attr('cx', badgeX).attr('cy', badgeY)
+                .attr('r', 7)
+                .attr('fill', 'var(--bg-deep)')
+                .attr('stroke', color)
+                .attr('stroke-width', 0.8);
+            g.append('text')
+                .attr('x', badgeX).attr('y', badgeY + 3.5)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '8px')
+                .attr('fill', color)
+                .text(osBadge(d.os));
+
+            // Label below node
+            g.append('text').attr('class', 'node-label')
+                .attr('y', half + 14).attr('font-size', '9px')
+                .text(d.label);
+        });
+    }
+
+    // ── Update VM node visuals (status color changes) ─────────────────────────
+    function updateNodeVisuals() {
+        nodeGroup.selectAll('.node-group').each(function(d) {
+            const g = d3.select(this);
+            if (d.type === 'vm') {
+                const color = statusColor(d.status);
+                g.select('.vm-bg')
+                    .attr('stroke', color)
+                    .attr('fill', `${color}14`)
+                    .style('filter', `drop-shadow(0 0 6px ${color}50)`);
+                g.selectAll('.vm-rack').attr('stroke', color);
+                g.selectAll('.vm-led').attr('fill', color);
+            }
+        });
+    }
+
+    // ── Simulation tick ───────────────────────────────────────────────────────
+    function ticked() {
+        linkGroup.selectAll('line')
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+
+        nodeGroup.selectAll('.node-group')
+            .attr('transform', d => `translate(${d.x},${d.y})`);
+    }
+
+    // ── Drag handlers ─────────────────────────────────────────────────────────
+    function dragStarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+        hideContextMenu();
+    }
+    function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+    }
+    function dragEnded(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+    }
+
+    // ── Tooltip ───────────────────────────────────────────────────────────────
+    function showTooltip(event, d) {
+        let html = '';
+        if (d.type === 'vm') {
+            const pct = d.modules_total > 0 ? Math.round((d.modules_completed / d.modules_total) * 100) : 0;
+            html = `
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Hostname</span><span class="topo-tooltip-value">${d.hostname || d.label}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">IP</span><span class="topo-tooltip-value">${d.ip || '—'}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">OS</span><span class="topo-tooltip-value">${d.os || '—'}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${d.status}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${d.modules_completed}/${d.modules_total}</span></div>
+                <div class="topo-tooltip-progress"><div class="topo-tooltip-progress-bar" style="width:${pct}%"></div></div>
+            `;
+        } else if (d.type === 'team') {
+            const teamVMs = currentNodes.filter(n => n.type === 'vm' && n.team_id === d.id);
+            const vmCount = teamVMs.length;
+            const totalMods = teamVMs.reduce((s, v) => s + (v.modules_total || 0), 0);
+            const completedMods = teamVMs.reduce((s, v) => s + (v.modules_completed || 0), 0);
+            const pct = totalMods > 0 ? Math.round((completedMods / totalMods) * 100) : 0;
+            html = `
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Team</span><span class="topo-tooltip-value">${d.label}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs</span><span class="topo-tooltip-value">${vmCount}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${completedMods}/${totalMods}</span></div>
+                <div class="topo-tooltip-progress"><div class="topo-tooltip-progress-bar" style="width:${pct}%"></div></div>
+            `;
+        } else if (d.type === 'event') {
+            const eventTeams = currentNodes.filter(n => n.type === 'team' && n.event_id === d.id);
+            const eventVMs = currentNodes.filter(n => n.type === 'vm' && n.event_id === d.id);
+            html = `
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Event</span><span class="topo-tooltip-value">${d.label}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${d.status}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Teams</span><span class="topo-tooltip-value">${eventTeams.length}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs</span><span class="topo-tooltip-value">${eventVMs.length}</span></div>
+            `;
+        }
+        tooltip.innerHTML = html;
+        tooltip.classList.add('visible');
+    }
+    function moveTooltip(event) {
+        const rect = svgEl.closest('.topology-container').getBoundingClientRect();
+        tooltip.style.left = (event.clientX - rect.left + 14) + 'px';
+        tooltip.style.top = (event.clientY - rect.top + 14) + 'px';
+    }
+    function hideTooltip() {
+        tooltip.classList.remove('visible');
+    }
+
+    // ── Context menu ──────────────────────────────────────────────────────────
+    function showContextMenu(event, d) {
+        event.preventDefault();
+        event.stopPropagation();
+        hideTooltip();
+
+        let items = '';
+        if (d.type === 'vm') {
+            const vmId = d.id.replace('vm-', '');
+            items = `
+                <div class="topo-context-header">${d.label} (${d.status})</div>
+                <div class="topo-context-item" onclick="location.href='/admin/vm/${vmId}'">&#9654; View Details</div>
+                <div class="topo-context-item" data-action="provision" data-id="${vmId}">&#8635; Provision</div>
+                <div class="topo-context-item" data-action="assign-modules" data-id="${vmId}">&#128203; Assign Modules</div>
+                <div class="topo-context-item" data-action="export-playbook" data-id="${vmId}">&#128230; Export Playbook</div>
+                <div class="topo-context-item danger" data-action="destroy" data-id="${vmId}">&#128465; Destroy</div>
+            `;
+        } else if (d.type === 'team') {
+            const teamId = d.id.replace('team-', '');
+            items = `
+                <div class="topo-context-header">${d.label}</div>
+                <div class="topo-context-item" onclick="location.href='/admin'">&#9654; View Team</div>
+                <div class="topo-context-item danger" data-action="delete-team" data-id="${teamId}">&#128465; Delete Team</div>
+            `;
+        } else if (d.type === 'event') {
+            items = `
+                <div class="topo-context-header">${d.label}</div>
+                <div class="topo-context-item" onclick="location.href='/admin'">&#9654; Manage Event</div>
+            `;
+        }
+
+        contextMenu.innerHTML = items;
+        const rect = svgEl.closest('.topology-container').getBoundingClientRect();
+        contextMenu.style.left = (event.clientX - rect.left) + 'px';
+        contextMenu.style.top = (event.clientY - rect.top) + 'px';
+        contextMenu.classList.add('visible');
+
+        // Wire up action items
+        contextMenu.querySelectorAll('[data-action]').forEach(el => {
+            el.addEventListener('click', () => handleContextAction(el.dataset.action, el.dataset.id));
+        });
+    }
+    function hideContextMenu() {
+        contextMenu.classList.remove('visible');
+    }
+
+    // ── Context menu actions ──────────────────────────────────────────────────
+    async function handleContextAction(action, id) {
+        hideContextMenu();
+        let url, method, msg;
+
+        switch (action) {
+            case 'provision':
+                url = `/admin/vms/${id}/provision`;
+                method = 'POST';
+                msg = 'Provision started';
+                break;
+            case 'assign-modules':
+                url = `/admin/vms/${id}/assign-modules`;
+                method = 'POST';
+                msg = 'Modules assigned';
+                break;
+            case 'export-playbook':
+                window.location = `/admin/vms/${id}/ansible-export`;
+                return;
+            case 'destroy':
+                if (!confirm('Destroy this VM? This cannot be undone.')) return;
+                url = `/admin/vms/${id}/destroy-vultr`;
+                method = 'POST';
+                msg = 'Destroy initiated';
+                break;
+            case 'delete-team':
+                if (!confirm('Delete this team?')) return;
+                url = `/admin/teams/${id}`;
+                method = 'DELETE';
+                msg = 'Team deleted';
+                break;
+            default:
+                return;
+        }
+
+        try {
+            const resp = await fetch(url, { method });
+            if (resp.ok) {
+                showToast(msg, 'success');
+                refreshData();
+            } else {
+                const err = await resp.json();
+                showToast(err.error || 'Action failed', 'error');
+            }
+        } catch (e) {
+            showToast('Network error', 'error');
+        }
+    }
+
+    // ── Toast (reuse existing pattern from admin) ─────────────────────────────
+    function showToast(message, type) {
+        if (typeof window.showToast === 'function') {
+            window.showToast(message);
+            return;
+        }
+        // Fallback inline toast
+        const toast = document.createElement('div');
+        toast.textContent = message;
+        toast.style.cssText = `
+            position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+            padding: 10px 20px; border-radius: 6px; font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #fff; background: ${type === 'error' ? 'var(--red)' : 'var(--green)'};
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            animation: fade-in-up 0.3s ease;
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    // ── Polling ───────────────────────────────────────────────────────────────
+    async function refreshData() {
+        const data = await fetchData(currentEventFilter);
+        if (data) {
+            if (data.nodes.length === 0) {
+                showEmpty();
+            } else {
+                hideEmpty();
+                updateGraph(data);
+            }
+        }
+    }
+
+    function showEmpty() {
+        if (!document.querySelector('.topo-empty')) {
+            const el = document.createElement('div');
+            el.className = 'topo-empty';
+            el.innerHTML = '<h3>No VMs found</h3><p>Create teams and register VMs to see them here.</p>';
+            svgEl.closest('.topology-container').appendChild(el);
+        }
+    }
+    function hideEmpty() {
+        const el = document.querySelector('.topo-empty');
+        if (el) el.remove();
+    }
+
+    function startPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(refreshData, 5000);
+    }
+
+    // ── Event filter ──────────────────────────────────────────────────────────
+    eventFilter.addEventListener('change', () => {
+        currentEventFilter = eventFilter.value;
+        // Reset graph
+        currentNodes = [];
+        currentLinks = [];
+        if (simulation) simulation.stop();
+        linkGroup.selectAll('*').remove();
+        nodeGroup.selectAll('*').remove();
+        refreshData();
+    });
+
+    // Close context menu on escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') hideContextMenu();
+    });
+
+    // Close context menu on click outside
+    document.addEventListener('click', (e) => {
+        if (!contextMenu.contains(e.target)) hideContextMenu();
+    });
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    loadEventFilter();
+    refreshData();
+    startPolling();
+})();
+</script>
+{% endblock %}

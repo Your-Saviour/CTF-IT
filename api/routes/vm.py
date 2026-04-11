@@ -1318,3 +1318,83 @@ async def destroy_vm_on_vultr(vm_id: int, request: Request, db: Session = Depend
 
     asyncio.create_task(asyncio.to_thread(_run_vultr_destroy, vm_id))
     return {"status": "destroying", "vm_id": vm_id}
+
+
+# ── Topology Data ─────────────────────────────────────────────────────────────
+
+# Predefined team colors cycled by index
+_TEAM_COLORS = [
+    "#ffb400", "#b400ff", "#00c8ff", "#ff6b6b", "#00ff88",
+    "#ff9100", "#7c4dff", "#00bfa5", "#ff4081", "#64dd17",
+]
+
+
+@router.get("/topology-data")
+async def topology_data(
+    request: Request,
+    event_id: int = None,
+    db: Session = Depends(get_db),
+):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    # Query events (non-draft unless filtered)
+    eq = db.query(Event)
+    if event_id:
+        eq = eq.filter(Event.id == event_id)
+    else:
+        eq = eq.filter(Event.status != "draft")
+    events = eq.all()
+
+    nodes = []
+    links = []
+    team_color_map = {}
+    color_idx = 0
+
+    for event in events:
+        event_node_id = f"event-{event.id}"
+        nodes.append({
+            "id": event_node_id,
+            "type": "event",
+            "label": event.name,
+            "status": event.status,
+        })
+
+        teams = db.query(Team).filter(Team.event_id == event.id).all()
+        for team in teams:
+            team_node_id = f"team-{team.id}"
+            if team.id not in team_color_map:
+                team_color_map[team.id] = _TEAM_COLORS[color_idx % len(_TEAM_COLORS)]
+                color_idx += 1
+
+            nodes.append({
+                "id": team_node_id,
+                "type": "team",
+                "label": team.name,
+                "event_id": event_node_id,
+                "color": team_color_map[team.id],
+            })
+            links.append({"source": event_node_id, "target": team_node_id})
+
+            vms = db.query(VM).filter(VM.team_id == team.id).all()
+            for vm in vms:
+                total = len(vm.modules)
+                completed = sum(1 for m in vm.modules if m.completed)
+                vm_node_id = f"vm-{vm.id}"
+                nodes.append({
+                    "id": vm_node_id,
+                    "type": "vm",
+                    "label": vm.hostname or f"vm-{vm.id}",
+                    "hostname": vm.hostname,
+                    "ip": vm.ip_address,
+                    "status": vm.status,
+                    "os": vm.os,
+                    "team_id": team_node_id,
+                    "event_id": event_node_id,
+                    "modules_total": total,
+                    "modules_completed": completed,
+                })
+                links.append({"source": team_node_id, "target": vm_node_id})
+
+    return {"nodes": nodes, "links": links}
