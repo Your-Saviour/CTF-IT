@@ -321,6 +321,17 @@
     </div>
 </div>
 
+<!-- Attack Graph -->
+<div class="card" style="margin-bottom: 1.25rem;">
+    <h3>Attack Graph</h3>
+    <div id="attack-tree-section">
+        <span style="color: var(--text-muted); font-size: 0.85rem;">Loading attack tree...</span>
+    </div>
+    <div class="attack-tree-wrap" id="attack-tree-container" style="display: none;"></div>
+</div>
+
+{% include "attack_tree_partial.html" %}
+
 <!-- Actions -->
 <div class="card">
     <h3>Actions</h3>
@@ -1018,8 +1029,34 @@ function runAttack() {
         });
 }
 
+// ── Attack Tree ──────────────────────────────────────────────────────────────
+
+function loadAttackTree() {
+    fetch('/admin/caldera/attack-tree/' + VM_ID)
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(data) {
+            var section = document.getElementById('attack-tree-section');
+            var container = document.getElementById('attack-tree-container');
+            if (data.tree && data.tree.nodes && data.tree.nodes.length > 0) {
+                section.style.display = 'none';
+                container.style.display = 'block';
+                renderAttackTree('attack-tree-container', data.tree);
+            } else {
+                section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No attack tree data available. Run an attack to generate the tree.</span>';
+            }
+        })
+        .catch(function(e) {
+            document.getElementById('attack-tree-section').innerHTML =
+                '<span style="color: var(--text-muted); font-size: 0.85rem;">Attack tree unavailable.</span>';
+        });
+}
+
 loadVM();
 loadModuleOptions();
 loadRedTeamStatus();
+loadAttackTree();
 </script>
 {% endblock %}

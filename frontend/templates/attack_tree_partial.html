@@ -1,0 +1,441 @@
+<!-- Attack Tree Visualization Partial -->
+<!-- Include this partial in any page that needs attack tree rendering. -->
+<!-- Then call: renderAttackTree(containerId, treeData) -->
+
+<style>
+.attack-tree-wrap {
+    position: relative;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-deep);
+    min-height: 200px;
+}
+.attack-tree-wrap svg {
+    display: block;
+}
+.at-node {
+    cursor: pointer;
+    transition: filter 0.2s;
+}
+.at-node:hover {
+    filter: brightness(1.2);
+}
+.at-node-rect {
+    rx: 6;
+    ry: 6;
+    stroke-width: 2;
+}
+.at-node-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    fill: var(--text-primary, #e6edf3);
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+}
+.at-tactic-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    fill: var(--text-muted, #7a8599);
+    text-anchor: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+}
+.at-phase-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    fill: var(--cyan, #00e5ff);
+    text-anchor: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+}
+.at-edge {
+    fill: none;
+    stroke-width: 1.5;
+}
+.at-tooltip {
+    position: absolute;
+    background: var(--bg-surface, #161b22);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-primary, #e6edf3);
+    pointer-events: none;
+    z-index: 100;
+    display: none;
+    max-width: 280px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.at-detail-panel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 300px;
+    background: var(--bg-surface, #161b22);
+    border-left: 1px solid var(--border, #30363d);
+    padding: 1rem;
+    overflow-y: auto;
+    display: none;
+    font-size: 0.8rem;
+}
+.at-detail-panel.active { display: block; }
+.at-detail-title {
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary, #e6edf3);
+}
+.at-empty-msg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    color: var(--text-muted, #7a8599);
+    font-size: 0.85rem;
+}
+
+/* Node status colors */
+.at-status-succeeded .at-node-rect { fill: rgba(0, 230, 118, 0.15); stroke: #3fb950; }
+.at-status-failed .at-node-rect { fill: rgba(255, 23, 68, 0.08); stroke: #f85149; stroke-dasharray: 4,2; }
+.at-status-skipped .at-node-rect { fill: rgba(122, 133, 153, 0.08); stroke: #484f58; }
+.at-status-pending .at-node-rect { fill: rgba(255, 255, 255, 0.04); stroke: #30363d; }
+.at-status-running .at-node-rect { fill: rgba(0, 229, 255, 0.12); stroke: #00e5ff; animation: at-pulse 1.5s ease-in-out infinite; }
+.at-status-infrastructure .at-node-rect { fill: rgba(122, 133, 153, 0.06); stroke: #30363d; stroke-dasharray: 2,2; }
+.at-status-default .at-node-rect { fill: rgba(255, 255, 255, 0.04); stroke: #30363d; }
+
+@keyframes at-pulse {
+    0%, 100% { stroke-opacity: 0.6; }
+    50% { stroke-opacity: 1; }
+}
+</style>
+
+<script>
+/**
+ * Render an attack tree into the given container element.
+ * @param {string} containerId - DOM id of the container div (should have class "attack-tree-wrap")
+ * @param {object} treeData - Object with .nodes and .edges arrays
+ *
+ * Loads elkjs and d3 from CDN on first call, then caches.
+ */
+window.renderAttackTree = (function() {
+    var libsLoaded = false;
+    var libsLoading = false;
+    var libsCallbacks = [];
+
+    var PHASE_NAMES = {
+        '-1': 'Infrastructure',
+        '0': 'Initial Access',
+        '1': 'Execution',
+        '2': 'Persistence',
+        '3': 'Priv Esc',
+        '4': 'Cred Access',
+        '5': 'Collection',
+        '6': 'Impact',
+        '7': 'C2'
+    };
+
+    var NODE_W = 160, NODE_H = 48, PADDING = 40;
+
+    function escTreeHtml(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function statusColor(s) {
+        if (s === 'succeeded') return 'var(--green, #3fb950)';
+        if (s === 'failed') return 'var(--red, #f85149)';
+        if (s === 'skipped') return 'var(--text-muted, #7a8599)';
+        if (s === 'running') return 'var(--cyan, #00e5ff)';
+        return 'var(--text-secondary, #8b949e)';
+    }
+
+    function loadLibs(callback) {
+        if (libsLoaded) { callback(); return; }
+        libsCallbacks.push(callback);
+        if (libsLoading) return;
+        libsLoading = true;
+
+        var elkScript = document.createElement('script');
+        elkScript.src = 'https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js';
+        elkScript.onload = function() {
+            var d3Script = document.createElement('script');
+            d3Script.src = 'https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js';
+            d3Script.onload = function() {
+                libsLoaded = true;
+                libsLoading = false;
+                libsCallbacks.forEach(function(cb) { cb(); });
+                libsCallbacks = [];
+            };
+            document.head.appendChild(d3Script);
+        };
+        document.head.appendChild(elkScript);
+    }
+
+    function doRender(containerId, treeData) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+
+        // Clear container
+        container.innerHTML = '';
+
+        if (!treeData || !treeData.nodes || treeData.nodes.length === 0) {
+            container.innerHTML = '<div class="at-empty-msg">No attack tree data available</div>';
+            return;
+        }
+
+        // Add tooltip and detail panel
+        var tooltipId = containerId + '-tooltip';
+        var detailId = containerId + '-detail';
+        var detailTitleId = containerId + '-detail-title';
+        var detailBodyId = containerId + '-detail-body';
+
+        var tooltip = document.createElement('div');
+        tooltip.className = 'at-tooltip';
+        tooltip.id = tooltipId;
+        container.appendChild(tooltip);
+
+        var detailPanel = document.createElement('div');
+        detailPanel.className = 'at-detail-panel';
+        detailPanel.id = detailId;
+        detailPanel.innerHTML =
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">' +
+                '<span class="at-detail-title" id="' + detailTitleId + '"></span>' +
+                '<button onclick="document.getElementById(\'' + detailId + '\').classList.remove(\'active\')" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;">&times;</button>' +
+            '</div>' +
+            '<div id="' + detailBodyId + '"></div>';
+        container.appendChild(detailPanel);
+
+        // Build elk graph
+        var elkNodes = treeData.nodes.map(function(n) {
+            return {
+                id: n.id,
+                width: NODE_W,
+                height: NODE_H,
+                labels: [{ text: n.name }],
+                _data: n
+            };
+        });
+
+        var elkEdges = treeData.edges.map(function(e, i) {
+            return {
+                id: 'e' + i,
+                sources: [e.source],
+                targets: [e.target],
+                _data: e
+            };
+        });
+
+        var graph = {
+            id: 'root',
+            layoutOptions: {
+                'elk.algorithm': 'layered',
+                'elk.direction': 'RIGHT',
+                'elk.spacing.nodeNode': '30',
+                'elk.layered.spacing.nodeNodeBetweenLayers': '80',
+                'elk.padding': '[top=' + PADDING + ',left=' + PADDING + ',bottom=' + PADDING + ',right=' + PADDING + ']'
+            },
+            children: elkNodes,
+            edges: elkEdges
+        };
+
+        var elk = new ELK();
+        elk.layout(graph).then(function(layoutedGraph) {
+            var totalW = layoutedGraph.width || 600;
+            var totalH = layoutedGraph.height || 300;
+
+            var svg = d3.select(container)
+                .append('svg')
+                .attr('width', totalW)
+                .attr('height', totalH);
+
+            var defs = svg.append('defs');
+            // Arrow markers
+            ['green', 'red', 'gray'].forEach(function(color) {
+                var fillColor = color === 'green' ? '#3fb950' : color === 'red' ? '#f85149' : '#484f58';
+                defs.append('marker')
+                    .attr('id', 'arrow-' + color + '-' + containerId)
+                    .attr('viewBox', '0 0 10 10')
+                    .attr('refX', 9)
+                    .attr('refY', 5)
+                    .attr('markerWidth', 6)
+                    .attr('markerHeight', 6)
+                    .attr('orient', 'auto')
+                    .append('path')
+                    .attr('d', 'M 0 0 L 10 5 L 0 10 z')
+                    .attr('fill', fillColor);
+            });
+
+            // Draw edges
+            layoutedGraph.edges.forEach(function(edge) {
+                if (!edge.sections || !edge.sections.length) return;
+                var section = edge.sections[0];
+                var points = [section.startPoint];
+                if (section.bendPoints) points = points.concat(section.bendPoints);
+                points.push(section.endPoint);
+
+                var lineGen = d3.line()
+                    .x(function(d) { return d.x; })
+                    .y(function(d) { return d.y; })
+                    .curve(d3.curveBasis);
+
+                var sourceNode = treeData.nodes.find(function(n) { return n.id === edge._data.source; });
+                var targetNode = treeData.nodes.find(function(n) { return n.id === edge._data.target; });
+                var edgeColor = '#484f58';
+                var edgeDash = '4,3';
+                var markerColor = 'gray';
+
+                if (sourceNode && sourceNode.status === 'succeeded' && targetNode && targetNode.status === 'succeeded') {
+                    edgeColor = '#3fb950';
+                    edgeDash = 'none';
+                    markerColor = 'green';
+                } else if (sourceNode && sourceNode.status === 'succeeded' && targetNode && targetNode.status === 'failed') {
+                    edgeColor = '#f85149';
+                    edgeDash = 'none';
+                    markerColor = 'red';
+                } else if (sourceNode && sourceNode.status === 'succeeded') {
+                    edgeColor = '#3fb950';
+                    edgeDash = 'none';
+                    markerColor = 'green';
+                }
+
+                svg.append('path')
+                    .attr('class', 'at-edge')
+                    .attr('d', lineGen(points))
+                    .attr('stroke', edgeColor)
+                    .attr('stroke-dasharray', edgeDash)
+                    .attr('marker-end', 'url(#arrow-' + markerColor + '-' + containerId + ')');
+            });
+
+            // Draw nodes
+            layoutedGraph.children.forEach(function(elkNode) {
+                var nodeData = elkNode._data;
+                var statusClass = 'at-status-default';
+                if (nodeData.is_infrastructure) statusClass = 'at-status-infrastructure';
+                else if (nodeData.status === 'succeeded') statusClass = 'at-status-succeeded';
+                else if (nodeData.status === 'failed') statusClass = 'at-status-failed';
+                else if (nodeData.status === 'skipped') statusClass = 'at-status-skipped';
+                else if (nodeData.status === 'running') statusClass = 'at-status-running';
+                else if (nodeData.status === 'pending') statusClass = 'at-status-pending';
+
+                var g = svg.append('g')
+                    .attr('class', 'at-node ' + statusClass)
+                    .attr('transform', 'translate(' + elkNode.x + ',' + elkNode.y + ')');
+
+                g.append('rect')
+                    .attr('class', 'at-node-rect')
+                    .attr('width', NODE_W)
+                    .attr('height', NODE_H);
+
+                // Module name (truncated)
+                var displayName = nodeData.name || nodeData.id;
+                if (displayName.length > 20) displayName = displayName.substring(0, 18) + '...';
+                g.append('text')
+                    .attr('class', 'at-node-label')
+                    .attr('x', NODE_W / 2)
+                    .attr('y', NODE_H / 2 - 6)
+                    .text(displayName);
+
+                // Tactic label below name
+                var tacticDisplay = nodeData.is_infrastructure ? 'infrastructure' : (nodeData.tactic || '');
+                g.append('text')
+                    .attr('class', 'at-tactic-label')
+                    .attr('x', NODE_W / 2)
+                    .attr('y', NODE_H / 2 + 10)
+                    .text(tacticDisplay);
+
+                // Hover tooltip
+                g.on('mouseenter', function(event) {
+                    var tt = document.getElementById(tooltipId);
+                    var phaseName = PHASE_NAMES[String(nodeData.phase)] || 'Phase ' + nodeData.phase;
+                    tt.innerHTML = '<strong>' + escTreeHtml(nodeData.name) + '</strong><br>' +
+                        '<span style="color:var(--text-secondary)">Phase: ' + escTreeHtml(phaseName) + '</span><br>' +
+                        (nodeData.technique_id ? '<span style="color:var(--text-secondary)">Technique: ' + escTreeHtml(nodeData.technique_id) + ' — ' + escTreeHtml(nodeData.technique_name) + '</span><br>' : '') +
+                        (nodeData.status ? '<span style="color:var(--text-secondary)">Status: ' + escTreeHtml(nodeData.status) + '</span>' : '');
+                    tt.style.display = 'block';
+                    tt.style.left = (event.offsetX + 15) + 'px';
+                    tt.style.top = (event.offsetY - 10) + 'px';
+                });
+
+                g.on('mouseleave', function() {
+                    document.getElementById(tooltipId).style.display = 'none';
+                });
+
+                // Click for detail panel
+                g.on('click', function() {
+                    var panel = document.getElementById(detailId);
+                    var title = document.getElementById(detailTitleId);
+                    var body = document.getElementById(detailBodyId);
+                    var phaseName = PHASE_NAMES[String(nodeData.phase)] || 'Phase ' + nodeData.phase;
+
+                    title.textContent = nodeData.name;
+                    body.innerHTML =
+                        '<div style="margin-bottom:0.5rem;">' +
+                            '<span style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Module ID</span><br>' +
+                            '<code style="font-size:0.75rem;">' + escTreeHtml(nodeData.id) + '</code>' +
+                        '</div>' +
+                        '<div style="margin-bottom:0.5rem;">' +
+                            '<span style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Phase</span><br>' +
+                            escTreeHtml(phaseName) +
+                        '</div>' +
+                        (nodeData.tactic ? '<div style="margin-bottom:0.5rem;">' +
+                            '<span style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Tactic</span><br>' +
+                            escTreeHtml(nodeData.tactic) +
+                        '</div>' : '') +
+                        (nodeData.technique_id ? '<div style="margin-bottom:0.5rem;">' +
+                            '<span style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Technique</span><br>' +
+                            escTreeHtml(nodeData.technique_id) + ' — ' + escTreeHtml(nodeData.technique_name) +
+                        '</div>' : '') +
+                        (nodeData.status ? '<div style="margin-bottom:0.5rem;">' +
+                            '<span style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Status</span><br>' +
+                            '<span style="color:' + statusColor(nodeData.status) + '">' + escTreeHtml(nodeData.status) + '</span>' +
+                        '</div>' : '') +
+                        (nodeData.requires && nodeData.requires.length ? '<div style="margin-bottom:0.5rem;">' +
+                            '<span style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Requires</span><br>' +
+                            nodeData.requires.map(function(r) { return '<code style="font-size:0.7rem;">' + escTreeHtml(r) + '</code>'; }).join(', ') +
+                        '</div>' : '');
+
+                    panel.classList.add('active');
+                });
+            });
+
+            // Phase headers at top
+            var phasePositions = {};
+            layoutedGraph.children.forEach(function(elkNode) {
+                var phase = elkNode._data.phase;
+                if (!(phase in phasePositions)) {
+                    phasePositions[phase] = { minX: elkNode.x, maxX: elkNode.x + NODE_W };
+                } else {
+                    phasePositions[phase].minX = Math.min(phasePositions[phase].minX, elkNode.x);
+                    phasePositions[phase].maxX = Math.max(phasePositions[phase].maxX, elkNode.x + NODE_W);
+                }
+            });
+
+            Object.keys(phasePositions).sort(function(a,b) { return parseInt(a) - parseInt(b); }).forEach(function(phase) {
+                var pos = phasePositions[phase];
+                var centerX = (pos.minX + pos.maxX) / 2;
+                var phaseName = PHASE_NAMES[phase] || 'Phase ' + phase;
+                svg.append('text')
+                    .attr('class', 'at-phase-header')
+                    .attr('x', centerX)
+                    .attr('y', 15)
+                    .text(phaseName);
+            });
+
+        }).catch(function(err) {
+            console.error('Attack tree layout error:', err);
+            container.innerHTML = '<div class="at-empty-msg" style="color:var(--red)">Failed to render attack tree</div>';
+        });
+    }
+
+    return function renderAttackTree(containerId, treeData) {
+        loadLibs(function() {
+            doRender(containerId, treeData);
+        });
+    };
+})();
+</script>

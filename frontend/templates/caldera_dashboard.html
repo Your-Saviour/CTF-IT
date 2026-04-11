@@ -265,6 +265,17 @@
     </table>
 </div>
 
+<!-- Attack Graph -->
+<div class="card">
+    <h3>Attack Graph</h3>
+    <div id="op-attack-tree-section">
+        <span style="color: var(--text-muted); font-size: 0.85rem;">Loading attack tree...</span>
+    </div>
+    <div class="attack-tree-wrap" id="op-attack-tree-container" style="display: none;"></div>
+</div>
+
+{% include "attack_tree_partial.html" %}
+
 {% else %}
 <!-- ===== LIST VIEW ===== -->
 <div class="page-header">
@@ -415,6 +426,26 @@
             })
             .catch(function (e) {
                 console.error('Failed to load operation detail:', e);
+            });
+
+        // Load attack tree for this operation
+        apiFetch('/admin/caldera/operations/' + OP_ID + '/attack-tree')
+            .then(function (data) {
+                var section = document.getElementById('op-attack-tree-section');
+                var container = document.getElementById('op-attack-tree-container');
+                if (data.tree && data.tree.nodes && data.tree.nodes.length > 0) {
+                    section.style.display = 'none';
+                    container.style.display = 'block';
+                    renderAttackTree('op-attack-tree-container', data.tree);
+                } else {
+                    section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No attack tree data available.</span>';
+                }
+            })
+            .catch(function (e) {
+                var section = document.getElementById('op-attack-tree-section');
+                if (section) {
+                    section.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Attack tree unavailable.</span>';
+                }
             });
     }
 
