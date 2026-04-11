@@ -999,6 +999,36 @@ async def vultr_os_list(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": f"Failed to fetch Vultr OS list: {exc}"}, status_code=502)
 
 
+# ── Shared Vultr Semaphore project ─────────────────────────────────────────────
+
+_VULTR_PROJECT_ID_KEY = "vultr_semaphore_project_id"
+_VULTR_KEY_ID_KEY = "vultr_semaphore_key_id"
+
+
+def _get_or_create_vultr_semaphore_project(db, client, private_key: str) -> tuple[int, int]:
+    """Return (project_id, key_id) for the shared 'CTF Vultr Operations' Semaphore project.
+
+    Creates the project and SSH key on first call and persists their IDs in
+    PlatformSettings so subsequent calls reuse the same project.
+    """
+    from api.models import PlatformSettings
+
+    proj_row = db.query(PlatformSettings).filter_by(key=_VULTR_PROJECT_ID_KEY).first()
+    key_row = db.query(PlatformSettings).filter_by(key=_VULTR_KEY_ID_KEY).first()
+
+    if proj_row and key_row:
+        return int(proj_row.value), int(key_row.value)
+
+    project_id = client.create_project("CTF Vultr Operations")
+    key_id = client.create_key(project_id, "platform-key", private_key)
+
+    db.add(PlatformSettings(key=_VULTR_PROJECT_ID_KEY, value=str(project_id)))
+    db.add(PlatformSettings(key=_VULTR_KEY_ID_KEY, value=str(key_id)))
+    db.commit()
+
+    return project_id, key_id
+
+
 # ── Vultr VM Creation ──────────────────────────────────────────────────────────
 
 def _run_vultr_create(vm_id: int) -> None:
@@ -1061,9 +1091,8 @@ def _run_vultr_create(vm_id: int) -> None:
         with SemaphoreClient() as client:
             client.login()
 
-            project_id = client.create_project(f"CTF Vultr Create VM {vm_id}")
-            key_id = client.create_key(project_id, "platform-key", private_key)
-            inventory_id = client.create_localhost_inventory(project_id, "localhost", key_id)
+            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
+            inventory_id = client.create_localhost_inventory(project_id, f"localhost-create-{vm_id}", key_id)
             repo_id = client.create_repository(
                 project_id, f"create-vm-{vm_id}", str(playbook_dir), key_id
             )
@@ -1416,9 +1445,8 @@ def _run_vultr_destroy(vm_id: int) -> None:
         with SemaphoreClient() as client:
             client.login()
 
-            project_id = client.create_project(f"CTF Vultr Destroy VM {vm_id}")
-            key_id = client.create_key(project_id, "platform-key", private_key)
-            inventory_id = client.create_localhost_inventory(project_id, "localhost", key_id)
+            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
+            inventory_id = client.create_localhost_inventory(project_id, f"localhost-destroy-{vm_id}", key_id)
             repo_id = client.create_repository(
                 project_id, f"destroy-vm-{vm_id}", str(playbook_dir), key_id
             )
