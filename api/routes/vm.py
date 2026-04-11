@@ -1092,15 +1092,18 @@ def _run_vultr_create(vm_id: int) -> None:
         # ── Step 4: Extract results from playbook output ──────────────────────
         _update_provision_step(db, vm, "extracting_results")
 
+        # Strip ANSI escape codes and join all lines — Ansible debug output wraps
+        # long messages across multiple lines with embedded colour codes.
+        _ansi = _re.compile(r'\x1b\[[0-9;]*[mGKHF]')
+        cleaned = " ".join(_ansi.sub('', line).strip() for line in output_lines)
+
         vultr_result = None
-        for line in reversed(output_lines):
-            match = _re.search(r'VULTR_RESULT=(\{.*\})', line)
-            if match:
-                try:
-                    vultr_result = json.loads(match.group(1))
-                except json.JSONDecodeError:
-                    pass
-                break
+        match = _re.search(r'VULTR_RESULT=(\{.*?\})', cleaned)
+        if match:
+            try:
+                vultr_result = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
 
         if not vultr_result or not vultr_result.get("ip"):
             raise RuntimeError(
