@@ -1,10 +1,12 @@
 import asyncio
 import json
 import os
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -14,6 +16,11 @@ from api.routes.auth import get_current_user
 REGISTRY_INTERNAL = os.environ.get("REGISTRY_INTERNAL", "http://registry:5000")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class PlanPreviewRequest(BaseModel):
+    quota: Optional[dict] = None
+    vm_quota: Optional[dict] = None
 
 
 def require_admin(request: Request, db: Session = Depends(get_db)):
@@ -471,6 +478,158 @@ async def event_provision_status(
         "total": len(vms),
         **counts,
         "vms": vm_list,
+    }
+
+
+@router.post("/events/{event_id}/plan-preview")
+async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    quota = body.quota or json.loads(event.quota)
+    vm_quota = body.vm_quota or (json.loads(event.vm_quota) if event.vm_quota else None)
+
+    if not vm_quota:
+        return JSONResponse({"error": "no vm_quota configured"}, status_code=422)
+
+    from api.models import Team
+    teams = db.query(Team).filter(Team.event_id == event_id).all()
+    if not teams:
+        return JSONResponse({"error": "no teams defined for this event"}, status_code=422)
+
+    from builder.module_loader import load_all_modules
+    from builder.selector import select_modules
+    from builder.plan_sizing import plan_for_vm
+    from builder.attack_tree import build_attack_tree, serialize_tree
+
+    library_list = load_all_modules()
+    library = {m.id: m for m in library_list}
+
+    # Fetch Vultr plans for sizing + cost estimates (optional)
+    available_plans = []
+    plan_costs = {}
+    vultr_key = os.environ.get("VULTR_API_KEY")
+    if vultr_key:
+        try:
+            resp = httpx.get(
+                "https://api.vultr.com/v2/plans?type=vc2&per_page=500",
+                headers={"Authorization": f"Bearer {vultr_key}"},
+                timeout=10,
+            )
+            for p in resp.json().get("plans", []):
+                if p["id"].startswith("vc2-"):
+                    available_plans.append({
+                        "id": p["id"],
+                        "ram": p["ram"],
+                        "vcpu_count": p["vcpu_count"],
+                        "monthly_cost": p["monthly_cost"],
+                    })
+                    plan_costs[p["id"]] = p["monthly_cost"]
+        except Exception:
+            pass
+
+    _TEAM_COLORS = [
+        "#e040fb", "#00bcd4", "#69f0ae", "#ff6d00", "#2979ff",
+        "#ff4081", "#ffea00", "#00e5ff", "#76ff03", "#ff6e40",
+    ]
+
+    topology_nodes = [
+        {"id": f"event-{event_id}", "type": "event", "label": event.name, "status": event.status}
+    ]
+    topology_links = []
+
+    for idx, team in enumerate(teams):
+        color = _TEAM_COLORS[idx % len(_TEAM_COLORS)]
+        topology_nodes.append({
+            "id": f"team-{team.id}", "type": "team", "label": team.name,
+            "event_id": f"event-{event_id}", "color": color,
+        })
+        topology_links.append({"source": f"event-{event_id}", "target": f"team-{team.id}"})
+
+    vm_types = []
+    total_modules = 0
+    total_attack_paths = 0
+    total_cost = 0.0
+
+    for type_key, spec in vm_quota.items():
+        role = spec.get("role", "target")
+        count_per_team = int(spec.get("count", 1))
+        os_name = spec.get("os", "")
+        default_plan = spec.get("default_plan", "vc2-1c-1gb")
+        region = spec.get("region", "")
+
+        vms = []
+
+        for team in teams:
+            for i in range(count_per_team):
+                hostname = f"{team.name}-{type_key}-{i + 1}"
+
+                if role == "target":
+                    selected = select_modules(quota, library_list)
+                    sized_plan = plan_for_vm(selected, default_plan, available_plans) if available_plans else default_plan
+                    module_objs = [library[m.id] for m in selected if m.id in library]
+                    tree = build_attack_tree(module_objs)
+                    serialized_tree = serialize_tree(tree)
+                    module_list = [
+                        {"id": m.id, "name": m.name, "type": m.type,
+                         "difficulty": m.difficulty, "points": m.points}
+                        for m in selected
+                    ]
+                    total_modules += len(module_list)
+                    total_attack_paths += len(serialized_tree.get("paths", []))
+                else:
+                    selected = []
+                    sized_plan = default_plan
+                    serialized_tree = None
+                    module_list = []
+
+                total_cost += plan_costs.get(sized_plan, 0)
+
+                vm_node_id = f"vm-projected-{type_key}-{team.name}-{i + 1}"
+                topology_nodes.append({
+                    "id": vm_node_id, "type": "vm",
+                    "label": hostname, "hostname": hostname,
+                    "ip": None, "status": "projected", "os": os_name,
+                    "team_id": f"team-{team.id}", "event_id": f"event-{event_id}",
+                    "modules_total": len(module_list), "modules_completed": 0,
+                })
+                topology_links.append({"source": f"team-{team.id}", "target": vm_node_id})
+
+                vms.append({
+                    "hostname": hostname,
+                    "team": team.name,
+                    "plan": sized_plan,
+                    "modules": module_list,
+                    "attack_tree": serialized_tree,
+                })
+
+        vm_types.append({
+            "type_key": type_key,
+            "role": role,
+            "os": os_name,
+            "default_plan": default_plan,
+            "region": region,
+            "count_per_team": count_per_team,
+            "total_count": count_per_team * len(teams),
+            "vms": vms,
+        })
+
+    return {
+        "summary": {
+            "total_vms": sum(t["total_count"] for t in vm_types),
+            "teams": len(teams),
+            "estimated_monthly_cost": round(total_cost, 2),
+            "total_modules": total_modules,
+            "total_attack_paths": total_attack_paths,
+        },
+        "teams": [t.name for t in teams],
+        "vm_types": vm_types,
+        "topology": {"nodes": topology_nodes, "links": topology_links},
     }
 
 
