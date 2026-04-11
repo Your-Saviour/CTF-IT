@@ -219,20 +219,18 @@ async def vm_detail_page(vm_id: int, request: Request, db: Session = Depends(get
 
 @app.get("/admin/caldera", response_class=HTMLResponse)
 async def caldera_dashboard_page(request: Request, db: Session = Depends(get_db)):
-    from api.routes.auth import get_current_user
     user = get_current_user(request, db)
     if not user or not user.is_admin:
-        return RedirectResponse("/login")
-    return templates.TemplateResponse(request, "caldera_dashboard.html", {"request": request})
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "caldera_dashboard.html", {"user": user})
 
 
 @app.get("/admin/caldera/operation/{op_id}", response_class=HTMLResponse)
 async def caldera_operation_page(op_id: str, request: Request, db: Session = Depends(get_db)):
-    from api.routes.auth import get_current_user
     user = get_current_user(request, db)
     if not user or not user.is_admin:
-        return RedirectResponse("/login")
+        return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "caldera_dashboard.html", {
-        "request": request,
+        "user": user,
         "op_id": op_id,
     })
