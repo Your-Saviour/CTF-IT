@@ -5,7 +5,6 @@ import shutil
 import uuid
 
 import docker
-import httpx
 import yaml
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -14,19 +13,15 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import Event
 from api.routes.admin import require_admin
+from api.services.caldera import CalderaClient, get_caldera_api_key
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 CALDERA_PLUGIN_DIR = os.environ.get("CALDERA_PLUGIN_DIR", "/caldera-plugin/ctf-exploit")
 CALDERA_CONFIG_PATH = os.environ.get("CALDERA_CONFIG_PATH", "/caldera-config/local.yml")
-CALDERA_INTERNAL_URL = os.environ.get("CALDERA_INTERNAL_URL", "http://ctf-caldera:8888")
 CALDERA_CONTAINER_NAME = os.environ.get("CALDERA_CONTAINER_NAME", "ctf-caldera")
 CALDERA_STARTUP_TIMEOUT = int(os.environ.get("CALDERA_STARTUP_TIMEOUT", "120"))
-
-# Caldera's atomic planner and default source UUIDs
-# Caldera's atomic planner name (ID varies by instance; we match by name as fallback)
-_ATOMIC_PLANNER_NAME = "atomic"
-_DEFAULT_SOURCE_ID = "ed32b9c3-9593-4c33-b0db-e2007315096b"
+CALDERA_INTERNAL_URL = os.environ.get("CALDERA_INTERNAL_URL", "http://ctf-caldera:8888")
 
 
 def _load_caldera_config() -> dict:
@@ -57,8 +52,6 @@ def _write_caldera_config(config: dict) -> None:
 def _copy_plugin_files(export_plugin_dir) -> int:
     """Copy exported plugin contents to the shared mount. Returns file count."""
     dest = CALDERA_PLUGIN_DIR
-    # Clear contents without removing the directory itself — it's a bind mount
-    # so the mount point can't be deleted, only its contents.
     if os.path.exists(dest):
         for item in os.listdir(dest):
             item_path = os.path.join(dest, item)
@@ -80,97 +73,18 @@ def _copy_plugin_files(export_plugin_dir) -> int:
 
 async def _wait_for_caldera(api_key: str, timeout: int = CALDERA_STARTUP_TIMEOUT) -> None:
     """Poll Caldera's health endpoint until it responds, or raise TimeoutError."""
+    import httpx as _httpx
     deadline = asyncio.get_event_loop().time() + timeout
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _httpx.AsyncClient(timeout=10.0) as client:
         while asyncio.get_event_loop().time() < deadline:
             try:
                 resp = await client.get(CALDERA_INTERNAL_URL, headers={"KEY": api_key})
                 if resp.status_code < 500:
                     return
-            except (httpx.ConnectError, httpx.ReadTimeout):
+            except (_httpx.ConnectError, _httpx.ReadTimeout):
                 pass
             await asyncio.sleep(5)
     raise TimeoutError(f"Caldera did not become healthy within {timeout}s")
-
-
-async def _get_atomic_planner_id(api_key: str) -> str:
-    """Return the ID of the 'atomic' planner in this Caldera instance."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{CALDERA_INTERNAL_URL}/api/v2/planners",
-            headers={"KEY": api_key},
-        )
-        resp.raise_for_status()
-    for p in resp.json():
-        if p.get("name") == _ATOMIC_PLANNER_NAME:
-            return p["id"]
-    raise ValueError(f"No '{_ATOMIC_PLANNER_NAME}' planner found in Caldera")
-
-
-async def _ensure_basic_source(api_key: str) -> None:
-    """Create the 'basic' fact source if it doesn't exist.
-
-    Caldera's operation API falls back to a source named 'basic' when the
-    requested source ID is missing.  Without this the POST /api/v2/operations
-    raises a 500 (IndexError on empty list).
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{CALDERA_INTERNAL_URL}/api/v2/sources",
-            headers={"KEY": api_key},
-        )
-        resp.raise_for_status()
-        sources = resp.json()
-        if any(s.get("id") == _DEFAULT_SOURCE_ID for s in sources):
-            return
-        await client.post(
-            f"{CALDERA_INTERNAL_URL}/api/v2/sources",
-            headers={"KEY": api_key},
-            json={"name": "basic", "id": _DEFAULT_SOURCE_ID, "facts": [], "rules": [], "relationships": []},
-        )
-
-
-async def _get_ctf_abilities(api_key: str) -> list:
-    """Return all CTF abilities (those with 'Recon:' or 'Exploit:' in name)."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{CALDERA_INTERNAL_URL}/api/v2/abilities",
-            headers={"KEY": api_key},
-        )
-        resp.raise_for_status()
-    return [
-        a for a in resp.json()
-        if "Recon:" in a.get("name", "") or "Exploit:" in a.get("name", "")
-    ]
-
-
-async def _get_adversaries(api_key: str) -> list:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{CALDERA_INTERNAL_URL}/api/v2/adversaries",
-            headers={"KEY": api_key},
-        )
-        resp.raise_for_status()
-    return resp.json()
-
-
-async def _create_operation(api_key: str, adversary_id: str, planner_id: str) -> dict:
-    payload = {
-        "name": "CTF Red Team Emulation",
-        "adversary": {"adversary_id": adversary_id},
-        "planner": {"id": planner_id},
-        "source": {"id": _DEFAULT_SOURCE_ID},
-        "group": "red",
-        "auto_close": False,
-    }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{CALDERA_INTERNAL_URL}/api/v2/operations",
-            headers={"KEY": api_key, "Content-Type": "application/json"},
-            content=json.dumps(payload),
-        )
-        resp.raise_for_status()
-    return resp.json()
 
 
 @router.post("/caldera-setup")
@@ -178,8 +92,6 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
     """
     Automated Caldera setup: generates the CTF exploit plugin, installs it,
     restarts Caldera, and creates an adversary operation.
-
-    Replaces the manual Phase 5 steps from the testing runbook.
     """
     admin = require_admin(request, db)
     if not admin:
@@ -240,7 +152,7 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             caldera_container.restart()
         except docker.errors.NotFound:
             return JSONResponse(
-                {"error": f"Caldera container '{CALDERA_CONTAINER_NAME}' not found. Is the stack running?"},
+                {"error": f"Caldera container '{CALDERA_CONTAINER_NAME}' not found."},
                 status_code=400,
             )
         except docker.errors.DockerException as e:
@@ -252,50 +164,53 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
         except TimeoutError as e:
             return JSONResponse({"error": str(e)}, status_code=504)
 
-        # Step 7: Verify abilities loaded
-        try:
-            ctf_abilities = await _get_ctf_abilities(api_key)
-        except httpx.HTTPError as e:
-            return JSONResponse({"error": f"Failed to list abilities: {e}"}, status_code=502)
+        async with CalderaClient(api_key) as caldera:
+            # Step 7: Verify abilities loaded
+            try:
+                all_abilities = await caldera.list_abilities()
+                ctf_abilities = [
+                    a for a in all_abilities
+                    if "Recon:" in a.get("name", "") or "Exploit:" in a.get("name", "")
+                ]
+            except Exception as e:
+                return JSONResponse({"error": f"Failed to list abilities: {e}"}, status_code=502)
 
-        # Step 8: Find "CTF Full Exploit Chain" adversary
-        try:
-            adversaries = await _get_adversaries(api_key)
-        except httpx.HTTPError as e:
-            return JSONResponse({"error": f"Failed to list adversaries: {e}"}, status_code=502)
+            # Step 8: Find "CTF Full Exploit Chain" adversary
+            try:
+                ctf_adversary = await caldera.get_adversary_by_name("CTF Full Exploit Chain")
+            except Exception as e:
+                return JSONResponse({"error": f"Failed to list adversaries: {e}"}, status_code=502)
 
-        ctf_adversary = next(
-            (a for a in adversaries if a.get("name") == "CTF Full Exploit Chain"), None
-        )
-        if not ctf_adversary:
-            return JSONResponse(
-                {
-                    "error": "CTF Full Exploit Chain adversary not found after restart",
-                    "abilities_loaded": len(ctf_abilities),
-                    "adversaries": [a.get("name") for a in adversaries],
-                },
-                status_code=500,
-            )
+            if not ctf_adversary:
+                return JSONResponse(
+                    {"error": "CTF Full Exploit Chain adversary not found after restart"},
+                    status_code=500,
+                )
 
-        # Step 9: Ensure basic fact source exists (required by Caldera operation API)
-        try:
-            await _ensure_basic_source(api_key)
-        except httpx.HTTPError as e:
-            return JSONResponse({"error": f"Failed to ensure basic source: {e}"}, status_code=502)
+            # Step 9: Ensure basic fact source exists
+            try:
+                await caldera.ensure_source()
+            except Exception as e:
+                return JSONResponse({"error": f"Failed to ensure basic source: {e}"}, status_code=502)
 
-        # Step 10: Get atomic planner ID for this Caldera instance
-        try:
-            planner_id = await _get_atomic_planner_id(api_key)
-        except (httpx.HTTPError, ValueError) as e:
-            return JSONResponse({"error": f"Failed to locate atomic planner: {e}"}, status_code=502)
+            # Step 10: Get atomic planner ID
+            try:
+                planner_id = await caldera.get_atomic_planner_id()
+            except Exception as e:
+                return JSONResponse({"error": f"Failed to locate atomic planner: {e}"}, status_code=502)
 
-        # Step 11: Create operation
-        operation_result = None
-        operation_error = None
-        try:
-            operation_result = await _create_operation(api_key, ctf_adversary["adversary_id"], planner_id)
-        except httpx.HTTPError as e:
-            operation_error = str(e)
+            # Step 11: Create operation
+            operation_result = None
+            operation_error = None
+            try:
+                operation_result = await caldera.create_operation(
+                    name="CTF Red Team Emulation",
+                    adversary_id=ctf_adversary["adversary_id"],
+                    planner_id=planner_id,
+                    group="red",
+                )
+            except Exception as e:
+                operation_error = str(e)
 
     finally:
         shutil.rmtree(output_dir, ignore_errors=True)
@@ -306,7 +221,6 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             "files_copied": file_count,
             "plugin_added_to_config": modified,
             "abilities_loaded": len(ctf_abilities),
-            "adversaries_loaded": len([a for a in adversaries if "CTF" in a.get("name", "")]),
         },
     }
     if operation_result:
