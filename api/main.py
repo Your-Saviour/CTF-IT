@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
                 "vultr_region": "VARCHAR(16)",
                 "cloudflare_record_id": "VARCHAR(64)",
                 "attack_tree_json": "TEXT",
+                "vm_type": "VARCHAR(64)",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
             for col, typ in {
                 "semaphore_project_id": "INTEGER",
                 "semaphore_key_id": "INTEGER",
+                "vm_quota": "TEXT",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))

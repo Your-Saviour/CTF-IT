@@ -204,6 +204,7 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "cloudflare_record_id": vm.cloudflare_record_id,
         "provision_step": vm.provision_step,
         "provision_error": vm.provision_error,
+        "vm_type": vm.vm_type,
     }
 
 
@@ -529,6 +530,7 @@ def _run_provision(vm_id: int) -> None:
         if not vm:
             return
 
+        vm.status = "provisioning"
         # ── Step 1: Generate playbook files ──────────────────────────────────
         _update_provision_step(db, vm, "generating_playbook")
 
@@ -1119,6 +1121,24 @@ def _run_vultr_create(vm_id: int) -> None:
         vm.updated_at = utcnow()
         db.commit()
 
+        # Auto-chain module provisioning for quota-created VMs
+        if vm.vm_type:
+            vm_modules = db.query(VMModule).filter(VMModule.vm_id == vm.id).all()
+            if vm_modules:
+                # Target VM with modules — chain into Ansible provisioning
+                _log.info("Auto-chaining provision for target VM %d (%s)", vm_id, vm.vm_type)
+                db.close()
+                if playbook_dir and playbook_dir.exists():
+                    shutil.rmtree(playbook_dir, ignore_errors=True)
+                playbook_dir = None
+                _run_provision(vm_id)
+                return
+            else:
+                # Attacker VM — no modules, mark active immediately
+                vm.status = "active"
+                vm.updated_at = utcnow()
+                db.commit()
+
     except Exception as exc:
         from api.models import utcnow as _utcnow
         _log.exception("Vultr VM creation failed for VM %d", vm_id)
@@ -1134,6 +1154,149 @@ def _run_vultr_create(vm_id: int) -> None:
         db.close()
         if playbook_dir and playbook_dir.exists():
             shutil.rmtree(playbook_dir, ignore_errors=True)
+
+
+def _provision_event_vms(event_id: int) -> None:
+    """Synchronous background task: create all VMs for an event based on vm_quota.
+
+    For each team in the event, creates VMs per the vm_quota spec:
+    - Target VMs get modules assigned and plans sized based on resource needs.
+    - Attacker VMs use the default plan with no modules.
+    Each VM creation is spawned as a separate thread via _run_vultr_create().
+    """
+    import threading
+
+    import httpx as _httpx
+
+    from api.database import SessionLocal
+    from api.models import utcnow
+    from builder.module_loader import load_all_modules
+    from builder.plan_sizing import plan_for_vm
+    from builder.selector import select_modules
+
+    db = SessionLocal()
+    try:
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event or not event.vm_quota:
+            return
+
+        vm_quota = json.loads(event.vm_quota)
+        module_quota = json.loads(event.quota)
+        teams = db.query(Team).filter(Team.event_id == event_id).all()
+        if not teams:
+            _log.warning("No teams for event %d — skipping VM provisioning", event_id)
+            return
+
+        # Load module library once
+        library = load_all_modules()
+
+        # Pre-create Semaphore project for the event (avoids race condition
+        # when multiple _run_provision threads check event.semaphore_project_id)
+        has_targets = any(
+            spec.get("role", "target") == "target" for spec in vm_quota.values()
+        )
+        if has_targets and not event.semaphore_project_id:
+            from api.services.semaphore import SemaphoreClient
+            from api.services.ssh_keys import get_or_create_platform_keypair
+
+            private_key, _ = get_or_create_platform_keypair(db)
+            with SemaphoreClient() as client:
+                client.login()
+                project_id = client.create_project(f"CTF Event {event.id}: {event.name}")
+                key_id = client.create_key(
+                    project_id,
+                    name="platform-key",
+                    private_key_pem=private_key,
+                )
+                event.semaphore_project_id = project_id
+                event.semaphore_key_id = key_id
+                db.commit()
+
+        # Fetch Vultr plans once for plan sizing
+        available_plans = []
+        if VULTR_API_KEY:
+            try:
+                resp = _httpx.get(
+                    "https://api.vultr.com/v2/plans",
+                    headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
+                    params={"type": "vc2", "per_page": 500},
+                    timeout=15.0,
+                )
+                resp.raise_for_status()
+                available_plans = [
+                    {
+                        "id": p["id"],
+                        "ram": p["ram"],
+                        "vcpu_count": p["vcpu_count"],
+                        "monthly_cost": p["monthly_cost"],
+                    }
+                    for p in resp.json().get("plans", [])
+                    if p.get("id", "").startswith("vc2-")
+                ]
+            except Exception as exc:
+                _log.warning("Failed to fetch Vultr plans for sizing: %s", exc)
+
+        vm_ids = []
+        for team in teams:
+            for vm_type_key, vm_spec in vm_quota.items():
+                count = vm_spec.get("count", 1)
+                role = vm_spec.get("role", "target")
+                default_plan = vm_spec.get("default_plan", "vc2-1c-1gb")
+                region = vm_spec.get("region") or VULTR_DEFAULT_REGION
+
+                for i in range(count):
+                    hostname = f"{team.name}-{vm_type_key}-{i + 1}"
+                    vm = VM(
+                        hostname=hostname,
+                        os=vm_spec.get("os", "Ubuntu 24.04 LTS x64"),
+                        status="creating",
+                        vm_type=vm_type_key,
+                        vultr_plan=default_plan,
+                        vultr_region=region,
+                        team_id=team.id,
+                        event_id=event_id,
+                        provision_step="queued",
+                        ssh_user=vm_spec.get("ssh_user", "root"),
+                        created_at=utcnow(),
+                        updated_at=utcnow(),
+                    )
+                    db.add(vm)
+                    db.flush()  # get vm.id
+
+                    if role == "target":
+                        # Select modules for this VM
+                        selected = select_modules(module_quota, library)
+                        for mod in selected:
+                            db.add(VMModule(
+                                vm_id=vm.id,
+                                module_id=mod.id,
+                                module_type=mod.type,
+                                difficulty=mod.difficulty,
+                                points=mod.points,
+                            ))
+                        # Size the plan based on module requirements
+                        if available_plans:
+                            sized_plan = plan_for_vm(selected, default_plan, available_plans)
+                            if sized_plan != default_plan:
+                                vm.vultr_plan = sized_plan
+
+                    db.commit()
+                    vm_ids.append(vm.id)
+
+        _log.info(
+            "Event %d: queued %d VMs for creation across %d teams",
+            event_id, len(vm_ids), len(teams),
+        )
+
+        # Spawn Vultr creation threads for all VMs
+        for vid in vm_ids:
+            t = threading.Thread(target=_run_vultr_create, args=(vid,), daemon=True)
+            t.start()
+
+    except Exception as exc:
+        _log.exception("Event VM provisioning failed for event %d", event_id)
+    finally:
+        db.close()
 
 
 @router.post("/vms/create-vultr")

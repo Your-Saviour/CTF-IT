@@ -272,6 +272,7 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "welcome_message": e.welcome_message,
             "time_limit_minutes": e.time_limit_minutes,
             "quota": json.loads(e.quota),
+            "vm_quota": json.loads(e.vm_quota) if e.vm_quota else None,
             "user_count": user_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         })
@@ -297,6 +298,7 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "welcome_message": event.welcome_message,
         "time_limit_minutes": event.time_limit_minutes,
         "quota": json.loads(event.quota),
+        "vm_quota": json.loads(event.vm_quota) if event.vm_quota else None,
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
     }
@@ -319,9 +321,19 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
                 status_code=422,
             )
 
+    if "vm_quota" in body:
+        from builder.vm_quota_validation import validate_vm_quota
+        errors = validate_vm_quota(body["vm_quota"])
+        if errors:
+            return JSONResponse(
+                {"error": "Invalid vm_quota", "details": errors},
+                status_code=422,
+            )
+
     event = Event(
         name=body.get("name", "CTF Event"),
         quota=json.dumps(body.get("quota", {})),
+        vm_quota=json.dumps(body["vm_quota"]) if "vm_quota" in body else None,
         status="draft",
         description=body.get("description"),
         welcome_message=body.get("welcome_message"),
@@ -357,6 +369,19 @@ async def update_event(
             )
         event.quota = json.dumps(body["quota"])
 
+    if "vm_quota" in body:
+        if body["vm_quota"] is None:
+            event.vm_quota = None
+        else:
+            from builder.vm_quota_validation import validate_vm_quota
+            errors = validate_vm_quota(body["vm_quota"])
+            if errors:
+                return JSONResponse(
+                    {"error": "Invalid vm_quota", "details": errors},
+                    status_code=422,
+                )
+            event.vm_quota = json.dumps(body["vm_quota"])
+
     if "name" in body:
         event.name = body["name"]
     if "description" in body:
@@ -383,7 +408,70 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     event.status = "open"
     event.open = True
     db.commit()
+
+    # If vm_quota is defined, kick off auto-provisioning for all teams
+    if event.vm_quota:
+        from api.models import Team
+
+        vm_quota = json.loads(event.vm_quota)
+        teams = db.query(Team).filter(Team.event_id == event_id).all()
+
+        if not teams:
+            return JSONResponse(
+                {"error": "Cannot auto-provision VMs: no teams defined for this event"},
+                status_code=422,
+            )
+
+        total_vms = sum(spec["count"] for spec in vm_quota.values()) * len(teams)
+
+        from api.routes.vm import _provision_event_vms
+
+        asyncio.create_task(asyncio.to_thread(_provision_event_vms, event_id))
+
+        return {"status": "started", "provisioning": True, "vm_count": total_vms}
+
     return {"status": "started"}
+
+
+@router.get("/events/{event_id}/provision-status")
+async def event_provision_status(
+    event_id: int, request: Request, db: Session = Depends(get_db)
+):
+    """Return aggregate provisioning progress for all VMs in an event."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    from api.models import Team, VM
+
+    vms = db.query(VM).filter(VM.event_id == event_id).all()
+
+    # Build team name lookup
+    teams = db.query(Team).filter(Team.event_id == event_id).all()
+    team_names = {t.id: t.name for t in teams}
+
+    # Count by status
+    counts = {"creating": 0, "registered": 0, "provisioning": 0, "active": 0, "failed": 0, "stopped": 0, "destroying": 0}
+    vm_list = []
+    for vm in vms:
+        status_key = vm.status if vm.status in counts else "creating"
+        counts[status_key] = counts.get(status_key, 0) + 1
+        vm_list.append({
+            "id": vm.id,
+            "hostname": vm.hostname,
+            "team": team_names.get(vm.team_id, ""),
+            "vm_type": vm.vm_type,
+            "status": vm.status,
+            "provision_step": vm.provision_step,
+            "provision_error": vm.provision_error,
+            "ip_address": vm.ip_address,
+        })
+
+    return {
+        "total": len(vms),
+        **counts,
+        "vms": vm_list,
+    }
 
 
 @router.post("/events/{event_id}/stop")

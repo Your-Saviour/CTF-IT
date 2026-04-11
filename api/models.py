@@ -60,6 +60,7 @@ class Event(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     quota: Mapped[str] = mapped_column(Text, nullable=False)
+    vm_quota: Mapped[str] = mapped_column(Text, nullable=True)
     open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
     status: Mapped[str] = mapped_column(String(16), default="draft")
     description: Mapped[str] = mapped_column(Text, nullable=True)
@@ -114,6 +115,7 @@ class VM(Base):
     vultr_plan: Mapped[str] = mapped_column(String(64), nullable=True)
     vultr_region: Mapped[str] = mapped_column(String(16), nullable=True)
     cloudflare_record_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    vm_type: Mapped[str] = mapped_column(String(64), nullable=True)
     # Caldera attack tree cache
     attack_tree_json: Mapped[str] = mapped_column(Text, nullable=True)
 

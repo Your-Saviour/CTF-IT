@@ -204,6 +204,64 @@
 }
 #ef-structured-editor, #ef-json-editor { display: none; }
 #ef-structured-editor.active, #ef-json-editor.active { display: block; }
+#ef-vm-structured-editor, #ef-vm-json-editor { display: none; }
+#ef-vm-structured-editor.active, #ef-vm-json-editor.active { display: block; }
+.vm-type-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 80px 100px 100px 32px;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.vm-type-row input, .vm-type-row select {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    width: 100%;
+}
+.vm-type-row input:focus, .vm-type-row select:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan-glow);
+}
+.vm-type-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 80px 100px 100px 32px;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.5rem;
+}
+/* Provisioning dashboard */
+#provision-dashboard { display: none; margin-top: 1rem; }
+#provision-dashboard.active { display: block; }
+.provision-progress {
+    height: 8px;
+    background: var(--bg-deep);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+.provision-progress-bar {
+    height: 100%;
+    background: var(--cyan);
+    transition: width 0.5s ease;
+}
+.status-badge.creating, .status-badge.provisioning, .status-badge.queued {
+    animation: pulse 2s infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
 .service-link:hover { border-color: var(--cyan) !important; box-shadow: 0 0 8px rgba(0, 229, 255, 0.2); }
 {% endblock %}
 
@@ -264,6 +322,22 @@
                     <textarea id="ef-quota-json" rows="10" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">{}</textarea>
                 </div>
             </div>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label>
+                    VM Quota (optional)
+                    <button type="button" class="mode-toggle" id="ef-vm-mode-toggle">Show Raw JSON</button>
+                </label>
+                <div id="ef-vm-structured-editor" class="active">
+                    <div class="vm-type-header">
+                        <span>Type Name</span><span>OS</span><span>Plan</span><span>Count</span><span>Role</span><span>Region</span><span></span>
+                    </div>
+                    <div id="ef-vm-type-rows"></div>
+                    <button type="button" class="btn-add" id="ef-add-vm-type">+ Add VM Type</button>
+                </div>
+                <div id="ef-vm-json-editor">
+                    <textarea id="ef-vm-quota-json" rows="8" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">{}</textarea>
+                </div>
+            </div>
             <div style="display: flex; gap: 0.5rem;">
                 <button type="submit" class="btn btn-primary">Save Event</button>
                 <button type="button" class="btn-outline" onclick="hideEventForm()">Cancel</button>
@@ -285,6 +359,36 @@
             <tr><td colspan="5" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+
+    <!-- Provisioning Dashboard (shown during event VM provisioning) -->
+    <div id="provision-dashboard">
+        <div style="background: var(--bg-deep); padding: 1rem; border-radius: 4px; border: 1px solid var(--border); margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                <h4 style="margin: 0;" id="provision-title">VM Provisioning</h4>
+                <span id="provision-summary" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+            </div>
+            <div class="provision-progress">
+                <div class="provision-progress-bar" id="provision-bar" style="width: 0%;"></div>
+            </div>
+            <table style="font-size: 0.85rem;">
+                <thead>
+                    <tr>
+                        <th>Hostname</th>
+                        <th>Team</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Step</th>
+                        <th>IP</th>
+                    </tr>
+                </thead>
+                <tbody id="provision-body"></tbody>
+            </table>
+            <div style="margin-top: 0.75rem;">
+                <button class="btn-outline" id="provision-retry-btn" style="display: none;" onclick="retryFailedVMs()">Retry Failed</button>
+                <button class="btn-outline" onclick="hideProvisionDashboard()">Close</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Users -->
@@ -620,6 +724,17 @@ function showEventForm(eventData) {
     document.getElementById('ef-json-editor').classList.remove('active');
     document.getElementById('ef-mode-toggle').textContent = 'Show Raw JSON';
     populateQuotaForm(efCurrentQuota);
+
+    // VM Quota
+    efVmJsonMode = false;
+    document.getElementById('ef-vm-structured-editor').classList.add('active');
+    document.getElementById('ef-vm-json-editor').classList.remove('active');
+    document.getElementById('ef-vm-mode-toggle').textContent = 'Show Raw JSON';
+    var vmQuotaData = (eventData && eventData.vm_quota) ? eventData.vm_quota : {};
+    fetchVultrOptions().then(function() {
+        populateVmQuotaForm(vmQuotaData);
+    });
+
     panel.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -796,6 +911,252 @@ document.getElementById('ef-add-tag').addEventListener('click', function() {
     addFilterRow('ef-tag-rows', allTags, '', 1);
 });
 
+// ── VM Quota Editor ──
+
+var efVmJsonMode = false;
+var cachedVultrOS = null;
+var cachedVultrPlans = null;
+
+function fetchVultrOptions() {
+    if (cachedVultrOS && cachedVultrPlans) return Promise.resolve();
+    return Promise.all([
+        fetch('/admin/vultr/os').then(function(r) { return r.ok ? r.json() : {os: []}; }),
+        fetch('/admin/vultr/plans').then(function(r) { return r.ok ? r.json() : {plans: []}; })
+    ]).then(function(results) {
+        cachedVultrOS = results[0].os || [];
+        cachedVultrPlans = results[1].plans || [];
+    }).catch(function() {
+        cachedVultrOS = cachedVultrOS || [];
+        cachedVultrPlans = cachedVultrPlans || [];
+    });
+}
+
+function addVmTypeRow(key, spec) {
+    spec = spec || {};
+    var container = document.getElementById('ef-vm-type-rows');
+    var row = document.createElement('div');
+    row.className = 'vm-type-row';
+
+    // Type name
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.placeholder = 'e.g. ubuntu_target';
+    nameInput.value = key || '';
+
+    // OS dropdown
+    var osSelect = document.createElement('select');
+    var osDefault = document.createElement('option');
+    osDefault.value = 'Ubuntu 24.04 LTS x64';
+    osDefault.textContent = 'Ubuntu 24.04 LTS x64';
+    osSelect.appendChild(osDefault);
+    if (cachedVultrOS) {
+        cachedVultrOS.forEach(function(o) {
+            if (o.name === 'Ubuntu 24.04 LTS x64') return;
+            var opt = document.createElement('option');
+            opt.value = o.name;
+            opt.textContent = o.name;
+            osSelect.appendChild(opt);
+        });
+    }
+    osSelect.value = spec.os || 'Ubuntu 24.04 LTS x64';
+
+    // Plan dropdown
+    var planSelect = document.createElement('select');
+    if (cachedVultrPlans) {
+        cachedVultrPlans.forEach(function(p) {
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.label || p.id;
+            planSelect.appendChild(opt);
+        });
+    }
+    if (spec.default_plan) planSelect.value = spec.default_plan;
+
+    // Count
+    var countInput = document.createElement('input');
+    countInput.type = 'number';
+    countInput.min = '1';
+    countInput.value = spec.count || 1;
+    countInput.style.textAlign = 'center';
+
+    // Role
+    var roleSelect = document.createElement('select');
+    ['target', 'attacker'].forEach(function(r) {
+        var opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r.charAt(0).toUpperCase() + r.slice(1);
+        roleSelect.appendChild(opt);
+    });
+    roleSelect.value = spec.role || 'target';
+
+    // Region
+    var regionInput = document.createElement('input');
+    regionInput.type = 'text';
+    regionInput.placeholder = 'default';
+    regionInput.value = spec.region || '';
+
+    // Remove button
+    var removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-remove';
+    removeBtn.innerHTML = '&times;';
+    removeBtn.addEventListener('click', function() { row.remove(); });
+
+    row.appendChild(nameInput);
+    row.appendChild(osSelect);
+    row.appendChild(planSelect);
+    row.appendChild(countInput);
+    row.appendChild(roleSelect);
+    row.appendChild(regionInput);
+    row.appendChild(removeBtn);
+    container.appendChild(row);
+}
+
+function buildVmQuotaFromForm() {
+    var vmQuota = {};
+    var rows = document.querySelectorAll('#ef-vm-type-rows .vm-type-row');
+    rows.forEach(function(row) {
+        var inputs = row.querySelectorAll('input');
+        var selects = row.querySelectorAll('select');
+        var key = inputs[0].value.trim().replace(/\s+/g, '_');
+        if (!key) return;
+        var spec = {
+            os: selects[0].value,
+            default_plan: selects[1].value,
+            count: parseInt(inputs[1].value) || 1,
+            role: selects[2].value,
+        };
+        var region = inputs[2].value.trim();
+        if (region) spec.region = region;
+        vmQuota[key] = spec;
+    });
+    return vmQuota;
+}
+
+function populateVmQuotaForm(vmQuota) {
+    document.getElementById('ef-vm-type-rows').innerHTML = '';
+    if (!vmQuota) return;
+    Object.keys(vmQuota).forEach(function(key) {
+        addVmTypeRow(key, vmQuota[key]);
+    });
+}
+
+document.getElementById('ef-add-vm-type').addEventListener('click', function() {
+    fetchVultrOptions().then(function() { addVmTypeRow('', {}); });
+});
+
+document.getElementById('ef-vm-mode-toggle').addEventListener('click', function() {
+    efVmJsonMode = !efVmJsonMode;
+    var structEl = document.getElementById('ef-vm-structured-editor');
+    var jsonEl = document.getElementById('ef-vm-json-editor');
+    var btn = document.getElementById('ef-vm-mode-toggle');
+
+    if (efVmJsonMode) {
+        var vmQuota = buildVmQuotaFromForm();
+        document.getElementById('ef-vm-quota-json').value = JSON.stringify(vmQuota, null, 2);
+        structEl.classList.remove('active');
+        jsonEl.classList.add('active');
+        btn.textContent = 'Show Form';
+    } else {
+        try {
+            var vmQuota = JSON.parse(document.getElementById('ef-vm-quota-json').value);
+            fetchVultrOptions().then(function() {
+                populateVmQuotaForm(vmQuota);
+                jsonEl.classList.remove('active');
+                structEl.classList.add('active');
+                btn.textContent = 'Show Raw JSON';
+            });
+        } catch(err) {
+            showToast('Invalid JSON — fix before switching to form view');
+            efVmJsonMode = true;
+        }
+    }
+});
+
+// ── Provisioning Dashboard ──
+
+var provisionPollTimer = null;
+var provisionEventId = null;
+
+function showProvisionDashboard(eventId) {
+    provisionEventId = eventId;
+    document.getElementById('provision-dashboard').classList.add('active');
+    document.getElementById('provision-title').textContent = 'VM Provisioning — Event #' + eventId;
+    pollProvisionStatus();
+}
+
+function hideProvisionDashboard() {
+    stopProvisionPoll();
+    document.getElementById('provision-dashboard').classList.remove('active');
+}
+
+function startProvisionPoll(eventId) {
+    stopProvisionPoll();
+    showProvisionDashboard(eventId);
+    provisionPollTimer = setInterval(pollProvisionStatus, 5000);
+}
+
+function stopProvisionPoll() {
+    if (provisionPollTimer) {
+        clearInterval(provisionPollTimer);
+        provisionPollTimer = null;
+    }
+}
+
+function pollProvisionStatus() {
+    if (!provisionEventId) return;
+    fetch('/admin/events/' + provisionEventId + '/provision-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            updateProvisionDashboard(data);
+            if (data.total > 0 && (data.active + data.failed) >= data.total) {
+                stopProvisionPoll();
+            }
+        })
+        .catch(function() {});
+}
+
+function updateProvisionDashboard(data) {
+    var pct = data.total > 0 ? Math.round((data.active / data.total) * 100) : 0;
+    document.getElementById('provision-bar').style.width = pct + '%';
+    document.getElementById('provision-summary').textContent =
+        data.active + ' / ' + data.total + ' active' +
+        (data.failed > 0 ? ' (' + data.failed + ' failed)' : '');
+
+    var retryBtn = document.getElementById('provision-retry-btn');
+    retryBtn.style.display = data.failed > 0 ? '' : 'none';
+
+    var html = '';
+    (data.vms || []).forEach(function(vm) {
+        var statusClass = vm.status;
+        html += '<tr>';
+        html += '<td>' + (vm.hostname || '-') + '</td>';
+        html += '<td>' + (vm.team || '-') + '</td>';
+        html += '<td>' + (vm.vm_type || '-') + '</td>';
+        html += '<td><span class="status-badge ' + statusClass + '">' + vm.status + '</span></td>';
+        html += '<td>' + (vm.provision_step || '-') + '</td>';
+        html += '<td>' + (vm.ip_address || '-') + '</td>';
+        html += '</tr>';
+    });
+    document.getElementById('provision-body').innerHTML = html;
+}
+
+function retryFailedVMs() {
+    if (!provisionEventId) return;
+    fetch('/admin/events/' + provisionEventId + '/provision-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var failedVMs = (data.vms || []).filter(function(vm) { return vm.status === 'failed'; });
+            failedVMs.forEach(function(vm) {
+                fetch('/admin/vms/' + vm.id + '/provision', { method: 'POST' });
+            });
+            if (failedVMs.length > 0) {
+                showToast('Retrying ' + failedVMs.length + ' failed VM(s)...');
+                startProvisionPoll(provisionEventId);
+            }
+        });
+}
+
 // ── Event Form Submit ──
 
 document.getElementById('event-form').addEventListener('submit', function(e) {
@@ -812,6 +1173,19 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
         quota = buildQuotaFromForm();
     }
 
+    // Build VM quota
+    var vmQuota;
+    if (efVmJsonMode) {
+        try {
+            vmQuota = JSON.parse(document.getElementById('ef-vm-quota-json').value);
+        } catch(err) {
+            showToast('Invalid JSON in VM quota field');
+            return;
+        }
+    } else {
+        vmQuota = buildVmQuotaFromForm();
+    }
+
     var eventId = document.getElementById('ef-id').value;
     var body = {
         name: document.getElementById('ef-name').value,
@@ -820,6 +1194,14 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
         welcome_message: document.getElementById('ef-welcome').value || null,
         time_limit_minutes: parseInt(document.getElementById('ef-timelimit').value) || null,
     };
+
+    // Include vm_quota (null to clear, object to set)
+    if (vmQuota && Object.keys(vmQuota).length > 0) {
+        body.vm_quota = vmQuota;
+    } else if (eventId) {
+        // Editing existing event — send null to clear vm_quota
+        body.vm_quota = null;
+    }
 
     var url = eventId ? '/admin/events/' + eventId : '/admin/events';
     var method = eventId ? 'PUT' : 'POST';
@@ -879,10 +1261,62 @@ function setupCaldera(eventId) {
 }
 
 function startEvent(id) {
+    // Fetch event details to check for vm_quota
+    fetch('/admin/events/' + id)
+        .then(function(r) { return r.json(); })
+        .then(function(event) {
+            if (event.vm_quota && Object.keys(event.vm_quota).length > 0) {
+                // Calculate total VMs and estimated cost
+                fetch('/admin/teams').then(function(r) { return r.json(); }).then(function(teams) {
+                    var eventTeams = teams.filter(function(t) { return t.event_id === id; });
+                    if (eventTeams.length === 0) {
+                        showToast('Error: No teams defined for this event. Create teams before starting.');
+                        return;
+                    }
+                    var totalVms = 0;
+                    var monthlyCost = 0;
+                    Object.keys(event.vm_quota).forEach(function(key) {
+                        var spec = event.vm_quota[key];
+                        totalVms += (spec.count || 1);
+                    });
+                    totalVms *= eventTeams.length;
+
+                    // Try to estimate cost from cached plans
+                    var costStr = '';
+                    if (cachedVultrPlans && cachedVultrPlans.length > 0) {
+                        Object.keys(event.vm_quota).forEach(function(key) {
+                            var spec = event.vm_quota[key];
+                            var plan = cachedVultrPlans.find(function(p) { return p.id === spec.default_plan; });
+                            if (plan) monthlyCost += (plan.monthly_cost || 0) * (spec.count || 1) * eventTeams.length;
+                        });
+                        costStr = ' Estimated cost: $' + monthlyCost.toFixed(2) + '/mo.';
+                    }
+
+                    if (!confirm('This will create ' + totalVms + ' VMs across ' + eventTeams.length + ' teams.' + costStr + ' Proceed?')) return;
+
+                    doStartEvent(id);
+                });
+            } else {
+                doStartEvent(id);
+            }
+        });
+}
+
+function doStartEvent(id) {
     fetch('/admin/events/' + id + '/start', { method: 'POST' })
-        .then(function(r) {
-            if (r.ok) { showToast('Event started'); loadEvents(); }
-            else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok) {
+                if (res.data.provisioning) {
+                    showToast('Event started — provisioning ' + res.data.vm_count + ' VMs...');
+                    startProvisionPoll(id);
+                } else {
+                    showToast('Event started');
+                }
+                loadEvents();
+            } else {
+                showToast('Error: ' + (res.data.error || 'Unknown error'));
+            }
         });
 }
 

@@ -60,6 +60,8 @@ class Module:
     caldera: Optional[dict] = None
     source_dir: Path = field(default_factory=Path)
     disabled: bool = False
+    min_ram_mb: int = 0
+    min_vcpu: int = 0
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
@@ -89,5 +91,7 @@ def load_all_modules() -> list[Module]:
             caldera=data.get("caldera"),
             source_dir=yaml_path.parent,
             disabled=bool(data.get("disabled", False)),
+            min_ram_mb=data.get("min_ram_mb", 0),
+            min_vcpu=data.get("min_vcpu", 0),
         ))
     return modules
