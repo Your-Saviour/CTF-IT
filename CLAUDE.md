@@ -59,7 +59,7 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Key Components
 
-- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `vm` (Team/VM CRUD).
+- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `vm` (Team/VM CRUD, topology data).
 - **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), and internal applications (`application_internal/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
@@ -162,6 +162,18 @@ The platform supports VM-based deployments alongside the existing per-user Docke
 - **VMModule**: mirrors `UserModule` — tracks which modules are assigned to a VM and their completion status. Created via `POST /admin/vms/{id}/assign-modules` (runs `select_modules()` with the event's quota) or manually via `POST /admin/vms/{id}/add-module`.
 - **VM-scoped Ansible export**: `POST /admin/vms/{id}/ansible-export` generates a playbook from the VM's assigned modules (reuses `render_playbook` + `_stage_files` from `builder/ansible.py`). Returns a zip download.
 - **Admin UI**: the admin page has a "Teams & VMs" card with inline create forms and overview tables. Each VM links to `/admin/vm/{id}` — a dedicated detail page showing connection info (with copyable SSH command), module progress, status/notes editing, and action buttons.
+
+### Network Topology
+
+An interactive D3.js force-directed graph at `/admin/topology` that visualizes the event → team → VM hierarchy as a network map. Accessible from the "Network Topology" button in the admin page's Teams & VMs card.
+
+- **Node hierarchy**: Event nodes (large cyan circles, center) → Team nodes (medium colored circles) → VM nodes (rounded-square server rack icons with OS badge).
+- **VM node icons**: Hybrid style — monoline server rack SVG (3 stacked rectangles with LED dots) plus a small circular OS badge in the bottom-right corner (penguin for Linux, grid for Windows, `>` for unknown). Node border/glow color reflects status: green (active), amber (creating/provisioning), red (failed), grey (stopped/registered).
+- **Interactions**: Drag any node to reposition, scroll to zoom, drag background to pan, hover for tooltip (IP, OS, module progress bar), right-click for context menu (View Details, Provision, Assign Modules, Export Playbook, Destroy for VMs; View Team, Delete Team for teams), double-click to navigate to detail page.
+- **Live polling**: Fetches `GET /admin/topology-data` every 5 seconds. Status changes animate with smooth color transitions and a pulse effect. New nodes fade in, removed nodes fade out.
+- **Event filter**: Dropdown in toolbar scopes the graph to a single event or shows all non-draft events.
+- **API endpoint**: `GET /admin/topology-data?event_id=X` (admin-only). Returns `{ nodes: [...], links: [...] }` — each node has `id`, `type` (event/team/vm), `label`, `status`, and type-specific fields (IP, OS, module counts for VMs; color for teams). Links connect event→team and team→VM.
+- **D3 dependency**: D3 v7 loaded from CDN only on the topology page. Chosen over higher-level graph libraries (Cytoscape, Vis.js) because D3 will be reused elsewhere in the project.
 
 ### Database Models (api/models.py)
 
