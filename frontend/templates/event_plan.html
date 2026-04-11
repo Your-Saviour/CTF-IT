@@ -544,11 +544,11 @@
         svgEl.innerHTML = '';
         topoInitialized = false;
 
-        const width = svgEl.clientWidth || 800;
-        const height = svgEl.clientHeight || 500;
+        const width = svgEl.clientWidth;
+        const height = svgEl.clientHeight;
 
         if (!width || !height) {
-            // SVG not visible yet, retry shortly
+            // SVG not visible yet (tab hidden), retry shortly
             setTimeout(renderTopology, 100);
             return;
         }
@@ -668,11 +668,6 @@
                 ctxMenuEl.classList.add('visible');
             });
 
-        // Close context menu on escape
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') ctxMenuEl.classList.remove('visible');
-        });
-
         // Event nodes
         groups.filter(d => d.type === 'event').each(function(d) {
             const g = d3.select(this);
@@ -779,7 +774,7 @@
                             <span class="vm-attack-hostname">${esc(vm.hostname)}</span>
                             <span class="badge badge-amber">${esc(vm.team)}</span>
                             <span class="badge badge-gray">${esc(vm.plan || vt.default_plan || '')}</span>
-                            <button class="reroll-btn" data-hostname="${esc(vm.hostname)}" onclick="rerollVm(this)">&#127922; Re-roll</button>
+                            <button class="reroll-btn" data-sid="${esc(sid)}" onclick="rerollVm(this)">&#127922; Re-roll</button>
                         </div>
                         <div class="vm-attack-body">
                             <div id="tree-${sid}" class="attack-tree-wrap" style="min-height:200px;"></div>
@@ -791,6 +786,16 @@
         });
 
         document.getElementById('attacks-content').innerHTML = html;
+
+        // Set hostname safely via DOM (avoids attribute-escaping issues in innerHTML)
+        previewData.vm_types.forEach(vt => {
+            if (vt.role === 'attacker') return;
+            vt.vms.forEach(vm => {
+                const sid = sanitizeId(vm.hostname);
+                const btn = document.querySelector(`.reroll-btn[data-sid="${sid}"]`);
+                if (btn) btn.dataset.hostname = vm.hostname;
+            });
+        });
 
         // Render attack trees after DOM update
         setTimeout(() => {
@@ -855,6 +860,14 @@
     };
 
     // ── Init ─────────────────────────────────────────────────────────────────
+    // Register topology context-menu escape handler once (not per-render)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const menu = document.getElementById('plan-topo-context-menu');
+            if (menu) menu.classList.remove('visible');
+        }
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
         loadPreview();
     });
