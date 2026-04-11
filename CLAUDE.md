@@ -60,7 +60,7 @@ User selects an open event and registers → user is bound to that event (`User.
 ### Key Components
 
 - **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `vm` (Team/VM CRUD, topology data).
-- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules.
+- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules. `vm_quota_validation.py` validates the vm_quota JSON schema. `plan_sizing.py` picks the cheapest Vultr plan that meets module resource requirements.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), and internal applications (`application_internal/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`templates/playbook.yml.j2`** — Jinja2 template for Ansible playbook export. Generates tasks using `ansible.builtin.script` and `ansible.builtin.copy` to apply the same modules on bare machines.
@@ -71,7 +71,7 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Module System
 
-Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/payload/application_external/application_internal), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`.
+Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/payload/application_external/application_internal), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`. Optional resource fields: `min_ram_mb`, `min_vcpu` (used by `builder/plan_sizing.py` to auto-size Vultr plans when VM quota provisioning is active).
 
 Application modules install infrastructure that vulnerability/payload modules can target via `requires`. They award 0 points and are selected via their own quota keys (`"application_external"` or `"application_internal"` in `EVENT_QUOTA`). Payload modules are scored like vulnerabilities — users must find and remove malicious artifacts for points.
 
@@ -96,7 +96,7 @@ The platform supports multiple concurrent events, each with independent settings
 
 - **Event lifecycle**: `draft` → `open` → `stopped`. Draft events are invisible to users. Open events accept registration. Stopped events are archived with frozen leaderboards (verification blocked).
 - **One event per user**: each user is bound to exactly one event via `User.event_id`. The event's quota drives module selection at registration time.
-- **Event settings**: name, quota (JSON), description, welcome message, time limit (display-only; enforcement is manual via start/stop).
+- **Event settings**: name, quota (JSON), vm_quota (JSON, optional), description, welcome message, time limit (display-only; enforcement is manual via start/stop).
 - **Admin CRUD**: `POST/GET/PUT/DELETE /admin/events/{id}`, plus `/start` and `/stop` actions. Events with assigned users cannot be deleted.
 - **Public event listing**: `GET /api/events` returns open events (no auth required) for the registration form.
 - **Scoreboard scoping**: `GET /api/scoreboard?event_id=X` returns per-event rankings. `GET /api/scoreboard/events` lists all non-draft events for the selector dropdown.
@@ -153,6 +153,47 @@ When `VULTR_API_KEY` is set, admins can create and destroy Vultr VPS instances d
 
 **Secrets:** `VULTR_API_KEY` is injected into the Semaphore container environment (docker-compose); all other secrets (Cloudflare token, SSH public key) are passed as Semaphore template extra vars at runtime.
 
+### VM Quota System
+
+An event-level quota system for automated VM provisioning, analogous to the module quota. Admins define VM types and counts on an event; when the event starts, the platform auto-creates Vultr VMs for every team, assigns modules, sizes plans, and deploys everything.
+
+**VM quota JSON schema** (`Event.vm_quota`):
+```json
+{
+  "ubuntu_target": {
+    "os": "Ubuntu 24.04 LTS x64",
+    "default_plan": "vc2-1c-2gb",
+    "count": 3,
+    "role": "target",
+    "region": "ewr"
+  },
+  "red_team": {
+    "os": "Ubuntu 24.04 LTS x64",
+    "default_plan": "vc2-2c-4gb",
+    "count": 1,
+    "role": "attacker"
+  }
+}
+```
+
+- **Roles**: `"target"` VMs get modules assigned (via `select_modules()`) and provisioned via Ansible. `"attacker"` VMs are bare OS only (no modules), marked active immediately after Vultr creation.
+- **Plan sizing**: Modules can declare `min_ram_mb` and `min_vcpu` in their YAML. `builder/plan_sizing.py` → `plan_for_vm()` picks the cheapest Vultr plan meeting `max(default_plan resources, module resource sum)`.
+- **Validation**: `builder/vm_quota_validation.py` → `validate_vm_quota()` enforces slug keys, required fields (`os`, `default_plan`, `count`, `role`), and valid role values.
+
+**Auto-provisioning flow** (triggered by `POST /admin/events/{id}/start` when `vm_quota` is defined):
+1. Validates teams exist for the event.
+2. Pre-creates a Semaphore project + SSH key for the event (avoids race conditions across concurrent threads).
+3. For each team × VM type × count: creates VM record, assigns modules (target role only), sizes Vultr plan.
+4. Spawns one `_run_vultr_create()` thread per VM (concurrent).
+5. After Vultr creation completes, target VMs auto-chain into `_run_provision()` (module deployment via Ansible). Attacker VMs go directly to `status="active"`.
+6. Returns `{"status": "started", "provisioning": true, "vm_count": N}`.
+
+**Provisioning dashboard**: `GET /admin/events/{id}/provision-status` returns aggregate progress (`{total, creating, registered, provisioning, active, failed, vms: [...]}`). The admin UI polls this every 5 seconds and shows a real-time progress bar, per-VM status table, and "Retry Failed" button.
+
+**Admin UI**: The event form has a "VM Quota" section with a dynamic form editor (type name, OS dropdown, plan dropdown, count, role, region) and a raw JSON toggle. Starting an event with vm_quota shows a confirmation dialog with VM count and estimated monthly cost.
+
+**Backward compatibility**: Events without `vm_quota` start as before — the `if event.vm_quota:` guard in `start_event` ensures no behavior change.
+
 ### Team and VM Management
 
 The platform supports VM-based deployments alongside the existing per-user Docker flow. VMs are team-scoped (not per-user). Admins can provision new VPS instances directly from the admin UI ("Create on Vultr") or register existing machines manually ("Register Existing").
@@ -177,4 +218,4 @@ An interactive D3.js force-directed graph at `/admin/topology` that visualizes t
 
 ### Database Models (api/models.py)
 
-Eight models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`), `VMModule` (mirrors UserModule — completion tracking per module per VM), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.
+Eight models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, `vm_quota` JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, `vm_type` — traces which vm_quota entry created this VM; provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`), `VMModule` (mirrors UserModule — completion tracking per module per VM), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.
