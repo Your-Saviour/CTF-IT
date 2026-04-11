@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-pip3 install flask gunicorn --break-system-packages
-
 mkdir -p /opt/flaskapp
+python3 -m venv /opt/flaskapp/venv
+/opt/flaskapp/venv/bin/pip install flask gunicorn
 cat > /opt/flaskapp/app.py << 'PYEOF'
 from flask import Flask
 app = Flask(__name__)
@@ -23,7 +23,7 @@ Description=CTF Flask Application
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/gunicorn --workers 2 --bind 0.0.0.0:5000 app:app
+ExecStart=/opt/flaskapp/venv/bin/gunicorn --workers 2 --bind 0.0.0.0:5000 app:app
 WorkingDirectory=/opt/flaskapp
 Restart=always
 
