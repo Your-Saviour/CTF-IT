@@ -249,3 +249,16 @@ async def caldera_operation_page(op_id: str, request: Request, db: Session = Dep
         "user": user,
         "op_id": op_id,
     })
+
+
+@app.get("/admin/events/{event_id}/plan", response_class=HTMLResponse)
+async def event_plan_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_plan.html", {
+        "user": user, "event_id": event_id, "event_name": event.name
+    })
