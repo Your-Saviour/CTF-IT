@@ -31,13 +31,8 @@ async def list_operations(request: Request, db: Session = Depends(get_db)):
         except Exception as e:
             return JSONResponse({"error": f"Caldera unavailable: {e}"}, status_code=502)
 
-    # Build IP→VM lookup for hostname resolution
-    all_vms = db.query(VM).all()
-    ip_to_vm = {vm.ip_address: vm for vm in all_vms if vm.ip_address}
-
     result = []
     for op in operations:
-        chain = op.get("chain", [])
         result.append({
             "id": op.get("id"),
             "name": op.get("name"),
@@ -45,7 +40,6 @@ async def list_operations(request: Request, db: Session = Depends(get_db)):
             "group": op.get("group"),
             "start": op.get("start"),
             "finish": op.get("finish"),
-            "abilities_run": len(chain),
         })
     return result
 
@@ -264,13 +258,14 @@ async def vm_attack_summary(request: Request, db: Session = Depends(get_db)):
     ip_to_vm = {vm.ip_address: vm for vm in all_vms if vm.ip_address}
 
     # Map paw → VM
+    all_teams = {t.id: t for t in db.query(Team).all()}
     paw_to_vm: dict[str, dict] = {}
     for agent in agents:
         paw = agent.get("paw")
         for ip in agent.get("host_ip_addrs", []):
             if ip in ip_to_vm:
                 vm = ip_to_vm[ip]
-                team = db.query(Team).filter(Team.id == vm.team_id).first()
+                team = all_teams.get(vm.team_id)
                 paw_to_vm[paw] = {
                     "hostname": vm.hostname,
                     "vm_id": vm.id,
@@ -333,30 +328,29 @@ async def vm_results(vm_id: int, request: Request, db: Session = Depends(get_db)
         except Exception as e:
             return JSONResponse({"error": f"Caldera unavailable: {e}"}, status_code=502)
 
-    # Find this VM's agent paw
-    vm_paw = None
-    for agent in agents:
-        if vm.ip_address in agent.get("host_ip_addrs", []):
-            vm_paw = agent.get("paw")
-            break
+        # Find this VM's agent paw
+        vm_paw = None
+        for agent in agents:
+            if vm.ip_address in agent.get("host_ip_addrs", []):
+                vm_paw = agent.get("paw")
+                break
 
-    if not vm_paw:
-        return {"results": [], "operation_id": None, "message": "No agent found for this VM"}
+        if not vm_paw:
+            return {"results": [], "operation_id": None, "message": "No agent found for this VM"}
 
-    # Find the most recent finished operation that ran against this VM's group
-    vm_group = f"event-{vm.event_id}" if vm.event_id else "red"
-    relevant_ops = [
-        op for op in operations
-        if op.get("group") == vm_group and op.get("state") in ("finished", "cleanup", "running")
-    ]
-    if not relevant_ops:
-        return {"results": [], "operation_id": None}
+        # Find the most recent finished operation that ran against this VM's group
+        vm_group = f"event-{vm.event_id}" if vm.event_id else "red"
+        relevant_ops = [
+            op for op in operations
+            if op.get("group") == vm_group and op.get("state") in ("finished", "cleanup", "running")
+        ]
+        if not relevant_ops:
+            return {"results": [], "operation_id": None}
 
-    # Sort by start time descending, pick most recent
-    relevant_ops.sort(key=lambda o: o.get("start") or "", reverse=True)
+        # Sort by start time descending, pick most recent
+        relevant_ops.sort(key=lambda o: o.get("start") or "", reverse=True)
 
-    # Fetch the most recent operation with chain
-    async with _make_client() as caldera:
+        # Fetch the most recent operation with chain
         try:
             op = await caldera.get_operation(relevant_ops[0]["id"], include_chain=True)
         except Exception as e:
