@@ -492,8 +492,8 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         return JSONResponse({"error": "not found"}, status_code=404)
 
     try:
-        quota = body.quota or json.loads(event.quota)
-        vm_quota = body.vm_quota or (json.loads(event.vm_quota) if event.vm_quota else None)
+        quota = body.quota if body.quota is not None else json.loads(event.quota)
+        vm_quota = body.vm_quota if body.vm_quota is not None else (json.loads(event.vm_quota) if event.vm_quota else None)
     except (json.JSONDecodeError, TypeError) as e:
         return JSONResponse({"error": f"invalid quota JSON: {e}"}, status_code=422)
 

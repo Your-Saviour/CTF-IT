@@ -162,7 +162,7 @@
     <div class="plan-header-actions">
         <a href="/admin" class="btn-outline">&larr; Back to Admin</a>
         <button class="btn-outline" id="reroll-all-btn" onclick="loadPreview()">&#127922; Re-roll All</button>
-        <a href="/admin" class="btn btn-primary btn-sm">&#9654; Start Event</a>
+        <button class="btn btn-primary btn-sm" onclick="startEventFromPlan()">&#9654; Start Event</button>
     </div>
 </div>
 
@@ -350,7 +350,9 @@
     }
 
     function sanitizeId(hostname) {
-        return hostname.replace(/\./g, '-');
+        // Replace all non-alphanumeric characters so the result is safe in
+        // CSS attribute selectors (e.g. querySelector('[data-sid="..."]')) and HTML IDs
+        return hostname.replace(/[^a-zA-Z0-9]/g, '-');
     }
 
     function diffClass(difficulty) {
@@ -836,28 +838,32 @@
             previewData = newData;
             topoDataVersion++;
 
-            // Re-render only this VM's attack tree
-            previewData.vm_types.forEach(vt => {
-                if (vt.role === 'attacker') return;
-                vt.vms.forEach(vm => {
-                    if (vm.hostname === hostname && vm.attack_tree) {
-                        const sid = sanitizeId(vm.hostname);
-                        const container = document.getElementById('tree-' + sid);
-                        if (container) {
-                            container.innerHTML = '';
-                            setTimeout(() => window.renderAttackTree('tree-' + sid, vm.attack_tree), 50);
-                        }
-                    }
-                });
-            });
-
-            // Update stats (module counts may differ)
+            // All VMs got new random draws — re-render the full VM plan and attack paths
+            // so nothing shows stale data. Topology also updated via topoDataVersion.
             updateStats(newData.summary);
+            renderVmPlan();
+            renderAttackPaths();
         } finally {
             btn.textContent = '🎲 Re-roll';
             btn.disabled = false;
         }
     };
+
+    // ── Start event from plan page ────────────────────────────────────────────
+    async function startEventFromPlan() {
+        const vmCount = previewData ? previewData.summary.total_vms : '?';
+        const cost = previewData ? '$' + previewData.summary.estimated_monthly_cost.toFixed(2) + '/mo' : '';
+        const msg = `Start event and provision ${vmCount} VMs${cost ? ' (est. ' + cost + ')' : ''}?\n\nThis will begin actual deployment. Continue?`;
+        if (!confirm(msg)) return;
+
+        const resp = await fetch(`/admin/events/${EVENT_ID}/start`, { method: 'POST' });
+        const data = await resp.json();
+        if (resp.ok) {
+            window.location = '/admin';
+        } else {
+            showError(data.error || data.detail || 'Failed to start event');
+        }
+    }
 
     // ── Init ─────────────────────────────────────────────────────────────────
     // Register topology context-menu escape handler once (not per-render)
