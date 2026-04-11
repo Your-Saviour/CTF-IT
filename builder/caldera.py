@@ -28,6 +28,41 @@ def _adversary_uuid(name: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, f"adversary_{name}"))
 
 
+def ability_uuid(module_id: str, phase: str) -> str:
+    """Public alias for deterministic ability UUID generation.
+
+    Returns the same UUID that generate_caldera_export() uses for abilities,
+    enabling reverse-lookup of which CTF module an operation result belongs to.
+    """
+    return _ability_uuid(module_id, phase)
+
+
+def build_ability_uuid_map(modules: list) -> dict[str, dict]:
+    """Return a mapping of ability_uuid -> {module_id, module_name, phase}.
+
+    Used by the operations results endpoint to annotate Caldera link results
+    with the corresponding CTF module name.
+    """
+    result = {}
+    for m in modules:
+        if m.type != "vulnerability" or not m.caldera:
+            continue
+        cal = m.caldera
+        if cal.get("recon", {}).get("command"):
+            result[_ability_uuid(m.id, "recon")] = {
+                "module_id": m.id,
+                "module_name": m.name,
+                "phase": "recon",
+            }
+        if cal.get("exploit", {}).get("command"):
+            result[_ability_uuid(m.id, "exploit")] = {
+                "module_id": m.id,
+                "module_name": m.name,
+                "phase": "exploit",
+            }
+    return result
+
+
 def _build_abilities(modules: list[Module]) -> list[dict]:
     """Build ability dicts for all vulnerability modules with caldera metadata."""
     abilities = []
