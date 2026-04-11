@@ -4,6 +4,7 @@ Designed for use in FastAPI route handlers (async context).
 """
 from __future__ import annotations
 
+import json
 import os
 
 import httpx
@@ -80,7 +81,6 @@ class CalderaClient:
         source_id: str = _DEFAULT_SOURCE_ID,
         auto_close: bool = False,
     ) -> dict:
-        import json as _json
         payload = {
             "name": name,
             "adversary": {"adversary_id": adversary_id},
@@ -89,11 +89,7 @@ class CalderaClient:
             "group": group,
             "auto_close": auto_close,
         }
-        resp = await self._client.post(
-            "/api/v2/operations",
-            content=_json.dumps(payload),
-            headers={"Content-Type": "application/json"},
-        )
+        resp = await self._client.post("/api/v2/operations", json=payload)
         resp.raise_for_status()
         return resp.json()
 
@@ -148,13 +144,9 @@ class CalderaClient:
         resp.raise_for_status()
         if any(s.get("id") == source_id for s in resp.json()):
             return
-        import json as _json
         create_resp = await self._client.post(
             "/api/v2/sources",
-            content=_json.dumps(
-                {"name": name, "id": source_id, "facts": [], "rules": [], "relationships": []}
-            ),
-            headers={"Content-Type": "application/json"},
+            json={"name": name, "id": source_id, "facts": [], "rules": [], "relationships": []},
         )
         create_resp.raise_for_status()
 
