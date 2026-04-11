@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import Event
+from api.models import Event, VM, VMModule
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient
 
@@ -213,6 +213,22 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
                 )
             except Exception as e:
                 operation_error = str(e)
+
+        # Store attack trees on VMs for this event
+        if _event_id:
+            from builder.attack_tree import build_attack_tree, serialize_tree
+            from builder.module_loader import load_all_modules
+            all_library = {m.id: m for m in load_all_modules()}
+            event_vms = db.query(VM).filter(VM.event_id == _event_id).all()
+            for ev_vm in event_vms:
+                vm_mods = db.query(VMModule).filter(VMModule.vm_id == ev_vm.id).all()
+                vm_module_objects = [all_library.get(vmm.module_id) for vmm in vm_mods]
+                vm_module_objects = [m for m in vm_module_objects if m]
+                if vm_module_objects:
+                    tree = build_attack_tree(vm_module_objects)
+                    import json as _json
+                    ev_vm.attack_tree_json = _json.dumps(serialize_tree(tree))
+            db.commit()
 
     finally:
         shutil.rmtree(output_dir, ignore_errors=True)

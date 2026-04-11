@@ -204,7 +204,56 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
         else:
             agent_summary[paw]["pending"] += 1
 
-    return {
+    # Optional: include attack trees annotated with results
+    attack_trees = {}
+    include_tree = request.query_params.get("include_tree", "").lower() == "true"
+    if include_tree:
+        from builder.attack_tree import build_attack_tree, serialize_tree
+        library = {m.id: m for m in modules}
+        # Collect unique VM IDs from chain
+        vm_ids = {link["vm_id"] for link in annotated_chain if link.get("vm_id")}
+        for vid in vm_ids:
+            vm = db.query(VM).filter(VM.id == vid).first()
+            if not vm:
+                continue
+            vm_mods = db.query(VMModule).filter(VMModule.vm_id == vid).all()
+            vm_module_objects = [library.get(vmm.module_id) for vmm in vm_mods]
+            vm_module_objects = [m for m in vm_module_objects if m]
+
+            tree = build_attack_tree(vm_module_objects)
+            tree_data = serialize_tree(tree)
+
+            # Annotate node statuses from chain results
+            # Build module_id -> best status from this operation's chain
+            module_status = {}
+            for link in annotated_chain:
+                if link.get("vm_id") != vid or not link.get("module_id"):
+                    continue
+                mid = link["module_id"]
+                status = link["status"]
+                output = link.get("output", "")
+                # Classify: check if output indicates skip
+                if output and output.startswith("SKIPPED:"):
+                    classified = "skipped"
+                elif status == 1:
+                    classified = "succeeded"
+                elif status in (-1, -3):
+                    classified = "failed"
+                elif status == 0:
+                    classified = "pending"
+                else:
+                    classified = "unknown"
+                # For a module, prefer exploit status over recon status
+                phase = link.get("phase", "")
+                if mid not in module_status or phase == "exploit":
+                    module_status[mid] = classified
+
+            for node in tree_data["nodes"]:
+                node["status"] = module_status.get(node["id"])
+
+            attack_trees[vid] = tree_data
+
+    response = {
         "id": op.get("id"),
         "name": op.get("name"),
         "state": op.get("state"),
@@ -215,6 +264,10 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
         "chain": annotated_chain,
         "agents": list(agent_summary.values()),
     }
+    if attack_trees:
+        response["attack_trees"] = attack_trees
+
+    return response
 
 
 # ── Delete Operation ───────────────────────────────────────────────────────────

@@ -114,6 +114,8 @@ class VM(Base):
     vultr_plan: Mapped[str] = mapped_column(String(64), nullable=True)
     vultr_region: Mapped[str] = mapped_column(String(16), nullable=True)
     cloudflare_record_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    # Caldera attack tree cache
+    attack_tree_json: Mapped[str] = mapped_column(Text, nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
