@@ -12,7 +12,7 @@
   become: true
   tasks:
 {%- for op in ops %}
-{%- if op.type == "package_install" %}
+{%- if op.type == "package_install" and op.packages %}
     - name: "Install base packages"
       ansible.builtin.apt:
         name: {{ op.packages | to_yaml | trim }}
@@ -33,8 +33,8 @@
         mode: "{{ op.mode }}"
 {%- endif %}
 {%- elif op.type == "playbook" %}
-    - name: "Include tasks: {{ op.tasks_file }} [{{ base_type.id }}]"
+    - name: "Include tasks: {{ op.playbook }} [{{ base_type.id }}]"
       ansible.builtin.include_tasks:
-        file: "{{ op.tasks_file }}"
+        file: "{{ op.playbook }}"
 {%- endif %}
 {%- endfor %}
