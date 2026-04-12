@@ -3,6 +3,18 @@ import random
 from builder.module_loader import Module
 from builder.quota_validation import RESERVED_KEYS
 
+# Process module types in this order so dependency chains resolve correctly:
+# applications must exist before goals (goals require apps),
+# goals before vulns/payloads (for future cross-type deps).
+_TYPE_ORDER = [
+    "application_external",
+    "application_internal",
+    "goal",
+    "vulnerability",
+    "payload",
+    "hardening",
+]
+
 
 def find_module(module_id: str, library: list[Module]) -> Module:
     for m in library:
@@ -30,7 +42,7 @@ def _pick_available(pool: list[Module], selected: list[Module]) -> Module | None
 
 
 def _pull_requires(pick: Module, selected: list[Module], library: list[Module]):
-    """Add required modules before the pick so their scripts run first in the Dockerfile."""
+    """Add required modules before the pick so their scripts run first."""
     selected_ids = {m.id for m in selected}
     blocked_by_selected = {c for m in selected for c in m.conflicts}
     for req_id in pick.requires:
@@ -60,9 +72,15 @@ def select_modules(
 
     selected: list[Module] = []
 
-    # Phase 1: type → difficulty selection (existing behaviour)
-    for module_type, tiers in quota.items():
-        if module_type in RESERVED_KEYS:
+    # Phase 1: type → difficulty selection in defined order.
+    # Iterate _TYPE_ORDER first so apps are selected before goals, goals before
+    # vulns, etc. Any quota keys not in _TYPE_ORDER are processed afterward.
+    ordered_types = [t for t in _TYPE_ORDER if t in quota and t not in RESERVED_KEYS]
+    remaining_types = [t for t in quota if t not in RESERVED_KEYS and t not in ordered_types]
+
+    for module_type in ordered_types + remaining_types:
+        tiers = quota[module_type]
+        if not isinstance(tiers, dict):
             continue
         pool = [m for m in module_library if m.type == module_type]
 
