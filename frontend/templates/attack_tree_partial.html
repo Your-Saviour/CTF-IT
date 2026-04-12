@@ -234,7 +234,7 @@ window.renderAttackTree = (function() {
                 height: NODE_H,
                 labels: [{ text: n.name }],
                 layoutOptions: {
-                    'elk.partitioning.partition': String(phaseToPartition[n.phase])
+                    'elk.partitioning.partition': phaseToPartition[n.phase]
                 },
                 _data: n
             };
@@ -257,7 +257,7 @@ window.renderAttackTree = (function() {
                 'elk.spacing.nodeNode': '30',
                 'elk.layered.spacing.nodeNodeBetweenLayers': '80',
                 'elk.padding': '[top=' + PADDING + ',left=' + PADDING + ',bottom=' + PADDING + ',right=' + PADDING + ']',
-                'elk.partitioning.activate': 'true'
+                'elk.partitioning.activate': true
             },
             children: elkNodes,
             edges: elkEdges
