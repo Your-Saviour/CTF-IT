@@ -289,7 +289,10 @@
 
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                showError(err.error || err.detail || 'Preview failed');
+                const msg = err.error || err.detail || 'Preview failed';
+                showError(msg === 'no vm_quota configured'
+                    ? 'This event has no VM quota configured. Add a VM quota in the event settings to use plan preview.'
+                    : msg);
                 document.getElementById('vms-loading').style.display = 'none';
                 document.getElementById('attacks-loading').style.display = 'none';
                 return;

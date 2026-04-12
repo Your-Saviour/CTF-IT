@@ -588,7 +588,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                         selected = select_modules(quota, library_list, base_type_id=None)
                     except ValueError as e:
                         return JSONResponse({"error": str(e)}, status_code=422)
-                    sized_plan = plan_for_vm(selected, default_plan, available_plans) if available_plans else default_plan
+                    sized_plan = plan_for_vm(None, selected, default_plan, available_plans) if available_plans else default_plan
                     module_objs = [library[m.id] for m in selected if m.id in library]
                     tree = build_attack_tree(module_objs)
                     serialized_tree = serialize_tree(tree)
