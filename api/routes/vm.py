@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import Event, Team, VM, VMModule
+from api.models import Event, Team, VM, VMModule, VMGoal
 from api.routes.admin import require_admin
 
 _log = logging.getLogger(__name__)
@@ -304,10 +304,11 @@ async def assign_modules(vm_id: int, request: Request, db: Session = Depends(get
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=422)
 
-    # Clear existing modules
+    # Clear existing modules and goals
     db.query(VMModule).filter(VMModule.vm_id == vm_id).delete()
+    db.query(VMGoal).filter(VMGoal.vm_id == vm_id).delete()
 
-    # Assign selected modules
+    # Assign selected modules; create VMGoal records for goal-type modules
     for m in selected:
         db.add(VMModule(
             vm_id=vm_id,
@@ -315,13 +316,28 @@ async def assign_modules(vm_id: int, request: Request, db: Session = Depends(get
             module_type=m.type,
             difficulty=m.difficulty,
             points=m.points,
+            stage=m.stage,
         ))
+        if m.type == "goal":
+            db.add(VMGoal(
+                vm_id=vm_id,
+                module_id=m.id,
+                status="pending",
+                red_points=m.red_points,
+                defend_points=m.defend_points,
+            ))
 
     from api.models import utcnow
     vm.updated_at = utcnow()
     db.commit()
 
-    return {"status": "assigned", "count": len(selected), "modules": [m.id for m in selected]}
+    goal_count = sum(1 for m in selected if m.type == "goal")
+    return {
+        "status": "assigned",
+        "count": len(selected),
+        "goal_count": goal_count,
+        "modules": [m.id for m in selected],
+    }
 
 
 @router.post("/vms/{vm_id}/add-module")
@@ -358,7 +374,16 @@ async def add_module(vm_id: int, request: Request, db: Session = Depends(get_db)
         module_type=mod.type,
         difficulty=mod.difficulty,
         points=mod.points,
+        stage=mod.stage,
     ))
+    if mod.type == "goal":
+        db.add(VMGoal(
+            vm_id=vm_id,
+            module_id=mod.id,
+            status="pending",
+            red_points=mod.red_points,
+            defend_points=mod.defend_points,
+        ))
     from api.models import utcnow
     vm.updated_at = utcnow()
     db.commit()
