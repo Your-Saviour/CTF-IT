@@ -285,8 +285,15 @@ window.renderAttackTree = (function() {
                 });
             }
 
-            var totalW = (layoutedGraph.width || 600) + shiftX + PADDING;
-            var totalH = (layoutedGraph.height || 300) + shiftY + PADDING;
+            // Compute SVG dimensions from actual node extents — ELK's reported
+            // width/height often omits right/bottom padding, clipping last-column nodes.
+            var maxNodeRight = 0, maxNodeBottom = 0;
+            layoutedGraph.children.forEach(function(n) {
+                maxNodeRight = Math.max(maxNodeRight, n.x + (n.width || NODE_W));
+                maxNodeBottom = Math.max(maxNodeBottom, n.y + (n.height || NODE_H));
+            });
+            var totalW = maxNodeRight + PADDING;
+            var totalH = maxNodeBottom + PADDING;
 
             var svg = d3.select(container)
                 .append('svg')
