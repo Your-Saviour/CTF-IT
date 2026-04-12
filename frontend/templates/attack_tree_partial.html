@@ -3,13 +3,19 @@
 <!-- Then call: renderAttackTree(containerId, treeData) -->
 
 <style>
+/* Pages that include attack trees need wider layout */
+.container { max-width: 1600px; }
+
 .attack-tree-wrap {
     position: relative;
-    overflow: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--bg-deep);
     min-height: 200px;
+    width: 100%;
+    box-sizing: border-box;
 }
 .attack-tree-wrap svg {
     display: block;
