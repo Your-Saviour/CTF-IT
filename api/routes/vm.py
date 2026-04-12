@@ -1529,13 +1529,6 @@ async def destroy_vm_on_vultr(vm_id: int, request: Request, db: Session = Depend
 
 # ── Topology Data ─────────────────────────────────────────────────────────────
 
-# Predefined team colors cycled by index
-_TEAM_COLORS = [
-    "#ffb400", "#b400ff", "#00c8ff", "#ff6b6b", "#00ff88",
-    "#ff9100", "#7c4dff", "#00bfa5", "#ff4081", "#64dd17",
-]
-
-
 @router.get("/topology-data")
 async def topology_data(
     request: Request,

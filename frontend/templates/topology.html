@@ -324,7 +324,6 @@
         draft: '#888',
     };
 
-    const NODE_RADIUS = { event: 50, team: 35, vm: 22 }; // used by renderNodes() until Tasks 4+5 replace those renderers
     const TIER_Y = { wan: 90, event: 210, vm: 370 };
     const VM_H_SPACING = 110; // min px between VM node centers
 
@@ -577,23 +576,6 @@
             }
         });
 
-        // Team nodes — medium circle
-        groups.filter(d => d.type === 'team').each(function(d) {
-            const g = d3.select(this);
-            const color = d.color || '#ffb400';
-            g.append('circle')
-                .attr('r', NODE_RADIUS.team)
-                .attr('fill', color.replace(')', ', 0.1)').replace('rgb', 'rgba').replace('#', ''))
-                .attr('fill', `${color}18`)
-                .attr('stroke', color)
-                .attr('stroke-width', 2)
-                .style('filter', `drop-shadow(0 0 10px ${color}40)`);
-            g.append('text').attr('class', 'node-label-type')
-                .attr('y', -6).attr('fill', color).text('TEAM');
-            g.append('text').attr('class', 'node-label')
-                .attr('y', 8).attr('font-size', '10px').text(d.label);
-        });
-
         // VM nodes — rounded-square with server rack icon + OS badge
         groups.filter(d => d.type === 'vm').each(function(d) {
             const g = d3.select(this);
@@ -747,18 +729,6 @@
                 <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${d.modules_completed}/${d.modules_total}</span></div>
                 <div class="topo-tooltip-progress"><div class="topo-tooltip-progress-bar" style="width:${pct}%"></div></div>
             `;
-        } else if (d.type === 'team') {
-            const teamVMs = currentNodes.filter(n => n.type === 'vm' && n.team_id === d.id);
-            const vmCount = teamVMs.length;
-            const totalMods = teamVMs.reduce((s, v) => s + (v.modules_total || 0), 0);
-            const completedMods = teamVMs.reduce((s, v) => s + (v.modules_completed || 0), 0);
-            const pct = totalMods > 0 ? Math.round((completedMods / totalMods) * 100) : 0;
-            html = `
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Team</span><span class="topo-tooltip-value">${d.label}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs</span><span class="topo-tooltip-value">${vmCount}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${completedMods}/${totalMods}</span></div>
-                <div class="topo-tooltip-progress"><div class="topo-tooltip-progress-bar" style="width:${pct}%"></div></div>
-            `;
         } else if (d.type === 'event') {
             const eventVMs = currentNodes.filter(n => n.type === 'vm' && n.event_id === d.id);
             html = `
@@ -797,13 +767,6 @@
                 <div class="topo-context-item" data-action="assign-modules" data-id="${vmId}">&#128203; Assign Modules</div>
                 <div class="topo-context-item" data-action="export-playbook" data-id="${vmId}">&#128230; Export Playbook</div>
                 <div class="topo-context-item danger" data-action="destroy" data-id="${vmId}">&#128465; Destroy</div>
-            `;
-        } else if (d.type === 'team') {
-            const teamId = d.id.replace('team-', '');
-            items = `
-                <div class="topo-context-header">${d.label}</div>
-                <div class="topo-context-item" onclick="location.href='/admin'">&#9654; View Team</div>
-                <div class="topo-context-item danger" data-action="delete-team" data-id="${teamId}">&#128465; Delete Team</div>
             `;
         } else if (d.type === 'event') {
             items = `
@@ -851,12 +814,6 @@
                 url = `/admin/vms/${id}/destroy-vultr`;
                 method = 'POST';
                 msg = 'Destroy initiated';
-                break;
-            case 'delete-team':
-                if (!confirm('Delete this team?')) return;
-                url = `/admin/teams/${id}`;
-                method = 'DELETE';
-                msg = 'Team deleted';
                 break;
             default:
                 return;
