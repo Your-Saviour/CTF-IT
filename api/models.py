@@ -124,6 +124,7 @@ class VM(Base):
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
     modules: Mapped[list["VMModule"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
+    goals: Mapped[list["VMGoal"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
 
 
 class PlatformSettings(Base):
@@ -145,5 +146,26 @@ class VMModule(Base):
     points: Mapped[int] = mapped_column(Integer, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    # "preapplied" = blue team sees+fixes, "caldera" = red team exploits.
+    # None for types where stage doesn't apply (hardening, application_*, goal).
+    stage: Mapped[str] = mapped_column(String(16), nullable=True)
 
     vm: Mapped["VM"] = relationship(back_populates="modules")
+
+
+class VMGoal(Base):
+    __tablename__ = "vm_goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vm_id: Mapped[int] = mapped_column(ForeignKey("vms.id"), nullable=False)
+    module_id: Mapped[str] = mapped_column(String(64), nullable=False)  # goal module id
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/achieved/defended
+    red_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    defend_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    achievement_count: Mapped[int] = mapped_column(Integer, default=0)
+    defend_count: Mapped[int] = mapped_column(Integer, default=0)
+    achieved_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    defended_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    vm: Mapped["VM"] = relationship(back_populates="goals")

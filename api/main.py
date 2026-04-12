@@ -56,6 +56,28 @@ async def lifespan(app: FastAPI):
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))
 
+        if inspector.has_table("vm_modules"):
+            existing = {col["name"] for col in inspector.get_columns("vm_modules")}
+            if "stage" not in existing:
+                db.execute(text("ALTER TABLE vm_modules ADD COLUMN stage VARCHAR(16)"))
+
+        if not inspector.has_table("vm_goals"):
+            db.execute(text("""
+                CREATE TABLE vm_goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vm_id INTEGER NOT NULL REFERENCES vms(id),
+                    module_id VARCHAR(64) NOT NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    red_points INTEGER NOT NULL DEFAULT 0,
+                    defend_points INTEGER NOT NULL DEFAULT 0,
+                    achievement_count INTEGER NOT NULL DEFAULT 0,
+                    defend_count INTEGER NOT NULL DEFAULT 0,
+                    achieved_at DATETIME,
+                    defended_at DATETIME,
+                    created_at DATETIME
+                )
+            """))
+
         db.commit()
 
         # Migrate existing events: open bool → status field
