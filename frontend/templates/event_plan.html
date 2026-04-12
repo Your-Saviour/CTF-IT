@@ -107,7 +107,8 @@
 .topology-container { position: relative; background: var(--bg-deep); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .topology-svg { width: 100%; height: 500px; display: block; cursor: grab; }
 .topology-svg:active { cursor: grabbing; }
-.topo-link { stroke: var(--border); stroke-width: 1.5; fill: none; stroke-dasharray: 4 4; opacity: 0.3; }
+.topo-link { fill: none; opacity: 0.6; }
+.topo-tier-label { font-family: 'JetBrains Mono', monospace; font-size: 9px; fill: #2a2a2a; text-transform: uppercase; letter-spacing: 2px; pointer-events: none; user-select: none; }
 .node-label { text-anchor: middle; font-family: 'JetBrains Mono', monospace; fill: var(--text-primary); pointer-events: none; user-select: none; }
 .node-label-type { text-anchor: middle; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: bold; text-transform: uppercase; pointer-events: none; user-select: none; }
 .topo-tooltip { position: absolute; background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 11px; font-family: 'JetBrains Mono', monospace; pointer-events: none; opacity: 0; transition: opacity 0.15s; white-space: nowrap; z-index: 100; }
@@ -519,8 +520,6 @@
         draft: '#888',
         projected: '#ffb300'
     };
-    const NODE_RADIUS = { event: 50, team: 35, vm: 22 };
-
     function topoStatusColor(status) {
         return STATUS_COLORS[status] || '#888';
     }
@@ -553,12 +552,17 @@
         const height = svgEl.clientHeight;
 
         if (!width || !height) {
-            // SVG not visible yet (tab hidden), retry shortly
             setTimeout(renderTopology, 100);
             return;
         }
 
+        const TIER_Y = { wan: 90, event: 210, vm: 370 };
+        const VM_H_SPACING = 110;
+
         const svg = d3.select(svgEl);
+
+        // Tier labels sit outside the zoom container so they stay in screen space
+        const tierGroupEl = svg.append('g').attr('class', 'tiers');
         const container = svg.append('g');
         const linkGroup = container.append('g').attr('class', 'links');
         const nodeGroup = container.append('g').attr('class', 'nodes');
@@ -566,39 +570,98 @@
         // Zoom
         const zoomBehavior = d3.zoom()
             .scaleExtent([0.2, 4])
-            .on('zoom', (event) => { container.attr('transform', event.transform); });
+            .on('zoom', (event) => {
+                container.attr('transform', event.transform);
+                renderTierLabels(event.transform);
+            });
         svg.call(zoomBehavior);
         svg.on('click', () => { ctxMenuEl.classList.remove('visible'); });
 
-        topoNodes = previewData.topology.nodes.map(n => ({ ...n }));
+        // Inject synthetic WAN node client-side
+        const wanNode = { id: 'wan', type: 'wan', label: 'INTERNET' };
+        const apiNodes = previewData.topology.nodes.map(n => ({ ...n }));
+        topoNodes = [wanNode, ...apiNodes];
         topoLinks = previewData.topology.links.map(l => ({ ...l }));
+        apiNodes.filter(n => n.type === 'event').forEach(evNode => {
+            topoLinks.unshift({ source: 'wan', target: evNode.id });
+        });
 
-        topoSimulation = d3.forceSimulation(topoNodes)
-            .force('link', d3.forceLink(topoLinks).id(d => d.id)
-                .distance(d => {
-                    const src = typeof d.source === 'object' ? d.source : topoNodes.find(n => n.id === d.source);
-                    return src && src.type === 'event' ? 180 : 100;
-                }))
-            .force('charge', d3.forceManyBody().strength(-300))
-            .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(d => NODE_RADIUS[d.type] + 15))
-            .on('tick', () => {
-                linkGroup.selectAll('line')
-                    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-                    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-                nodeGroup.selectAll('.node-group')
-                    .attr('transform', d => `translate(${d.x},${d.y})`);
+        function calcLayout() {
+            const w = svgEl.clientWidth || 800;
+            const wanNodes  = topoNodes.filter(n => n.type === 'wan');
+            const eventNodes = topoNodes.filter(n => n.type === 'event');
+            const vmNodes   = topoNodes.filter(n => n.type === 'vm');
+
+            wanNodes.forEach(n => { n.x = w / 2; n.y = TIER_Y.wan; });
+
+            const eCount = eventNodes.length;
+            eventNodes.forEach((n, i) => {
+                n.x = (i + 1) * (w / (eCount + 1));
+                n.y = TIER_Y.event;
             });
+
+            eventNodes.forEach(evNode => {
+                const vms = vmNodes.filter(v => v.event_id === evNode.id);
+                const count = vms.length;
+                if (count === 0) return;
+                const totalW = (count - 1) * VM_H_SPACING;
+                vms.forEach((v, i) => {
+                    v.x = evNode.x - totalW / 2 + i * VM_H_SPACING;
+                    v.y = TIER_Y.vm;
+                });
+            });
+        }
+
+        function renderTierLabels(transform) {
+            tierGroupEl.selectAll('*').remove();
+            const t = transform || d3.zoomTransform(svgEl);
+            const labels = [
+                { tier: 'wan',   text: 'INTERNET / WAN' },
+                { tier: 'event', text: 'EVENT' },
+                { tier: 'vm',    text: 'VMs' },
+            ];
+            const w = svgEl.clientWidth || 800;
+            labels.forEach(({ tier, text }) => {
+                const screenY = t.applyY(TIER_Y[tier]) - 30;
+                tierGroupEl.append('line')
+                    .attr('x1', 0).attr('y1', screenY + 4)
+                    .attr('x2', w).attr('y2', screenY + 4)
+                    .attr('stroke', '#111').attr('stroke-width', 1);
+                tierGroupEl.append('text')
+                    .attr('class', 'topo-tier-label')
+                    .attr('x', 14).attr('y', screenY)
+                    .text(text);
+            });
+        }
+
+        function applyPositions() {
+            topoLinks.forEach(l => {
+                if (typeof l.source === 'string') l.source = topoNodes.find(n => n.id === l.source) || l.source;
+                if (typeof l.target === 'string') l.target = topoNodes.find(n => n.id === l.target) || l.target;
+            });
+
+            linkGroup.selectAll('line')
+                .attr('x1', d => (typeof d.source === 'object' ? d.source : topoNodes.find(n => n.id === d.source))?.x ?? 0)
+                .attr('y1', d => (typeof d.source === 'object' ? d.source : topoNodes.find(n => n.id === d.source))?.y ?? 0)
+                .attr('x2', d => (typeof d.target === 'object' ? d.target : topoNodes.find(n => n.id === d.target))?.x ?? 0)
+                .attr('y2', d => (typeof d.target === 'object' ? d.target : topoNodes.find(n => n.id === d.target))?.y ?? 0);
+
+            nodeGroup.selectAll('.node-group')
+                .attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
+        }
+
+        calcLayout();
+        renderTierLabels();
 
         // Links
         linkGroup.selectAll('line')
             .data(topoLinks).enter().append('line')
             .attr('class', 'topo-link')
-            .attr('stroke', d => {
-                const target = typeof d.target === 'object' ? d.target : topoNodes.find(n => n.id === d.target);
-                return (target && target.color) || '#00e5ff';
-            })
-            .attr('stroke-width', 1);
+            .attr('stroke', '#2a2a2a')
+            .attr('stroke-width', d => {
+                const src = typeof d.source === 'object' ? d.source : topoNodes.find(n => n.id === d.source);
+                return src && src.type === 'wan' ? 2 : 1.5;
+            });
 
         // Nodes
         const groups = nodeGroup.selectAll('.node-group')
@@ -606,16 +669,11 @@
             .attr('class', 'node-group')
             .style('cursor', 'pointer')
             .call(d3.drag()
-                .on('start', (event, d) => {
-                    if (!event.active) topoSimulation.alphaTarget(0.3).restart();
-                    d.fx = d.x; d.fy = d.y;
-                })
-                .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-                .on('end', (event, d) => {
-                    if (!event.active) topoSimulation.alphaTarget(0);
-                    d.fx = null; d.fy = null;
-                }))
+                .on('start', (event, d) => { d._dragging = true; ctxMenuEl.classList.remove('visible'); })
+                .on('drag', (event, d) => { d.x = event.x; d.y = event.y; applyPositions(); })
+                .on('end', (event, d) => { d._dragging = false; }))
             .on('mouseover', (event, d) => {
+                if (d.type === 'wan') return;
                 let html = '';
                 if (d.type === 'vm') {
                     html = `
@@ -624,14 +682,11 @@
                         <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${topoStatusColor(d.status)}">${esc(d.status)}</span></div>
                         <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${d.modules_completed || 0}/${d.modules_total || 0}</span></div>
                     `;
-                } else if (d.type === 'team') {
-                    html = `
-                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Team</span><span class="topo-tooltip-value">${esc(d.label)}</span></div>
-                    `;
                 } else if (d.type === 'event') {
                     html = `
                         <div class="topo-tooltip-row"><span class="topo-tooltip-label">Event</span><span class="topo-tooltip-value">${esc(d.label)}</span></div>
                         <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value">${esc(d.status)}</span></div>
+                        <div class="topo-tooltip-row"><span class="topo-tooltip-label">Teams</span><span class="topo-tooltip-value">${d.team_count ?? 0}</span></div>
                     `;
                 }
                 tooltipEl.innerHTML = html;
@@ -647,17 +702,13 @@
                 event.preventDefault();
                 event.stopPropagation();
                 tooltipEl.classList.remove('visible');
+                if (d.type === 'wan') return;
 
                 let items = '';
                 if (d.type === 'vm') {
                     items = `
                         <div class="topo-context-header">${esc(d.label)} (projected)</div>
                         <div class="topo-context-item disabled">VM not yet deployed</div>
-                    `;
-                } else if (d.type === 'team') {
-                    items = `
-                        <div class="topo-context-header">${esc(d.label)}</div>
-                        <div class="topo-context-item disabled">Preview mode</div>
                     `;
                 } else {
                     items = `
@@ -673,38 +724,61 @@
                 ctxMenuEl.classList.add('visible');
             });
 
-        // Event nodes
+        // WAN node — dashed circle with globe icon
+        groups.filter(d => d.type === 'wan').each(function() {
+            const g = d3.select(this);
+            g.append('circle')
+                .attr('r', 28)
+                .attr('fill', 'rgba(80,80,80,0.06)')
+                .attr('stroke', '#444')
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '5 3');
+            g.append('text')
+                .attr('y', -4)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '14px')
+                .attr('fill', '#555')
+                .text('⊕');
+            g.append('text').attr('class', 'node-label')
+                .attr('y', 14).attr('font-size', '9px')
+                .attr('fill', '#555')
+                .text('INTERNET');
+        });
+
+        // Event nodes — rounded rect with ×N teams badge
         groups.filter(d => d.type === 'event').each(function(d) {
             const g = d3.select(this);
-            g.append('circle')
-                .attr('r', NODE_RADIUS.event)
-                .attr('fill', 'rgba(0,229,255,0.08)')
+            const w = 130, h = 42, rx = 8;
+            g.append('rect')
+                .attr('x', -w / 2).attr('y', -h / 2)
+                .attr('width', w).attr('height', h)
+                .attr('rx', rx)
+                .attr('fill', 'rgba(0, 229, 255, 0.05)')
                 .attr('stroke', topoStatusColor(d.status))
-                .attr('stroke-width', 2)
-                .style('filter', 'drop-shadow(0 0 12px rgba(0,229,255,0.3))');
-            g.append('text').attr('class', 'node-label-type')
-                .attr('y', -8).attr('fill', '#00e5ff').text('EVENT');
+                .attr('stroke-width', 1.5)
+                .style('filter', 'drop-shadow(0 0 10px rgba(0, 229, 255, 0.25))');
             g.append('text').attr('class', 'node-label')
-                .attr('y', 8).attr('font-size', '11px').text(d.label);
+                .attr('y', -6).attr('font-size', '11px')
+                .attr('fill', '#00e5ff')
+                .text(d.label);
+            if (d.team_count && d.team_count > 0) {
+                g.append('rect')
+                    .attr('x', -32).attr('y', 6)
+                    .attr('width', 64).attr('height', 14)
+                    .attr('rx', 7)
+                    .attr('fill', 'rgba(255,180,0,0.12)')
+                    .attr('stroke', '#ffb400')
+                    .attr('stroke-width', 0.8);
+                g.append('text')
+                    .attr('y', 17)
+                    .attr('text-anchor', 'middle')
+                    .attr('font-size', '8px')
+                    .attr('fill', '#ffb400')
+                    .text(`\u00d7 ${d.team_count} teams`);
+            }
         });
 
-        // Team nodes
-        groups.filter(d => d.type === 'team').each(function(d) {
-            const g = d3.select(this);
-            const color = d.color || '#ffb400';
-            g.append('circle')
-                .attr('r', NODE_RADIUS.team)
-                .attr('fill', `${color}18`)
-                .attr('stroke', color)
-                .attr('stroke-width', 2)
-                .style('filter', `drop-shadow(0 0 10px ${color}40)`);
-            g.append('text').attr('class', 'node-label-type')
-                .attr('y', -6).attr('fill', color).text('TEAM');
-            g.append('text').attr('class', 'node-label')
-                .attr('y', 8).attr('font-size', '10px').text(d.label);
-        });
-
-        // VM nodes (projected)
+        // VM nodes (projected — dashed border)
         groups.filter(d => d.type === 'vm').each(function(d) {
             const g = d3.select(this);
             const color = topoStatusColor(d.status);
@@ -722,7 +796,6 @@
                 .attr('stroke-dasharray', d.status === 'projected' ? '5,3' : 'none')
                 .style('filter', `drop-shadow(0 0 6px ${color}50)`);
 
-            // Server rack
             const rackW = 20, rackH = 5, rackGap = 3;
             const startY = -half + 10;
             for (let i = 0; i < 3; i++) {
@@ -737,7 +810,6 @@
                     .attr('r', 1.5).attr('fill', color);
             }
 
-            // OS badge
             const badgeX = half - 6, badgeY = half - 6;
             g.append('circle').attr('cx', badgeX).attr('cy', badgeY)
                 .attr('r', 7).attr('fill', 'var(--bg-deep)')
@@ -746,11 +818,11 @@
                 .attr('text-anchor', 'middle').attr('font-size', '8px')
                 .attr('fill', color).text(osBadge(d.os));
 
-            // Label
             g.append('text').attr('class', 'node-label')
                 .attr('y', half + 14).attr('font-size', '9px').text(d.label);
         });
 
+        applyPositions();
         topoInitialized = true;
         topoRenderedVersion = topoDataVersion;
     }

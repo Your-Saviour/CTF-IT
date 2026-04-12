@@ -552,18 +552,13 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         "#ff4081", "#ffea00", "#00e5ff", "#76ff03", "#ff6e40",
     ]
 
+    team_count = len(teams)
+    first_team = teams[0] if teams else None
     topology_nodes = [
-        {"id": f"event-{event_id}", "type": "event", "label": event.name, "status": event.status}
+        {"id": f"event-{event_id}", "type": "event", "label": event.name, "status": event.status,
+         "team_count": team_count}
     ]
     topology_links = []
-
-    for idx, team in enumerate(teams):
-        color = _TEAM_COLORS[idx % len(_TEAM_COLORS)]
-        topology_nodes.append({
-            "id": f"team-{team.id}", "type": "team", "label": team.name,
-            "event_id": f"event-{event_id}", "color": color,
-        })
-        topology_links.append({"source": f"event-{event_id}", "target": f"team-{team.id}"})
 
     vm_types = []
     total_modules = 0
@@ -608,14 +603,16 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                 total_cost += plan_costs.get(sized_plan, 0)
 
                 vm_node_id = f"vm-projected-{type_key}-{team.name}-{i + 1}"
-                topology_nodes.append({
-                    "id": vm_node_id, "type": "vm",
-                    "label": hostname, "hostname": hostname,
-                    "ip": None, "status": "projected", "os": os_name,
-                    "team_id": f"team-{team.id}", "event_id": f"event-{event_id}",
-                    "modules_total": len(module_list), "modules_completed": 0,
-                })
-                topology_links.append({"source": f"team-{team.id}", "target": vm_node_id})
+                # Only include first team's VMs in topology (canonical — all teams identical)
+                if first_team and team.id == first_team.id:
+                    topology_nodes.append({
+                        "id": vm_node_id, "type": "vm",
+                        "label": hostname, "hostname": hostname,
+                        "ip": None, "status": "projected", "os": os_name,
+                        "event_id": f"event-{event_id}",
+                        "modules_total": len(module_list), "modules_completed": 0,
+                    })
+                    topology_links.append({"source": f"event-{event_id}", "target": vm_node_id})
 
                 vms.append({
                     "hostname": hostname,
