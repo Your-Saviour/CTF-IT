@@ -329,7 +329,7 @@
                 </label>
                 <div id="ef-vm-structured-editor" class="active">
                     <div class="vm-type-header">
-                        <span>Type Name</span><span>OS</span><span>Plan</span><span>Count</span><span>Role</span><span>Region</span><span></span>
+                        <span>Type Name</span><span>Base Type</span><span>Plan Override</span><span>Count</span><span>Role</span><span>Region</span><span></span>
                     </div>
                     <div id="ef-vm-type-rows"></div>
                     <button type="button" class="btn-add" id="ef-add-vm-type">+ Add VM Type</button>
@@ -916,18 +916,22 @@ document.getElementById('ef-add-tag').addEventListener('click', function() {
 var efVmJsonMode = false;
 var cachedVultrOS = null;
 var cachedVultrPlans = null;
+var cachedBaseTypes = null;
 
 function fetchVultrOptions() {
-    if (cachedVultrOS && cachedVultrPlans) return Promise.resolve();
+    if (cachedVultrOS && cachedVultrPlans && cachedBaseTypes) return Promise.resolve();
     return Promise.all([
         fetch('/admin/vultr/os').then(function(r) { return r.ok ? r.json() : {os: []}; }),
-        fetch('/admin/vultr/plans').then(function(r) { return r.ok ? r.json() : {plans: []}; })
+        fetch('/admin/vultr/plans').then(function(r) { return r.ok ? r.json() : {plans: []}; }),
+        fetch('/admin/base-types').then(function(r) { return r.ok ? r.json() : []; })
     ]).then(function(results) {
         cachedVultrOS = results[0].os || [];
         cachedVultrPlans = results[1].plans || [];
+        cachedBaseTypes = Array.isArray(results[2]) ? results[2] : [];
     }).catch(function() {
         cachedVultrOS = cachedVultrOS || [];
         cachedVultrPlans = cachedVultrPlans || [];
+        cachedBaseTypes = cachedBaseTypes || [];
     });
 }
 
@@ -943,34 +947,28 @@ function addVmTypeRow(key, spec) {
     nameInput.placeholder = 'e.g. ubuntu_target';
     nameInput.value = key || '';
 
-    // OS dropdown
-    var osSelect = document.createElement('select');
-    var osDefault = document.createElement('option');
-    osDefault.value = 'Ubuntu 24.04 LTS x64';
-    osDefault.textContent = 'Ubuntu 24.04 LTS x64';
-    osSelect.appendChild(osDefault);
-    if (cachedVultrOS) {
-        cachedVultrOS.forEach(function(o) {
-            if (o.name === 'Ubuntu 24.04 LTS x64') return;
+    // Base type dropdown
+    var baseTypeSelect = document.createElement('select');
+    var blankOpt = document.createElement('option');
+    blankOpt.value = '';
+    blankOpt.textContent = '— select base type —';
+    baseTypeSelect.appendChild(blankOpt);
+    if (cachedBaseTypes && cachedBaseTypes.length) {
+        cachedBaseTypes.forEach(function(b) {
             var opt = document.createElement('option');
-            opt.value = o.name;
-            opt.textContent = o.name;
-            osSelect.appendChild(opt);
+            opt.value = b.id;
+            opt.textContent = b.name;
+            opt.title = b.description || '';
+            baseTypeSelect.appendChild(opt);
         });
     }
-    osSelect.value = spec.os || 'Ubuntu 24.04 LTS x64';
+    baseTypeSelect.value = spec.base_type || '';
 
-    // Plan dropdown
-    var planSelect = document.createElement('select');
-    if (cachedVultrPlans) {
-        cachedVultrPlans.forEach(function(p) {
-            var opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.label || p.id;
-            planSelect.appendChild(opt);
-        });
-    }
-    if (spec.default_plan) planSelect.value = spec.default_plan;
+    // Plan override (optional text input)
+    var planInput = document.createElement('input');
+    planInput.type = 'text';
+    planInput.placeholder = 'Optional: override base type default';
+    planInput.value = spec.default_plan || '';
 
     // Count
     var countInput = document.createElement('input');
@@ -1003,8 +1001,8 @@ function addVmTypeRow(key, spec) {
     removeBtn.addEventListener('click', function() { row.remove(); });
 
     row.appendChild(nameInput);
-    row.appendChild(osSelect);
-    row.appendChild(planSelect);
+    row.appendChild(baseTypeSelect);
+    row.appendChild(planInput);
     row.appendChild(countInput);
     row.appendChild(roleSelect);
     row.appendChild(regionInput);
@@ -1018,15 +1016,18 @@ function buildVmQuotaFromForm() {
     rows.forEach(function(row) {
         var inputs = row.querySelectorAll('input');
         var selects = row.querySelectorAll('select');
+        // inputs: [0]=type_name, [1]=plan_override, [2]=count, [3]=region
+        // selects: [0]=base_type, [1]=role
         var key = inputs[0].value.trim().replace(/\s+/g, '_');
         if (!key) return;
         var spec = {
-            os: selects[0].value,
-            default_plan: selects[1].value,
-            count: parseInt(inputs[1].value) || 1,
-            role: selects[2].value,
+            base_type: selects[0].value,
+            count: parseInt(inputs[2].value) || 1,
+            role: selects[1].value,
         };
-        var region = inputs[2].value.trim();
+        var planOverride = inputs[1].value.trim();
+        if (planOverride) spec.default_plan = planOverride;
+        var region = inputs[3].value.trim();
         if (region) spec.region = region;
         vmQuota[key] = spec;
     });

@@ -204,6 +204,10 @@
                 <span class="detail-label">VM Type</span>
                 <span class="detail-value" id="ci-vmtype">—</span>
             </div>
+            <div class="detail-row" id="ci-basetype-row" style="display:none;">
+                <span class="detail-label">Base Type</span>
+                <span class="detail-value" id="ci-basetype">—</span>
+            </div>
         </div>
         <div class="detail-row">
             <span class="detail-label">Agent</span>
@@ -429,6 +433,10 @@ function renderVM(data) {
     if (data.vm_type) {
         document.getElementById('ci-vmtype').textContent = data.vm_type;
         document.getElementById('ci-vmtype-row').style.display = 'flex';
+    }
+    if (data.base_type) {
+        document.getElementById('ci-basetype').textContent = data.base_type;
+        document.getElementById('ci-basetype-row').style.display = 'flex';
     }
 
     var sshCmd = data.ip_address

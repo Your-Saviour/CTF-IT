@@ -666,6 +666,25 @@ async def stop_event(event_id: int, request: Request, db: Session = Depends(get_
     return {"status": "stopped"}
 
 
+@router.get("/base-types")
+async def get_base_types(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    from builder.base_loader import load_all_bases
+    bases = [b for b in load_all_bases() if not b.disabled]
+    return [
+        {
+            "id": b.id,
+            "name": b.name,
+            "description": b.description,
+            "default_plan": b.default_plan,
+        }
+        for b in bases
+    ]
+
+
 @router.delete("/events/{event_id}")
 async def delete_event(event_id: int, request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
