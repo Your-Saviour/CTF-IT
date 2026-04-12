@@ -3,6 +3,7 @@
 import pytest
 
 from builder.attack_tree import (
+    GOAL_PHASE,
     INFRASTRUCTURE_PHASE,
     TACTIC_PHASE,
     AttackTree,
@@ -507,3 +508,87 @@ class TestEdgeCases:
         m = _mod("v1", requires=["v1"], caldera=_caldera("initial-access"))
         tree = build_attack_tree([m])
         assert "v1" in tree.nodes
+
+
+class TestGoalNodes:
+    def test_goal_module_becomes_terminal_node(self):
+        """A goal module with caldera metadata is included as a phase-8 node."""
+        modules = [
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("g1", type="goal", caldera=_caldera("impact")),
+        ]
+        tree = build_attack_tree(modules)
+        assert "g1" in tree.nodes
+        assert tree.nodes["g1"].phase == GOAL_PHASE
+        assert tree.nodes["g1"].is_goal is True
+
+    def test_goal_node_is_terminal(self):
+        """Goal nodes have no outgoing edges."""
+        modules = [
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("g1", type="goal", caldera=_caldera("impact")),
+        ]
+        tree = build_attack_tree(modules)
+        outgoing = [t for s, t, _ in tree.edges if s == "g1"]
+        assert outgoing == []
+
+    def test_attack_nodes_connect_to_goal(self):
+        """Attack nodes at the highest phase connect to goal nodes."""
+        modules = [
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("priv", caldera=_caldera("privilege-escalation")),
+            _mod("g1", type="goal", caldera=_caldera("impact")),
+        ]
+        tree = build_attack_tree(modules)
+        edges_to_goal = [(s, t) for s, t, _ in tree.edges if t == "g1"]
+        assert len(edges_to_goal) > 0
+
+    def test_paths_terminate_at_goal(self):
+        """Extracted paths end at goal nodes when goals are present."""
+        modules = [
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("g1", type="goal", caldera=_caldera("impact")),
+        ]
+        tree = build_attack_tree(modules)
+        assert len(tree.paths) > 0
+        for path in tree.paths:
+            last = path[-1]
+            assert tree.nodes[last].is_goal is True
+
+    def test_multiple_goals_reachable_from_same_path(self):
+        """Multiple goal nodes can be reached from the same attack chain."""
+        modules = [
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("g1", type="goal", caldera=_caldera("impact")),
+            _mod("g2", type="goal", caldera=_caldera("impact")),
+        ]
+        tree = build_attack_tree(modules)
+        goal_nodes_in_paths = {
+            path[-1] for path in tree.paths
+            if tree.nodes[path[-1]].is_goal
+        }
+        assert "g1" in goal_nodes_in_paths
+        assert "g2" in goal_nodes_in_paths
+
+    def test_goal_requires_app_pulls_infra(self):
+        """Goal with requires on an app pulls in the app as infrastructure."""
+        modules = [
+            _mod("app", type="application_external"),
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("g1", type="goal", caldera=_caldera("impact"), requires=["app"]),
+        ]
+        tree = build_attack_tree(modules)
+        assert "app" in tree.nodes
+        assert tree.nodes["app"].is_infrastructure is True
+
+    def test_goal_in_serialize_tree_includes_is_goal(self):
+        """serialize_tree() includes is_goal flag on goal nodes."""
+        modules = [
+            _mod("init", caldera=_caldera("initial-access")),
+            _mod("g1", type="goal", caldera=_caldera("impact")),
+        ]
+        tree = build_attack_tree(modules)
+        data = serialize_tree(tree)
+        goal_node = next(n for n in data["nodes"] if n["id"] == "g1")
+        assert goal_node["is_goal"] is True
+        assert goal_node["phase"] == GOAL_PHASE
