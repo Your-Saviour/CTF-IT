@@ -1,0 +1,44 @@
+id: ubuntu_24_server
+name: Ubuntu 24.04 LTS Server
+description: Base Ubuntu 24.04 LTS server image with essential system packages, SSH configured, and systemd enabled for container/VM deployments.
+os: "Ubuntu 24.04 LTS x64"
+default_plan: vc2-1c-2gb
+packages:
+  - systemd
+  - systemd-sysv
+  - dbus
+  - openssh-server
+  - sudo
+  - curl
+  - python3
+  - python3-pip
+  - net-tools
+  - iproute2
+  - passwd
+  - procps
+  - iptables
+  - ufw
+  - vim
+  - nano
+  - wget
+  - cron
+  - rsyslog
+  - man-db
+  - ca-certificates
+  - unzip
+  - tar
+  - gzip
+  - git
+  - findutils
+  - apt-utils
+  - lsof
+  - tcpdump
+  - nmap
+  - file
+  - less
+  - whois
+  - dnsutils
+  - logrotate
+steps:
+  - run: setup_base.sh
+disabled: false
