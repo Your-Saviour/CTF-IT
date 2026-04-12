@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
                 "EVENT_QUOTA",
                 '{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}',
             )
-            db.add(Event(name="Default CTF Event", quota=quota, status="draft"))
+            db.add(Event(name="Default CTF Event", quota=quota, status="open"))
             db.commit()
     finally:
         db.close()
