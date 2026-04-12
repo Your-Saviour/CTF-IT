@@ -751,12 +751,18 @@ function destroyVultrVM() {
 
 // ── Provisioning ─────────────────────────────────────────────────────────────
 
-var PROVISION_STEPS = [
-    {key: 'generating_playbook',   label: 'Generating playbook'},
-    {key: 'configuring_semaphore', label: 'Configuring Semaphore'},
-    {key: 'running_playbook',      label: 'Running playbook'},
-    {key: 'completed',             label: 'Completed'},
-];
+function buildProvisionSteps() {
+    var steps = [];
+    if (vmData && vmData.base_type) {
+        steps.push({key: 'generating_base_playbook', label: 'Generating base setup'});
+        steps.push({key: 'running_base_playbook',    label: 'Running base setup'});
+    }
+    steps.push({key: 'generating_playbook',   label: 'Generating module playbook'});
+    steps.push({key: 'configuring_semaphore', label: 'Configuring Semaphore'});
+    steps.push({key: 'running_playbook',      label: 'Running module playbook'});
+    steps.push({key: 'completed',             label: 'Completed'});
+    return steps;
+}
 
 function startProvision() {
     if (!confirm('Provision this VM? Assigned modules will be deployed via Ansible.')) return;
@@ -828,6 +834,7 @@ function pollProvisionStatus() {
 }
 
 function renderProvisionSteps(currentStep, vmStatus) {
+    var PROVISION_STEPS = buildProvisionSteps();
     var container = document.getElementById('provision-steps');
     var isFailed = (vmStatus === 'failed' && currentStep === 'failed');
     var currentIdx = -1;

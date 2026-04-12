@@ -1013,13 +1013,20 @@ function addVmTypeRow(key, spec) {
 function buildVmQuotaFromForm() {
     var vmQuota = {};
     var rows = document.querySelectorAll('#ef-vm-type-rows .vm-type-row');
+    var valid = true;
     rows.forEach(function(row) {
+        if (!valid) return;
         var inputs = row.querySelectorAll('input');
         var selects = row.querySelectorAll('select');
         // inputs: [0]=type_name, [1]=plan_override, [2]=count, [3]=region
         // selects: [0]=base_type, [1]=role
         var key = inputs[0].value.trim().replace(/\s+/g, '_');
         if (!key) return;
+        if (!selects[0].value) {
+            alert('Please select a base type for all VM types.');
+            valid = false;
+            return;
+        }
         var spec = {
             base_type: selects[0].value,
             count: parseInt(inputs[2].value) || 1,
@@ -1031,6 +1038,7 @@ function buildVmQuotaFromForm() {
         if (region) spec.region = region;
         vmQuota[key] = spec;
     });
+    if (!valid) return null;
     return vmQuota;
 }
 
@@ -1054,6 +1062,7 @@ document.getElementById('ef-vm-mode-toggle').addEventListener('click', function(
 
     if (efVmJsonMode) {
         var vmQuota = buildVmQuotaFromForm();
+        if (vmQuota === null) { efVmJsonMode = false; return; }
         document.getElementById('ef-vm-quota-json').value = JSON.stringify(vmQuota, null, 2);
         structEl.classList.remove('active');
         jsonEl.classList.add('active');
@@ -1185,6 +1194,7 @@ document.getElementById('event-form').addEventListener('submit', function(e) {
         }
     } else {
         vmQuota = buildVmQuotaFromForm();
+        if (vmQuota === null) return;
     }
 
     var eventId = document.getElementById('ef-id').value;

@@ -1367,14 +1367,17 @@ def _provision_event_vms(event_id: int) -> None:
                 default_plan = vm_spec.get("default_plan", "vc2-1c-1gb")
                 region = vm_spec.get("region") or VULTR_DEFAULT_REGION
 
+                base_type_id = vm_spec.get("base_type")
+                loaded_base_type = load_base_type(base_type_id) if base_type_id else None
+
                 for i in range(count):
                     hostname = f"{team.name}-{vm_type_key}-{i + 1}"
                     vm = VM(
                         hostname=hostname,
-                        os=vm_spec.get("os", "Ubuntu 24.04 LTS x64"),
+                        os=loaded_base_type.os if loaded_base_type else "Ubuntu 24.04 LTS x64",
                         status="creating",
                         vm_type=vm_type_key,
-                        base_type=vm_spec.get("base_type"),
+                        base_type=base_type_id,
                         vultr_plan=default_plan,
                         vultr_region=region,
                         team_id=team.id,
@@ -1389,7 +1392,7 @@ def _provision_event_vms(event_id: int) -> None:
 
                     if role == "target":
                         # Select modules for this VM
-                        selected = select_modules(module_quota, library, base_type_id=vm_spec.get("base_type"))
+                        selected = select_modules(module_quota, library, base_type_id=base_type_id)
                         for mod in selected:
                             db.add(VMModule(
                                 vm_id=vm.id,
@@ -1400,8 +1403,6 @@ def _provision_event_vms(event_id: int) -> None:
                             ))
                         # Size the plan based on module requirements
                         if available_plans:
-                            base_type_id = vm_spec.get("base_type")
-                            loaded_base_type = load_base_type(base_type_id) if base_type_id else None
                             if loaded_base_type is not None:
                                 sized_plan = plan_for_vm(
                                     base_type=loaded_base_type,
@@ -1412,7 +1413,7 @@ def _provision_event_vms(event_id: int) -> None:
                                 if sized_plan != vm.vultr_plan:
                                     vm.vultr_plan = sized_plan
                             else:
-                                _log.warning(f"VM {vm.hostname}: no base_type set, skipping plan sizing (using default_plan from vm_quota)")
+                                _log.warning("VM %s: no base_type set, skipping plan sizing (using default_plan from vm_quota)", vm.hostname)
 
                     db.commit()
                     vm_ids.append(vm.id)
