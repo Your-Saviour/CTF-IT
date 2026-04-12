@@ -40,12 +40,24 @@ def _parse_steps(data: dict) -> list[Step]:
     return []
 
 
+def _default_stage(module_type: str) -> Optional[str]:
+    """Return the default stage for a module type.
+
+    vulnerability/payload: "preapplied" (can be overridden to "caldera")
+    goal: None (goals don't have a stage — they are always red-team objectives)
+    all others: None
+    """
+    if module_type in ("vulnerability", "payload"):
+        return "preapplied"
+    return None
+
+
 @dataclass
 class Module:
     id: str
     name: str
     description: str
-    type: str  # "vulnerability", "hardening", "payload", "application_external", or "application_internal"
+    type: str  # "vulnerability", "hardening", "payload", "application_external", "application_internal", or "goal"
     difficulty: str  # "easy", "medium", "hard"
     points: int
     category: str
@@ -63,6 +75,18 @@ class Module:
     min_ram_mb: int = 0
     min_vcpu: int = 0
     supported_bases: list[str] = field(default_factory=list)
+    # Stage: "preapplied" (blue team sees + fixes) or "caldera" (red team exploits).
+    # Defaults via _default_stage(); None for types where stage doesn't apply.
+    # When stage is None, __post_init__ fills in the type-based default.
+    stage: Optional[str] = None
+    # Goal-specific scoring fields (only meaningful when type == "goal")
+    red_points: int = 0
+    defend_points: int = 0
+    revert_verification: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.stage is None:
+            self.stage = _default_stage(self.type)
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
@@ -73,11 +97,15 @@ def load_all_modules() -> list[Module]:
     for yaml_path in sorted(MODULES_DIR.rglob("*.yaml")):
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
+        module_type = data["type"]
+        # Stage: explicit YAML value takes precedence; fall back to type default
+        raw_stage = data.get("stage")
+        stage = raw_stage if raw_stage is not None else _default_stage(module_type)
         modules.append(Module(
             id=data["id"],
             name=data["name"],
             description=data["description"],
-            type=data["type"],
+            type=module_type,
             difficulty=data["difficulty"],
             points=data["points"],
             category=data["category"],
@@ -95,5 +123,9 @@ def load_all_modules() -> list[Module]:
             min_ram_mb=data.get("min_ram_mb", 0),
             min_vcpu=data.get("min_vcpu", 0),
             supported_bases=data.get("supported_bases", []),
+            stage=stage,
+            red_points=data.get("red_points", 0),
+            defend_points=data.get("defend_points", 0),
+            revert_verification=data.get("revert_verification", {}),
         ))
     return modules
