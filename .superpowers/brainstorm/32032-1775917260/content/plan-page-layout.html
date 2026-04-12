@@ -1,0 +1,88 @@
+<h2>Event Plan Preview — Page Layout</h2>
+<p class="subtitle">Dedicated page at /admin/events/{id}/plan</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Top Summary + Expandable Cards</h3>
+      <p>Best for scan-then-drill-down workflow</p>
+      <div style="background: #0a0b10; border: 1px solid #1a1d2e; border-radius: 8px; padding: 16px; margin-top: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8892b0;">
+        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+          <div style="flex:1; background: #111320; border: 1px solid #00e5ff33; border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="color: #00e5ff; font-size: 20px; font-weight: bold;">12</div>
+            <div style="font-size: 10px; color: #5a6080;">Total VMs</div>
+          </div>
+          <div style="flex:1; background: #111320; border: 1px solid #00e5ff33; border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="color: #00e5ff; font-size: 20px; font-weight: bold;">3</div>
+            <div style="font-size: 10px; color: #5a6080;">Teams</div>
+          </div>
+          <div style="flex:1; background: #111320; border: 1px solid #00e5ff33; border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="color: #00e5ff; font-size: 20px; font-weight: bold;">$48/mo</div>
+            <div style="font-size: 10px; color: #5a6080;">Est. Cost</div>
+          </div>
+          <div style="flex:1; background: #111320; border: 1px solid #00e5ff33; border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="color: #00e5ff; font-size: 20px; font-weight: bold;">36</div>
+            <div style="font-size: 10px; color: #5a6080;">Modules</div>
+          </div>
+        </div>
+        <div style="border: 1px solid #1a1d2e; border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div><span style="color: #00e5ff;">▸</span> <strong style="color: #ccd6f6;">ubuntu_target</strong> <span style="color: #5a6080;">— vc2-2c-4gb • Ubuntu 24.04 • target</span></div>
+            <div style="color: #5a6080; font-size: 10px;">×3/team = 9 VMs</div>
+          </div>
+        </div>
+        <div style="border: 1px solid #00e5ff44; border-radius: 6px; padding: 10px; margin-bottom: 8px; background: #111320;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div><span style="color: #00e5ff;">▾</span> <strong style="color: #ccd6f6;">red_team</strong> <span style="color: #5a6080;">— vc2-2c-4gb • Ubuntu 24.04 • attacker</span></div>
+            <div style="color: #5a6080; font-size: 10px;">×1/team = 3 VMs</div>
+          </div>
+          <div style="padding-left: 20px; color: #5a6080; font-size: 11px;">No modules (attacker role)</div>
+        </div>
+        <div style="text-align: center; margin-top: 12px;">
+          <span style="background: #00e5ff22; color: #00e5ff; padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer;">🎲 Re-roll Modules</span>
+          <span style="background: #1a1d2e; color: #8892b0; padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; margin-left: 8px;">Toggle Team View</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Two-Panel: Config Left, Preview Right</h3>
+      <p>Best for the sandbox/tweaking workflow</p>
+      <div style="background: #0a0b10; border: 1px solid #1a1d2e; border-radius: 8px; padding: 16px; margin-top: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8892b0;">
+        <div style="display: flex; gap: 12px;">
+          <div style="flex: 1; background: #111320; border: 1px solid #1a1d2e; border-radius: 6px; padding: 10px;">
+            <div style="color: #ccd6f6; font-weight: bold; margin-bottom: 8px; font-size: 11px;">QUOTA CONFIG</div>
+            <div style="font-size: 10px; margin-bottom: 6px;">
+              <span style="color: #5a6080;">Module Quota</span><br>
+              <span style="background: #0a0b10; display: block; padding: 4px 6px; border-radius: 3px; margin-top: 2px; border: 1px solid #1a1d2e;">{"vulnerability": {"easy": 2...}}</span>
+            </div>
+            <div style="font-size: 10px; margin-bottom: 6px;">
+              <span style="color: #5a6080;">VM Quota</span><br>
+              <span style="background: #0a0b10; display: block; padding: 4px 6px; border-radius: 3px; margin-top: 2px; border: 1px solid #1a1d2e;">{"ubuntu_target": {...}}</span>
+            </div>
+            <div style="text-align: center; margin-top: 8px;">
+              <span style="background: #00e5ff22; color: #00e5ff; padding: 3px 10px; border-radius: 4px; font-size: 10px;">Generate Preview</span>
+            </div>
+          </div>
+          <div style="flex: 1.5; background: #111320; border: 1px solid #1a1d2e; border-radius: 6px; padding: 10px;">
+            <div style="color: #ccd6f6; font-weight: bold; margin-bottom: 8px; font-size: 11px;">PLAN PREVIEW</div>
+            <div style="font-size: 10px; color: #5a6080; margin-bottom: 4px;">ubuntu_target (×3/team)</div>
+            <div style="padding-left: 8px; font-size: 10px; margin-bottom: 6px;">
+              <div>• ssh_weak_config <span style="color: #f5a623;">medium</span></div>
+              <div>• unpatched_sudo <span style="color: #ff5555;">hard</span></div>
+              <div>• world_readable_shadow <span style="color: #50fa7b;">easy</span></div>
+            </div>
+            <div style="font-size: 10px; color: #5a6080; margin-bottom: 4px;">red_team (×1/team)</div>
+            <div style="padding-left: 8px; font-size: 10px;">
+              <div style="color: #5a6080; font-style: italic;">No modules</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

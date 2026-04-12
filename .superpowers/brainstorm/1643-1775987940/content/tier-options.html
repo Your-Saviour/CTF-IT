@@ -1,0 +1,114 @@
+<h2>What should the tiers be?</h2>
+<p class="subtitle">All VMs appear flat within their tier — no sub-grouping or role separation</p>
+
+<div class="cards">
+  <div class="card" data-choice="two-tier" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px 24px;background:#0a0a0a;">
+      <svg viewBox="0 0 340 180" style="width:100%;font-family:monospace;">
+        <text x="6" y="16" fill="#555" font-size="9" letter-spacing="1">EVENT</text>
+        <line x1="0" y1="22" x2="340" y2="22" stroke="#1a1a1a" stroke-width="1"/>
+        <rect x="125" y="30" width="90" height="28" rx="6" fill="rgba(0,229,255,0.06)" stroke="#00e5ff" stroke-width="1.5"/>
+        <text x="170" y="49" text-anchor="middle" fill="#00e5ff" font-size="10">Spring CTF</text>
+
+        <line x1="0" y1="72" x2="340" y2="72" stroke="#1a1a1a" stroke-width="1"/>
+        <text x="6" y="86" fill="#555" font-size="9" letter-spacing="1">VMs</text>
+
+        <rect x="18" y="92" width="62" height="32" rx="5" fill="rgba(0,230,118,0.06)" stroke="#00e676" stroke-width="1.5"/>
+        <text x="49" y="113" text-anchor="middle" fill="#ccc" font-size="9">vm-01</text>
+        <rect x="95" y="92" width="62" height="32" rx="5" fill="rgba(0,230,118,0.06)" stroke="#00e676" stroke-width="1.5"/>
+        <text x="126" y="113" text-anchor="middle" fill="#ccc" font-size="9">vm-02</text>
+        <rect x="172" y="92" width="62" height="32" rx="5" fill="rgba(255,200,0,0.06)" stroke="#ffc800" stroke-width="1.5"/>
+        <text x="203" y="113" text-anchor="middle" fill="#ccc" font-size="9">web-01</text>
+        <rect x="249" y="92" width="62" height="32" rx="5" fill="rgba(255,23,68,0.06)" stroke="#ff1744" stroke-width="1.5"/>
+        <text x="280" y="113" text-anchor="middle" fill="#ccc" font-size="9">kali-01</text>
+
+        <line x1="170" y1="58" x2="49" y2="92" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="58" x2="126" y2="92" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="58" x2="203" y2="92" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="58" x2="280" y2="92" stroke="#333" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="card-body">
+      <h3>Event → all VMs flat</h3>
+      <p>Two tiers. Event on top, all VMs in one row below regardless of role. Simplest possible structure.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="three-tier-wan" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px 24px;background:#0a0a0a;">
+      <svg viewBox="0 0 340 220" style="width:100%;font-family:monospace;">
+        <text x="6" y="16" fill="#555" font-size="9" letter-spacing="1">INTERNET / WAN</text>
+        <line x1="0" y1="22" x2="340" y2="22" stroke="#1a1a1a" stroke-width="1"/>
+        <circle cx="170" cy="42" r="14" fill="rgba(100,100,100,0.08)" stroke="#555" stroke-width="1.5"/>
+        <text x="170" y="46" text-anchor="middle" fill="#777" font-size="9">WAN</text>
+
+        <line x1="0" y1="68" x2="340" y2="68" stroke="#1a1a1a" stroke-width="1"/>
+        <text x="6" y="82" fill="#555" font-size="9" letter-spacing="1">EVENT</text>
+        <rect x="125" y="88" width="90" height="28" rx="6" fill="rgba(0,229,255,0.06)" stroke="#00e5ff" stroke-width="1.5"/>
+        <text x="170" y="107" text-anchor="middle" fill="#00e5ff" font-size="10">Spring CTF</text>
+        <line x1="170" y1="56" x2="170" y2="88" stroke="#333" stroke-width="1"/>
+
+        <line x1="0" y1="128" x2="340" y2="128" stroke="#1a1a1a" stroke-width="1"/>
+        <text x="6" y="142" fill="#555" font-size="9" letter-spacing="1">VMs</text>
+
+        <rect x="18" y="148" width="62" height="32" rx="5" fill="rgba(0,230,118,0.06)" stroke="#00e676" stroke-width="1.5"/>
+        <text x="49" y="169" text-anchor="middle" fill="#ccc" font-size="9">vm-01</text>
+        <rect x="95" y="148" width="62" height="32" rx="5" fill="rgba(0,230,118,0.06)" stroke="#00e676" stroke-width="1.5"/>
+        <text x="126" y="169" text-anchor="middle" fill="#ccc" font-size="9">vm-02</text>
+        <rect x="172" y="148" width="62" height="32" rx="5" fill="rgba(255,200,0,0.06)" stroke="#ffc800" stroke-width="1.5"/>
+        <text x="203" y="169" text-anchor="middle" fill="#ccc" font-size="9">web-01</text>
+        <rect x="249" y="148" width="62" height="32" rx="5" fill="rgba(255,23,68,0.06)" stroke="#ff1744" stroke-width="1.5"/>
+        <text x="280" y="169" text-anchor="middle" fill="#ccc" font-size="9">kali-01</text>
+
+        <line x1="170" y1="116" x2="49" y2="148" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="116" x2="126" y2="148" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="116" x2="203" y2="148" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="116" x2="280" y2="148" stroke="#333" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="card-body">
+      <h3>WAN → Event → all VMs flat</h3>
+      <p>Three tiers. A generic WAN/internet node at top, then event, then all VMs flat. More closely mirrors a real network diagram with an upstream connection.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="attacker-bottom" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px 24px;background:#0a0a0a;">
+      <svg viewBox="0 0 340 230" style="width:100%;font-family:monospace;">
+        <text x="6" y="16" fill="#555" font-size="9" letter-spacing="1">EVENT</text>
+        <line x1="0" y1="22" x2="340" y2="22" stroke="#1a1a1a" stroke-width="1"/>
+        <rect x="125" y="28" width="90" height="28" rx="6" fill="rgba(0,229,255,0.06)" stroke="#00e5ff" stroke-width="1.5"/>
+        <text x="170" y="47" text-anchor="middle" fill="#00e5ff" font-size="10">Spring CTF</text>
+
+        <line x1="0" y1="70" x2="340" y2="70" stroke="#1a1a1a" stroke-width="1"/>
+        <text x="6" y="84" fill="#555" font-size="9" letter-spacing="1">VMs</text>
+
+        <rect x="40" y="90" width="62" height="32" rx="5" fill="rgba(0,230,118,0.06)" stroke="#00e676" stroke-width="1.5"/>
+        <text x="71" y="111" text-anchor="middle" fill="#ccc" font-size="9">vm-01</text>
+        <rect x="120" y="90" width="62" height="32" rx="5" fill="rgba(0,230,118,0.06)" stroke="#00e676" stroke-width="1.5"/>
+        <text x="151" y="111" text-anchor="middle" fill="#ccc" font-size="9">vm-02</text>
+        <rect x="200" y="90" width="62" height="32" rx="5" fill="rgba(255,200,0,0.06)" stroke="#ffc800" stroke-width="1.5"/>
+        <text x="231" y="111" text-anchor="middle" fill="#ccc" font-size="9">web-01</text>
+
+        <line x1="170" y1="56" x2="71" y2="90" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="56" x2="151" y2="90" stroke="#333" stroke-width="1"/>
+        <line x1="170" y1="56" x2="231" y2="90" stroke="#333" stroke-width="1"/>
+
+        <line x1="0" y1="138" x2="340" y2="138" stroke="#1a1a1a" stroke-width="1"/>
+        <text x="6" y="152" fill="#ff1744" font-size="9" letter-spacing="1" opacity="0.7">ATTACKER</text>
+
+        <rect x="125" y="158" width="90" height="32" rx="5" fill="rgba(255,23,68,0.06)" stroke="#ff1744" stroke-width="1.5"/>
+        <text x="170" y="179" text-anchor="middle" fill="#ccc" font-size="9">kali-01</text>
+
+        <!-- Dashed attack lines from attacker up to VMs -->
+        <line x1="170" y1="158" x2="71" y2="122" stroke="#ff1744" stroke-width="1" stroke-dasharray="4 3" opacity="0.4"/>
+        <line x1="170" y1="158" x2="151" y2="122" stroke="#ff1744" stroke-width="1" stroke-dasharray="4 3" opacity="0.4"/>
+        <line x1="170" y1="158" x2="231" y2="122" stroke="#ff1744" stroke-width="1" stroke-dasharray="4 3" opacity="0.4"/>
+      </svg>
+    </div>
+    <div class="card-body">
+      <h3>Event → VMs → Attacker separate</h3>
+      <p>Attacker VMs get their own tier below targets, with dashed "attack path" lines going up. Visually emphasizes the red team / blue team dynamic.</p>
+    </div>
+  </div>
+</div>

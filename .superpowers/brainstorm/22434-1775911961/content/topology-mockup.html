@@ -1,0 +1,123 @@
+<h2>VM Network Topology — Page Layout</h2>
+<p class="subtitle">How the /admin/topology page would look with D3.js force-directed graph</p>
+
+<div class="mockup">
+  <div class="mockup-header">Admin → Network Topology</div>
+  <div class="mockup-body" style="background: #0a0e1a; padding: 0; min-height: 500px; position: relative; overflow: hidden;">
+
+    <!-- Top toolbar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid rgba(0, 255, 255, 0.15); background: rgba(10, 14, 26, 0.95);">
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <span style="color: #00ffff; font-family: monospace; font-size: 14px; font-weight: bold;">NETWORK TOPOLOGY</span>
+        <select style="background: #1a1f2e; border: 1px solid rgba(0, 255, 255, 0.3); color: #e0e0e0; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+          <option>All Events</option>
+          <option>Event: Spring CTF 2026</option>
+          <option>Event: Red Team Exercise</option>
+        </select>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <span style="background: rgba(0, 255, 255, 0.1); border: 1px solid rgba(0, 255, 255, 0.3); padding: 4px 10px; border-radius: 4px; font-size: 11px; color: #00ffff; font-family: monospace;">ZOOM: 100%</span>
+        <span style="background: rgba(0, 255, 255, 0.1); border: 1px solid rgba(0, 255, 255, 0.3); padding: 4px 10px; border-radius: 4px; font-size: 11px; color: #00ffff; font-family: monospace;">⟳ LIVE</span>
+      </div>
+    </div>
+
+    <!-- Graph area -->
+    <div style="position: relative; min-height: 420px; padding: 20px;">
+
+      <!-- Event node (center) -->
+      <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100px; height: 100px; border-radius: 50%; background: radial-gradient(circle, rgba(0, 255, 255, 0.2), transparent); border: 2px solid #00ffff; display: flex; align-items: center; justify-content: center; flex-direction: column; box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);">
+        <span style="font-size: 10px; color: #00ffff; font-family: monospace; text-transform: uppercase;">Event</span>
+        <span style="font-size: 11px; color: #fff; font-family: monospace; margin-top: 2px;">Spring CTF</span>
+      </div>
+
+      <!-- Team 1 (top-left cluster) -->
+      <div style="position: absolute; top: 80px; left: 80px;">
+        <!-- Team hub -->
+        <div style="width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 180, 0, 0.15), transparent); border: 2px solid #ffb400; display: flex; align-items: center; justify-content: center; flex-direction: column; box-shadow: 0 0 15px rgba(255, 180, 0, 0.2);">
+          <span style="font-size: 9px; color: #ffb400; font-family: monospace;">TEAM</span>
+          <span style="font-size: 10px; color: #fff; font-family: monospace;">Alpha</span>
+        </div>
+        <!-- VM nodes around team -->
+        <div style="position: absolute; top: -30px; left: 80px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 255, 100, 0.1); border: 2px solid #00ff64; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(0, 255, 100, 0.3);">
+          <span style="font-size: 8px; color: #00ff64; font-family: monospace;">vm-01</span>
+        </div>
+        <div style="position: absolute; top: 20px; left: 95px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 255, 100, 0.1); border: 2px solid #00ff64; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(0, 255, 100, 0.3);">
+          <span style="font-size: 8px; color: #00ff64; font-family: monospace;">vm-02</span>
+        </div>
+        <div style="position: absolute; top: 70px; left: 80px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 60, 60, 0.1); border: 2px solid #ff3c3c; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(255, 60, 60, 0.3);">
+          <span style="font-size: 8px; color: #ff3c3c; font-family: monospace;">vm-03</span>
+        </div>
+      </div>
+
+      <!-- Team 2 (top-right cluster) -->
+      <div style="position: absolute; top: 70px; right: 100px;">
+        <div style="width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, rgba(180, 0, 255, 0.15), transparent); border: 2px solid #b400ff; display: flex; align-items: center; justify-content: center; flex-direction: column; box-shadow: 0 0 15px rgba(180, 0, 255, 0.2);">
+          <span style="font-size: 9px; color: #b400ff; font-family: monospace;">TEAM</span>
+          <span style="font-size: 10px; color: #fff; font-family: monospace;">Bravo</span>
+        </div>
+        <div style="position: absolute; top: -25px; right: -60px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 255, 100, 0.1); border: 2px solid #00ff64; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(0, 255, 100, 0.3);">
+          <span style="font-size: 8px; color: #00ff64; font-family: monospace;">vm-04</span>
+        </div>
+        <div style="position: absolute; top: 50px; right: -70px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 200, 0, 0.1); border: 2px solid #ffc800; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(255, 200, 0, 0.3);">
+          <span style="font-size: 8px; color: #ffc800; font-family: monospace;">vm-05</span>
+        </div>
+      </div>
+
+      <!-- Team 3 (bottom cluster) -->
+      <div style="position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);">
+        <div style="width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, rgba(0, 200, 255, 0.15), transparent); border: 2px solid #00c8ff; display: flex; align-items: center; justify-content: center; flex-direction: column; box-shadow: 0 0 15px rgba(0, 200, 255, 0.2);">
+          <span style="font-size: 9px; color: #00c8ff; font-family: monospace;">TEAM</span>
+          <span style="font-size: 10px; color: #fff; font-family: monospace;">Charlie</span>
+        </div>
+        <div style="position: absolute; top: -20px; left: -60px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 255, 100, 0.1); border: 2px solid #00ff64; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(0, 255, 100, 0.3);">
+          <span style="font-size: 8px; color: #00ff64; font-family: monospace;">vm-06</span>
+        </div>
+        <div style="position: absolute; top: -20px; right: -60px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0, 255, 100, 0.1); border: 2px solid #00ff64; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 8px rgba(0, 255, 100, 0.3);">
+          <span style="font-size: 8px; color: #00ff64; font-family: monospace;">vm-07</span>
+        </div>
+      </div>
+
+      <!-- Connection lines (simplified representation) -->
+      <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0.3;">
+        <line x1="50%" y1="50%" x2="25%" y2="30%" stroke="#ffb400" stroke-width="1" stroke-dasharray="4,4"/>
+        <line x1="50%" y1="50%" x2="75%" y2="28%" stroke="#b400ff" stroke-width="1" stroke-dasharray="4,4"/>
+        <line x1="50%" y1="50%" x2="50%" y2="80%" stroke="#00c8ff" stroke-width="1" stroke-dasharray="4,4"/>
+      </svg>
+
+      <!-- Legend -->
+      <div style="position: absolute; bottom: 12px; right: 16px; background: rgba(10, 14, 26, 0.9); border: 1px solid rgba(0, 255, 255, 0.2); border-radius: 6px; padding: 10px 14px; font-size: 10px; font-family: monospace;">
+        <div style="color: #888; margin-bottom: 6px; text-transform: uppercase; font-size: 9px;">Status</div>
+        <div style="display: flex; gap: 12px;">
+          <span><span style="color: #00ff64;">●</span> Active</span>
+          <span><span style="color: #ffc800;">●</span> Creating</span>
+          <span><span style="color: #ff3c3c;">●</span> Failed</span>
+          <span><span style="color: #888;">●</span> Stopped</span>
+        </div>
+      </div>
+
+      <!-- Context menu mockup (floating) -->
+      <div style="position: absolute; top: 85px; left: 220px; background: #1a1f2e; border: 1px solid rgba(0, 255, 255, 0.3); border-radius: 6px; padding: 4px 0; font-size: 11px; font-family: monospace; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5); min-width: 160px;">
+        <div style="padding: 6px 14px; color: #00ffff; border-bottom: 1px solid rgba(255,255,255,0.05);">vm-03 (failed)</div>
+        <div style="padding: 6px 14px; color: #e0e0e0; cursor: pointer;">▶ View Details</div>
+        <div style="padding: 6px 14px; color: #e0e0e0; cursor: pointer;">⟳ Re-provision</div>
+        <div style="padding: 6px 14px; color: #e0e0e0; cursor: pointer;">📋 Assign Modules</div>
+        <div style="padding: 6px 14px; color: #e0e0e0; cursor: pointer;">📦 Export Playbook</div>
+        <div style="padding: 6px 14px; color: #ff3c3c; cursor: pointer; border-top: 1px solid rgba(255,255,255,0.05);">🗑 Destroy</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 1.5rem;">
+  <h3>Design Summary</h3>
+  <ul style="color: #ccc; font-size: 13px; line-height: 1.8;">
+    <li><strong>Hierarchy:</strong> Event (center) → Teams (mid-ring, colored) → VMs (outer, status-colored)</li>
+    <li><strong>Force layout:</strong> Teams cluster around their event, VMs cluster around their team</li>
+    <li><strong>Status:</strong> VM border color = status (green/amber/red/grey)</li>
+    <li><strong>Context menu:</strong> Right-click any node for quick actions</li>
+    <li><strong>Live polling:</strong> Every 5s, fetches VM status and updates node colors/positions</li>
+    <li><strong>Event filter:</strong> Dropdown to scope to a single event or show all</li>
+    <li><strong>Zoom/pan:</strong> D3 zoom behavior on the SVG canvas</li>
+  </ul>
+</div>

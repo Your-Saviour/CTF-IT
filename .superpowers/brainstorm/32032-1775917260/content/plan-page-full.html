@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Plan Preview Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #08090d;
+    color: #ccd6f6;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* Nav */
+  .nav {
+    background: #0a0b10;
+    border-bottom: 1px solid #1a1d2e;
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .nav-brand { color: #00e5ff; font-size: 14px; font-weight: bold; letter-spacing: 2px; }
+  .nav-sep { color: #1a1d2e; }
+  .nav-item { color: #8892b0; font-size: 12px; }
+  .nav-item.active { color: #ccd6f6; }
+  .back-btn {
+    margin-left: auto;
+    background: none;
+    border: 1px solid #1a1d2e;
+    color: #8892b0;
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+  }
+
+  /* Page header */
+  .page-header {
+    padding: 24px 28px 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .page-title { font-size: 22px; color: #ccd6f6; font-weight: bold; letter-spacing: 1px; }
+  .page-subtitle { color: #5a6080; font-size: 11px; margin-top: 4px; }
+  .header-actions { display: flex; gap: 8px; align-items: center; }
+
+  .btn {
+    padding: 7px 16px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .btn-primary {
+    background: #00e5ff22;
+    border-color: #00e5ff66;
+    color: #00e5ff;
+  }
+  .btn-secondary {
+    background: #1a1d2e;
+    border-color: #2a2d3e;
+    color: #8892b0;
+  }
+  .btn-success {
+    background: #3fb95022;
+    border-color: #3fb95066;
+    color: #3fb950;
+  }
+  .btn-warn {
+    background: #f5a62322;
+    border-color: #f5a62366;
+    color: #f5a623;
+  }
+
+  /* Quota drawer */
+  .quota-drawer {
+    margin: 20px 28px 0;
+    border: 1px solid #1a1d2e;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .quota-drawer-header {
+    background: #111320;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+  .quota-drawer-title { color: #8892b0; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+  .quota-drawer-body {
+    background: #0d0e1a;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .quota-label { color: #5a6080; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+  .quota-textarea {
+    width: 100%;
+    background: #0a0b10;
+    border: 1px solid #1a1d2e;
+    border-radius: 4px;
+    color: #8892b0;
+    font-family: inherit;
+    font-size: 11px;
+    padding: 8px;
+    resize: vertical;
+    min-height: 80px;
+  }
+  .quota-actions { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* Summary stats */
+  .stats-bar {
+    margin: 20px 28px 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+  .stat-card {
+    background: #111320;
+    border: 1px solid #1a1d2e;
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .stat-value { font-size: 24px; color: #00e5ff; font-weight: bold; }
+  .stat-label { font-size: 10px; color: #5a6080; margin-top: 3px; text-transform: uppercase; letter-spacing: 1px; }
+  .stat-card.warn .stat-value { color: #f5a623; }
+  .stat-card.green .stat-value { color: #3fb950; }
+
+  /* Preview badge */
+  .preview-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #f5a62311;
+    border: 1px solid #f5a62355;
+    color: #f5a623;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin: 16px 28px 0;
+  }
+  .preview-dot {
+    width: 6px; height: 6px;
+    background: #f5a623;
+    border-radius: 50%;
+    animation: pulse-dot 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+  }
+
+  /* Tabs */
+  .tabs {
+    margin: 20px 28px 0;
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #1a1d2e;
+  }
+  .tab {
+    padding: 10px 20px;
+    font-size: 12px;
+    color: #5a6080;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    user-select: none;
+    letter-spacing: 0.5px;
+  }
+  .tab.active {
+    color: #00e5ff;
+    border-bottom-color: #00e5ff;
+  }
+
+  /* Tab content */
+  .tab-content { padding: 20px 28px 40px; }
+
+  /* VM Type cards */
+  .vm-type-grid { display: flex; flex-direction: column; gap: 16px; }
+  .vm-type-card {
+    background: #111320;
+    border: 1px solid #1a1d2e;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .vm-type-header {
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    border-bottom: 1px solid #1a1d2e;
+  }
+  .vm-type-name { font-size: 14px; color: #ccd6f6; font-weight: bold; }
+  .vm-type-meta { font-size: 11px; color: #5a6080; margin-top: 3px; }
+  .vm-type-badges { display: flex; gap: 8px; align-items: center; }
+  .badge {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .badge-cyan { background: #00e5ff22; border: 1px solid #00e5ff44; color: #00e5ff; }
+  .badge-amber { background: #f5a62322; border: 1px solid #f5a62344; color: #f5a623; }
+  .badge-green { background: #3fb95022; border: 1px solid #3fb95044; color: #3fb950; }
+  .badge-gray { background: #1a1d2e; border: 1px solid #2a2d3e; color: #5a6080; }
+  .badge-red { background: #ff555522; border: 1px solid #ff555544; color: #ff5555; }
+
+  .vm-type-body { padding: 18px; }
+
+  /* Module list */
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 8px;
+    margin-top: 0;
+  }
+  .module-card {
+    background: #0d0e1a;
+    border: 1px solid #1a1d2e;
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .module-name { color: #ccd6f6; font-size: 11px; font-weight: bold; margin-bottom: 4px; }
+  .module-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .diff-easy { color: #3fb950; font-size: 10px; }
+  .diff-medium { color: #f5a623; font-size: 10px; }
+  .diff-hard { color: #ff5555; font-size: 10px; }
+  .module-type { color: #5a6080; font-size: 10px; }
+  .module-pts { color: #00e5ff; font-size: 10px; }
+
+  /* Team toggle */
+  .view-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    border: 1px solid #1a1d2e;
+    border-radius: 6px;
+    overflow: hidden;
+    width: fit-content;
+  }
+  .view-toggle-btn {
+    padding: 7px 18px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: #5a6080;
+    letter-spacing: 0.5px;
+  }
+  .view-toggle-btn.active { background: #00e5ff22; color: #00e5ff; }
+
+  /* Team breakdown */
+  .team-section { margin-bottom: 20px; }
+  .team-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1a1d2e;
+  }
+  .team-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .team-name { color: #ccd6f6; font-size: 13px; font-weight: bold; }
+  .team-vm-count { color: #5a6080; font-size: 11px; }
+  .vm-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #0d0e1a;
+    border: 1px solid #1a1d2e;
+    border-radius: 6px;
+    margin-bottom: 8px;
+  }
+  .vm-hostname { color: #ccd6f6; font-size: 12px; min-width: 160px; }
+  .vm-plan { color: #5a6080; font-size: 11px; min-width: 100px; }
+  .vm-modules-summary { color: #8892b0; font-size: 11px; }
+  .vm-status-projected {
+    background: #f5a62311;
+    border: 1px solid #f5a62344;
+    color: #f5a623;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-left: auto;
+  }
+
+  /* Topology panel */
+  .viz-panel {
+    background: #111320;
+    border: 1px solid #1a1d2e;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .viz-panel-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid #1a1d2e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .viz-panel-title { color: #8892b0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .viz-body {
+    padding: 24px;
+    min-height: 340px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* SVG topology mockup */
+  .topo-svg { width: 100%; max-width: 700px; height: 300px; }
+
+  /* Attack tree panel */
+  .attack-tree-panel {
+    background: #111320;
+    border: 1px solid #1a1d2e;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 16px;
+  }
+  .attack-tree-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid #1a1d2e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* AT node mockup */
+  .at-row { display: flex; gap: 0; align-items: flex-start; padding: 24px; overflow-x: auto; }
+  .at-phase-col { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 170px; }
+  .at-phase-label { font-size: 9px; color: #5a6080; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; text-align: center; }
+  .at-node {
+    width: 160px;
+    border: 1px dashed #1a1d2e;
+    border-radius: 6px;
+    padding: 9px 12px;
+    position: relative;
+  }
+  .at-node.infra { border-color: #2a2d3e; background: #0a0b10; }
+  .at-node.projected { border-color: #00e5ff44; background: #00e5ff08; }
+  .at-node.projected-hard { border-color: #ff555544; background: #ff555508; }
+  .at-node.projected-medium { border-color: #f5a62344; background: #f5a62308; }
+  .at-node-name { font-size: 11px; color: #ccd6f6; font-weight: bold; }
+  .at-node-tactic { font-size: 9px; color: #5a6080; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+  .at-connector { color: #2a2d3e; font-size: 20px; display: flex; align-items: center; padding: 0 4px; margin-top: 30px; }
+
+  .projected-watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-30deg);
+    font-size: 48px;
+    color: #f5a62308;
+    font-weight: bold;
+    pointer-events: none;
+    letter-spacing: 8px;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  /* selection indicator */
+  .selection-indicator {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #00e5ff22;
+    border: 1px solid #00e5ff55;
+    color: #00e5ff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 11px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<div class="nav">
+  <span class="nav-brand">CTF//PLATFORM</span>
+  <span class="nav-sep">|</span>
+  <span class="nav-item">Admin</span>
+  <span class="nav-sep">/</span>
+  <span class="nav-item">Events</span>
+  <span class="nav-sep">/</span>
+  <span class="nav-item active">Plan Preview</span>
+  <button class="back-btn">← Back to Admin</button>
+</div>
+
+<!-- Page header -->
+<div class="page-header">
+  <div>
+    <div class="page-title">PLAN PREVIEW — Autumn Breach 2026</div>
+    <div class="page-subtitle">Dry-run preview of VMs, modules, topology, and attack paths. Nothing is deployed.</div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-secondary">🎲 Re-roll Modules</button>
+    <button class="btn btn-warn">Edit Quota</button>
+    <button class="btn btn-success">▶ Start Event</button>
+  </div>
+</div>
+
+<!-- Preview badge -->
+<div class="preview-badge">
+  <div class="preview-dot"></div>
+  Preview mode — no resources provisioned
+</div>
+
+<!-- Stats bar -->
+<div class="stats-bar">
+  <div class="stat-card">
+    <div class="stat-value">12</div>
+    <div class="stat-label">Total VMs</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">3</div>
+    <div class="stat-label">Teams</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="stat-value">$62<span style="font-size:13px">/mo</span></div>
+    <div class="stat-label">Est. Cost</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-value">27</div>
+    <div class="stat-label">Modules (sample)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">4</div>
+    <div class="stat-label">Attack Paths</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active">VM Plan</div>
+  <div class="tab">Network Topology</div>
+  <div class="tab">Attack Paths</div>
+</div>
+
+<!-- Tab content: VM Plan (showing both views) -->
+<div class="tab-content">
+
+  <!-- View toggle -->
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <div class="view-toggle">
+      <button class="view-toggle-btn active">By VM Type</button>
+      <button class="view-toggle-btn">By Team</button>
+    </div>
+    <div style="color:#5a6080;font-size:11px;">Showing 1 random module sample per VM type — <span style="color:#00e5ff;cursor:pointer;">Re-roll</span> to regenerate</div>
+  </div>
+
+  <!-- === BY VM TYPE VIEW === -->
+  <div class="vm-type-grid">
+
+    <!-- Target VM type -->
+    <div class="vm-type-card">
+      <div class="vm-type-header">
+        <div>
+          <div class="vm-type-name">ubuntu_target</div>
+          <div class="vm-type-meta">Ubuntu 24.04 LTS x64 &nbsp;·&nbsp; vc2-2c-4gb (auto-sized) &nbsp;·&nbsp; ewr &nbsp;·&nbsp; 3 per team = 9 total</div>
+        </div>
+        <div class="vm-type-badges">
+          <span class="badge badge-cyan">target</span>
+          <span class="badge badge-amber">vc2-2c-4gb</span>
+          <span class="badge badge-green">9 modules</span>
+          <span style="color:#5a6080;font-size:16px;">▾</span>
+        </div>
+      </div>
+      <div class="vm-type-body">
+        <div style="font-size:10px; color:#5a6080; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;">Sample module assignment (one random draw — all 9 VMs may differ)</div>
+        <div class="module-grid">
+          <div class="module-card">
+            <div class="module-name">ssh_weak_config</div>
+            <div class="module-meta">
+              <span class="diff-medium">medium</span>
+              <span class="module-type">vulnerability</span>
+              <span class="module-pts">150 pts</span>
+            </div>
+          </div>
+          <div class="module-card">
+            <div class="module-name">unpatched_sudo</div>
+            <div class="module-meta">
+              <span class="diff-hard">hard</span>
+              <span class="module-type">vulnerability</span>
+              <span class="module-pts">300 pts</span>
+            </div>
+          </div>
+          <div class="module-card">
+            <div class="module-name">world_readable_shadow</div>
+            <div class="module-meta">
+              <span class="diff-easy">easy</span>
+              <span class="module-type">vulnerability</span>
+              <span class="module-pts">100 pts</span>
+            </div>
+          </div>
+          <div class="module-card">
+            <div class="module-name">cron_backdoor</div>
+            <div class="module-meta">
+              <span class="diff-medium">medium</span>
+              <span class="module-type">payload</span>
+              <span class="module-pts">200 pts</span>
+            </div>
+          </div>
+          <div class="module-card" style="border-color:#00e5ff22; background:#00e5ff05;">
+            <div class="module-name" style="color:#00e5ff88;">nginx (dependency)</div>
+            <div class="module-meta">
+              <span class="module-type" style="color:#00e5ff55;">application</span>
+              <span class="module-pts" style="color:#00e5ff55;">0 pts</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attacker VM type -->
+    <div class="vm-type-card">
+      <div class="vm-type-header">
+        <div>
+          <div class="vm-type-name">red_team</div>
+          <div class="vm-type-meta">Ubuntu 24.04 LTS x64 &nbsp;·&nbsp; vc2-2c-4gb &nbsp;·&nbsp; ewr &nbsp;·&nbsp; 1 per team = 3 total</div>
+        </div>
+        <div class="vm-type-badges">
+          <span class="badge badge-red">attacker</span>
+          <span class="badge badge-amber">vc2-2c-4gb</span>
+          <span class="badge badge-gray">no modules</span>
+          <span style="color:#5a6080;font-size:16px;">▾</span>
+        </div>
+      </div>
+      <div class="vm-type-body">
+        <div style="color:#5a6080; font-size:11px; font-style:italic;">Attacker role — no modules assigned. Bare OS deployment only.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- === BY TEAM VIEW (shown below as a separate section for the mockup) === -->
+  <div style="margin-top:32px; padding-top:24px; border-top:1px solid #1a1d2e;">
+    <div style="font-size:11px; color:#5a6080; text-transform:uppercase; letter-spacing:1px; margin-bottom:16px;">Team Breakdown View</div>
+
+    <div class="team-section">
+      <div class="team-header">
+        <div class="team-dot" style="background:#e040fb;"></div>
+        <div class="team-name">Alpha</div>
+        <div class="team-vm-count">4 VMs</div>
+      </div>
+      <div class="vm-row">
+        <div class="vm-hostname">alpha-ubuntu_target-1</div>
+        <div class="vm-plan">vc2-2c-4gb</div>
+        <div class="vm-modules-summary">9 modules · ssh_weak_config, unpatched_sudo, +7 more</div>
+        <div class="vm-status-projected">projected</div>
+      </div>
+      <div class="vm-row">
+        <div class="vm-hostname">alpha-ubuntu_target-2</div>
+        <div class="vm-plan">vc2-2c-4gb</div>
+        <div class="vm-modules-summary">9 modules · cron_backdoor, world_readable_shadow, +7 more</div>
+        <div class="vm-status-projected">projected</div>
+      </div>
+      <div class="vm-row">
+        <div class="vm-hostname">alpha-ubuntu_target-3</div>
+        <div class="vm-plan">vc2-2c-4gb</div>
+        <div class="vm-modules-summary">9 modules · suid_binary, weak_password, +7 more</div>
+        <div class="vm-status-projected">projected</div>
+      </div>
+      <div class="vm-row" style="border-color:#ff555533;">
+        <div class="vm-hostname">alpha-red_team-1</div>
+        <div class="vm-plan">vc2-2c-4gb</div>
+        <div class="vm-modules-summary" style="color:#5a6080; font-style:italic;">No modules (attacker)</div>
+        <div class="vm-status-projected" style="border-color:#ff555544; color:#ff5555;">attacker</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Topology tab (shown as second panel for mockup purposes) -->
+<div style="padding: 0 28px 20px;">
+  <div class="viz-panel">
+    <div class="viz-panel-header">
+      <span class="viz-panel-title">Network Topology — Projected</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="badge badge-amber">preview</span>
+        <button class="btn btn-secondary" style="padding:4px 12px;font-size:10px;">🎲 Re-roll</button>
+      </div>
+    </div>
+    <div class="viz-body" style="background:#0a0b10; position:relative;">
+      <div class="projected-watermark">PREVIEW</div>
+
+      <!-- SVG topology mockup -->
+      <svg class="topo-svg" viewBox="0 0 700 300">
+        <defs>
+          <filter id="glow-c">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-t">
+            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <style>
+          .topo-link { stroke: #1a1d2e; stroke-width: 1.5; stroke-dasharray: 5,4; fill: none; }
+          .topo-link.projected { stroke: #f5a62333; }
+          .event-node circle { fill: #0d0e1a; stroke: #f5a623; stroke-width: 2; stroke-dasharray: 6,3; }
+          .event-node text { fill: #f5a623; font-size: 10px; text-anchor: middle; font-family: 'JetBrains Mono', monospace; }
+          .team-node circle { fill: #0d0e1a; stroke-width: 2; stroke-dasharray: 4,2; }
+          .team-node text { fill: #ccd6f6; font-size: 9px; text-anchor: middle; font-family: monospace; }
+          .vm-node rect { fill: #0d0e1a; stroke-width: 1.5; stroke-dasharray: 4,2; rx: 6; }
+          .vm-node text { fill: #ccd6f6; font-size: 8px; text-anchor: middle; font-family: monospace; }
+          .vm-node text.type-label { fill: #5a6080; font-size: 7px; }
+        </style>
+
+        <!-- Links -->
+        <line class="topo-link projected" x1="350" y1="150" x2="160" y2="80"/>
+        <line class="topo-link projected" x1="350" y1="150" x2="350" y2="60"/>
+        <line class="topo-link projected" x1="350" y1="150" x2="540" y2="80"/>
+
+        <!-- Team -> VM links (alpha) -->
+        <line class="topo-link projected" x1="160" y1="80" x2="60" y2="190"/>
+        <line class="topo-link projected" x1="160" y1="80" x2="120" y2="220"/>
+        <line class="topo-link projected" x1="160" y1="80" x2="180" y2="210"/>
+        <line class="topo-link projected" x1="160" y1="80" x2="240" y2="180"/>
+
+        <!-- Team -> VM links (bravo) -->
+        <line class="topo-link projected" x1="350" y1="60" x2="300" y2="190"/>
+        <line class="topo-link projected" x1="350" y1="60" x2="345" y2="210"/>
+        <line class="topo-link projected" x1="350" y1="60" x2="400" y2="200"/>
+        <line class="topo-link projected" x1="350" y1="60" x2="420" y2="170"/>
+
+        <!-- Team -> VM links (charlie) -->
+        <line class="topo-link projected" x1="540" y1="80" x2="470" y2="200"/>
+        <line class="topo-link projected" x1="540" y1="80" x2="520" y2="230"/>
+        <line class="topo-link projected" x1="540" y1="80" x2="580" y2="210"/>
+        <line class="topo-link projected" x1="540" y1="80" x2="620" y2="175"/>
+
+        <!-- Event node -->
+        <g class="event-node" filter="url(#glow-t)">
+          <circle cx="350" cy="150" r="38"/>
+          <text x="350" y="147" dy="0">AUTUMN</text>
+          <text x="350" y="160" dy="0">BREACH</text>
+        </g>
+
+        <!-- Team nodes -->
+        <g class="team-node" filter="url(#glow-t)">
+          <circle cx="160" cy="80" r="26" style="stroke:#e040fb"/>
+          <text x="160" y="78" dy="0" style="fill:#e040fb">ALPHA</text>
+          <text x="160" y="90" dy="0">3+1 VMs</text>
+        </g>
+        <g class="team-node" filter="url(#glow-t)">
+          <circle cx="350" cy="60" r="26" style="stroke:#00bcd4"/>
+          <text x="350" y="58" dy="0" style="fill:#00bcd4">BRAVO</text>
+          <text x="350" y="70" dy="0">3+1 VMs</text>
+        </g>
+        <g class="team-node" filter="url(#glow-t)">
+          <circle cx="540" cy="80" r="26" style="stroke:#69f0ae"/>
+          <text x="540" y="78" dy="0" style="fill:#69f0ae">CHARLIE</text>
+          <text x="540" y="90" dy="0">3+1 VMs</text>
+        </g>
+
+        <!-- VM nodes alpha -->
+        <g class="vm-node"><rect x="30" y="175" width="60" height="30" style="stroke:#f5a623"/><text x="60" y="188" dy="0" style="fill:#f5a623">▤</text><text x="60" y="198" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="90" y="207" width="60" height="30" style="stroke:#f5a623"/><text x="120" y="220" dy="0" style="fill:#f5a623">▤</text><text x="120" y="230" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="155" y="197" width="60" height="30" style="stroke:#f5a623"/><text x="185" y="210" dy="0" style="fill:#f5a623">▤</text><text x="185" y="220" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="218" y="168" width="60" height="30" style="stroke:#ff5555"/><text x="248" y="181" dy="0" style="fill:#ff5555">▣</text><text x="248" y="191" dy="0" class="type-label">attacker</text></g>
+
+        <!-- VM nodes bravo -->
+        <g class="vm-node"><rect x="272" y="177" width="60" height="30" style="stroke:#f5a623"/><text x="302" y="190" dy="0" style="fill:#f5a623">▤</text><text x="302" y="200" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="317" y="197" width="60" height="30" style="stroke:#f5a623"/><text x="347" y="210" dy="0" style="fill:#f5a623">▤</text><text x="347" y="220" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="373" y="188" width="60" height="30" style="stroke:#f5a623"/><text x="403" y="201" dy="0" style="fill:#f5a623">▤</text><text x="403" y="211" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="394" y="158" width="60" height="30" style="stroke:#ff5555"/><text x="424" y="171" dy="0" style="fill:#ff5555">▣</text><text x="424" y="181" dy="0" class="type-label">attacker</text></g>
+
+        <!-- VM nodes charlie -->
+        <g class="vm-node"><rect x="443" y="188" width="60" height="30" style="stroke:#f5a623"/><text x="473" y="201" dy="0" style="fill:#f5a623">▤</text><text x="473" y="211" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="493" y="218" width="60" height="30" style="stroke:#f5a623"/><text x="523" y="231" dy="0" style="fill:#f5a623">▤</text><text x="523" y="241" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="553" y="198" width="60" height="30" style="stroke:#f5a623"/><text x="583" y="211" dy="0" style="fill:#f5a623">▤</text><text x="583" y="221" dy="0" class="type-label">target</text></g>
+        <g class="vm-node"><rect x="592" y="163" width="60" height="30" style="stroke:#ff5555"/><text x="622" y="176" dy="0" style="fill:#ff5555">▣</text><text x="622" y="186" dy="0" class="type-label">attacker</text></g>
+
+      </svg>
+    </div>
+    <div style="padding:10px 18px; border-top:1px solid #1a1d2e; font-size:10px; color:#5a6080; display:flex; gap:20px;">
+      <span>▤ target VM (projected)</span>
+      <span>▣ attacker VM (projected)</span>
+      <span style="color:#f5a623;">— Projected (not deployed)</span>
+    </div>
+  </div>
+</div>
+
+<!-- Attack Tree panel -->
+<div style="padding: 0 28px 40px;">
+  <div class="attack-tree-panel">
+    <div class="attack-tree-header">
+      <div>
+        <span class="viz-panel-title">Attack Paths — ubuntu_target (sample)</span>
+        <span style="color:#5a6080; font-size:10px; margin-left:12px;">Based on sampled module assignment · 4 paths · 5 modules in kill chain</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" style="padding:4px 12px;font-size:10px;font-family:inherit;">🎲 Re-roll</button>
+        <span class="badge badge-amber">preview</span>
+      </div>
+    </div>
+    <div style="padding:20px; background:#0a0b10; position:relative; overflow-x:auto;">
+      <div class="projected-watermark">PREVIEW</div>
+      <div class="at-row">
+
+        <!-- Infrastructure phase -->
+        <div class="at-phase-col">
+          <div class="at-phase-label">Infrastructure</div>
+          <div class="at-node infra">
+            <div class="at-node-name">nginx</div>
+            <div class="at-node-tactic">application</div>
+          </div>
+        </div>
+
+        <div class="at-connector" style="color:#1a1d2e; margin-top:48px;">──▶</div>
+
+        <!-- Initial Access -->
+        <div class="at-phase-col">
+          <div class="at-phase-label">Initial Access</div>
+          <div class="at-node projected-medium">
+            <div class="at-node-name">ssh_weak_config</div>
+            <div class="at-node-tactic">initial-access</div>
+          </div>
+        </div>
+
+        <div class="at-connector" style="color:#1a1d2e; margin-top:48px;">──▶</div>
+
+        <!-- Privilege Escalation -->
+        <div class="at-phase-col">
+          <div class="at-phase-label">Priv Esc</div>
+          <div class="at-node projected-hard">
+            <div class="at-node-name">unpatched_sudo</div>
+            <div class="at-node-tactic">priv-esc</div>
+          </div>
+        </div>
+
+        <div class="at-connector" style="color:#1a1d2e; margin-top:48px;">──▶</div>
+
+        <!-- Credential Access -->
+        <div class="at-phase-col">
+          <div class="at-phase-label">Credential Access</div>
+          <div class="at-node projected-easy" style="border-color:#3fb95044; background:#3fb95008;">
+            <div class="at-node-name">world_readable_shadow</div>
+            <div class="at-node-tactic">cred-access</div>
+          </div>
+        </div>
+
+        <div class="at-connector" style="color:#1a1d2e; margin-top:48px;">──▶</div>
+
+        <!-- Persistence -->
+        <div class="at-phase-col">
+          <div class="at-phase-label">Persistence</div>
+          <div class="at-node projected-medium">
+            <div class="at-node-name">cron_backdoor</div>
+            <div class="at-node-tactic">persistence</div>
+          </div>
+        </div>
+
+      </div>
+      <div style="padding-top:10px; border-top:1px solid #1a1d2e; margin-top:4px; font-size:10px; color:#5a6080; display:flex; gap:20px;">
+        <span style="color:#f5a623;">◻ medium</span>
+        <span style="color:#ff5555;">◻ hard</span>
+        <span style="color:#3fb950;">◻ easy</span>
+        <span style="color:#2a2d3e;">◻ infrastructure</span>
+        <span style="margin-left:auto;">Dashed borders = projected (not yet deployed)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

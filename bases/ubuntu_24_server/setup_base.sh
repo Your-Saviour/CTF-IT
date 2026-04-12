@@ -11,19 +11,21 @@ mkdir -p /run/sshd
 
 # Configure SSH to allow root login
 echo "Configuring SSH..."
-if grep -q "^#PermitRootLogin" /etc/ssh/sshd_config; then
-    sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-elif ! grep -q "^PermitRootLogin" /etc/ssh/sshd_config; then
-    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
-fi
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+grep -q "^PermitRootLogin" /etc/ssh/sshd_config || echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+
+# Configure password authentication
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+grep -q "^PasswordAuthentication" /etc/ssh/sshd_config || echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+echo "PasswordAuthentication yes" > /etc/ssh/sshd_config.d/ctf-override.conf
 
 # Enable SSH service to start on boot
 echo "Enabling SSH service..."
-systemctl enable ssh.service || systemctl enable sshd.service || true
+systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service || { echo "ERROR: could not enable SSH service"; exit 1; }
 
 # Start SSH service
 echo "Starting SSH service..."
-systemctl start ssh.service || systemctl start sshd.service || true
+systemctl start ssh.service 2>/dev/null || systemctl start sshd.service || { echo "ERROR: could not start SSH service"; exit 1; }
 
 # Configure journald for production/container use
 echo "Configuring journald..."

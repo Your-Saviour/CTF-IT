@@ -1,0 +1,64 @@
+<h2>VM Network Topology — Library Options</h2>
+<p class="subtitle">Which rendering approach fits best for your interactive network map?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Cytoscape.js</h3>
+      <p><strong>Best for: network graphs with interactivity</strong></p>
+      <p>Purpose-built graph visualization library. Force-directed layouts, node grouping (compound nodes for teams), built-in context menus via extensions, zoom/pan, live data updates via API.</p>
+      <ul>
+        <li>~170KB minified (CDN)</li>
+        <li>Compound nodes = teams as containers</li>
+        <li>cytoscape-context-menus extension for right-click actions</li>
+        <li>Excellent performance up to ~1000 nodes</li>
+        <li>Cyberpunk styling via CSS-like selectors</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Built for exactly this use case</li><li>Rich plugin ecosystem</li><li>Great docs</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Larger bundle than D3</li><li>Learning curve for styling API</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>D3.js Force Layout</h3>
+      <p><strong>Best for: maximum customization</strong></p>
+      <p>Low-level SVG rendering with force-directed simulation. Full control over every pixel. Requires more code to build interactions (tooltips, context menus, grouping).</p>
+      <ul>
+        <li>~80KB minified (just d3-force + d3-selection)</li>
+        <li>SVG-based = easy CSS theming</li>
+        <li>Manual implementation for grouping, menus, zoom</li>
+        <li>More code but more control</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Smaller bundle</li><li>Total visual control</li><li>Widely known</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Significantly more code to write</li><li>Context menus, grouping all from scratch</li><li>Performance tuning needed</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Vis.js Network</h3>
+      <p><strong>Best for: quick setup with clustering</strong></p>
+      <p>High-level network visualization. Built-in clustering, physics, interaction events. Less customizable than Cytoscape but faster to implement.</p>
+      <ul>
+        <li>~250KB minified</li>
+        <li>Built-in clustering (teams)</li>
+        <li>Canvas-based rendering</li>
+        <li>Manipulation module for editing</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Fastest to implement</li><li>Good defaults</li><li>Built-in edit mode</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Largest bundle</li><li>Canvas = harder to style cyberpunk</li><li>Less maintained than Cytoscape</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top: 1.5rem; opacity: 0.7;">My recommendation: <strong>Cytoscape.js (A)</strong> — it's purpose-built for interactive network graphs with grouping, has a context menu extension that matches your "inline actions" requirement, and its CSS-like styling API will let us match your existing cyberpunk theme.</p>

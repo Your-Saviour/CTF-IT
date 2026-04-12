@@ -1,0 +1,107 @@
+<h2>VM Node Icons — Options</h2>
+<p class="subtitle">What style of icons for VM nodes?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>OS-based icons</h3>
+      <p>Different icon per OS type — Ubuntu/Linux penguin, Windows logo, generic server for unknown. Makes it easy to visually scan what's running what.</p>
+      <div style="display: flex; gap: 20px; margin-top: 12px; align-items: center;">
+        <div style="text-align: center;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#00ff64" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10" fill="rgba(0,255,100,0.1)"/>
+            <text x="12" y="16" text-anchor="middle" font-size="10" fill="#00ff64" stroke="none">🐧</text>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Linux</div>
+        </div>
+        <div style="text-align: center;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#00c8ff" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10" fill="rgba(0,200,255,0.1)"/>
+            <text x="12" y="16" text-anchor="middle" font-size="10" fill="#00c8ff" stroke="none">⊞</text>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Windows</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Server/terminal icons (SVG)</h3>
+      <p>Clean monoline SVG icons — a server rack icon for VMs, with status indicated by glow color. Consistent look regardless of OS.</p>
+      <div style="display: flex; gap: 20px; margin-top: 12px; align-items: center;">
+        <div style="text-align: center;">
+          <svg width="44" height="44" viewBox="0 0 44 44">
+            <rect x="2" y="2" width="40" height="40" rx="8" fill="rgba(0,255,100,0.08)" stroke="#00ff64" stroke-width="1.5"/>
+            <rect x="12" y="10" width="20" height="6" rx="2" fill="none" stroke="#00ff64" stroke-width="1"/>
+            <circle cx="28" cy="13" r="1.5" fill="#00ff64"/>
+            <rect x="12" y="19" width="20" height="6" rx="2" fill="none" stroke="#00ff64" stroke-width="1"/>
+            <circle cx="28" cy="22" r="1.5" fill="#00ff64"/>
+            <rect x="12" y="28" width="20" height="6" rx="2" fill="none" stroke="#00ff64" stroke-width="1"/>
+            <circle cx="28" cy="31" r="1.5" fill="#00ff64"/>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Active</div>
+        </div>
+        <div style="text-align: center;">
+          <svg width="44" height="44" viewBox="0 0 44 44">
+            <rect x="2" y="2" width="40" height="40" rx="8" fill="rgba(255,60,60,0.08)" stroke="#ff3c3c" stroke-width="1.5"/>
+            <rect x="12" y="10" width="20" height="6" rx="2" fill="none" stroke="#ff3c3c" stroke-width="1"/>
+            <circle cx="28" cy="13" r="1.5" fill="#ff3c3c"/>
+            <rect x="12" y="19" width="20" height="6" rx="2" fill="none" stroke="#ff3c3c" stroke-width="1"/>
+            <circle cx="28" cy="22" r="1.5" fill="#ff3c3c"/>
+            <rect x="12" y="28" width="20" height="6" rx="2" fill="none" stroke="#ff3c3c" stroke-width="1"/>
+            <circle cx="28" cy="31" r="1.5" fill="#ff3c3c"/>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Failed</div>
+        </div>
+        <div style="text-align: center;">
+          <svg width="44" height="44" viewBox="0 0 44 44">
+            <rect x="2" y="2" width="40" height="40" rx="8" fill="rgba(255,200,0,0.08)" stroke="#ffc800" stroke-width="1.5"/>
+            <rect x="12" y="10" width="20" height="6" rx="2" fill="none" stroke="#ffc800" stroke-width="1"/>
+            <circle cx="28" cy="13" r="1.5" fill="#ffc800"/>
+            <rect x="12" y="19" width="20" height="6" rx="2" fill="none" stroke="#ffc800" stroke-width="1"/>
+            <circle cx="28" cy="22" r="1.5" fill="#ffc800"/>
+            <rect x="12" y="28" width="20" height="6" rx="2" fill="none" stroke="#ffc800" stroke-width="1"/>
+            <circle cx="28" cy="31" r="1.5" fill="#ffc800"/>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Creating</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid — OS icon inside server shape</h3>
+      <p>Rounded-square node with a small OS icon badge in the corner. Best of both: you see the machine type AND the OS at a glance.</p>
+      <div style="display: flex; gap: 20px; margin-top: 12px; align-items: center;">
+        <div style="text-align: center; position: relative;">
+          <svg width="50" height="50" viewBox="0 0 50 50">
+            <rect x="3" y="3" width="44" height="44" rx="10" fill="rgba(0,255,100,0.08)" stroke="#00ff64" stroke-width="1.5"/>
+            <rect x="14" y="12" width="22" height="5" rx="2" fill="none" stroke="#00ff64" stroke-width="0.8"/>
+            <rect x="14" y="20" width="22" height="5" rx="2" fill="none" stroke="#00ff64" stroke-width="0.8"/>
+            <rect x="14" y="28" width="22" height="5" rx="2" fill="none" stroke="#00ff64" stroke-width="0.8"/>
+            <!-- OS badge -->
+            <circle cx="39" cy="39" r="8" fill="#0a0e1a" stroke="#00ff64" stroke-width="1"/>
+            <text x="39" y="43" text-anchor="middle" font-size="9" fill="#00ff64" stroke="none">🐧</text>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Linux + Active</div>
+        </div>
+        <div style="text-align: center; position: relative;">
+          <svg width="50" height="50" viewBox="0 0 50 50">
+            <rect x="3" y="3" width="44" height="44" rx="10" fill="rgba(255,60,60,0.08)" stroke="#ff3c3c" stroke-width="1.5"/>
+            <rect x="14" y="12" width="22" height="5" rx="2" fill="none" stroke="#ff3c3c" stroke-width="0.8"/>
+            <rect x="14" y="20" width="22" height="5" rx="2" fill="none" stroke="#ff3c3c" stroke-width="0.8"/>
+            <rect x="14" y="28" width="22" height="5" rx="2" fill="none" stroke="#ff3c3c" stroke-width="0.8"/>
+            <circle cx="39" cy="39" r="8" fill="#0a0e1a" stroke="#ff3c3c" stroke-width="1"/>
+            <text x="39" y="43" text-anchor="middle" font-size="9" fill="#ff3c3c" stroke="none">⊞</text>
+          </svg>
+          <div style="font-size: 9px; color: #888; margin-top: 4px;">Windows + Failed</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

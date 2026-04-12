@@ -30,7 +30,6 @@ packages:
   - gzip
   - git
   - findutils
-  - apt-utils
   - lsof
   - tcpdump
   - nmap
