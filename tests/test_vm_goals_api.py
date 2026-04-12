@@ -292,3 +292,56 @@ def test_check_goal_revert_to_defended(client, seeded_data):
     assert updated.status == "defended"
     assert updated.defend_count == 1
     db.close()
+
+
+# ── Test 7: POST check — re-exploitation from "defended" back to "achieved" ───
+
+def test_check_goal_reexploit_from_defended(client, seeded_data):
+    """A goal in 'defended' status should transition back to 'achieved' when
+    verification passes, with achievement_count incremented."""
+    c, vm = client
+    db = _Session()
+    goal = VMGoal(
+        vm_id=vm.id,
+        module_id="reexploit_goal",
+        status="defended",
+        red_points=10,
+        defend_points=5,
+        achievement_count=1,
+        defend_count=1,
+        achieved_at=datetime.now(timezone.utc),
+        defended_at=datetime.now(timezone.utc),
+    )
+    db.add(goal)
+    db.commit()
+    goal_id = goal.id
+    db.close()
+
+    mock_module = _make_http_response_module("reexploit_goal")
+
+    # Response body contains "OK" → verification passes → re-exploitation
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "OK"
+
+    mock_client_instance = AsyncMock()
+    mock_client_instance.get = AsyncMock(return_value=mock_resp)
+    mock_client_cm = MagicMock()
+    mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client_instance)
+    mock_client_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
+        with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
+            resp = c.post(f"/admin/vms/{vm.id}/goals/{goal_id}/check")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "achieved"
+    assert data["achievement_count"] == 2
+    assert data["achieved_at"] is not None
+
+    db = _Session()
+    updated = db.query(VMGoal).filter(VMGoal.id == goal_id).first()
+    assert updated.status == "achieved"
+    assert updated.achievement_count == 2
+    db.close()

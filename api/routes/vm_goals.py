@@ -82,7 +82,7 @@ async def check_vm_goal(
             return JSONResponse({"error": err}, status_code=501)
 
     # State machine transitions
-    if verification_passed and goal.status != "achieved":
+    if verification_passed and goal.status in ("pending", "defended"):
         goal.status = "achieved"
         goal.achievement_count += 1
         goal.achieved_at = now
@@ -105,6 +105,8 @@ async def _run_remote_verification(verification: dict, vm: VM) -> tuple[bool, st
     supported for remote VMs — the caller should surface a 501.
     """
     vtype = verification.get("type")
+    if not vtype:
+        return False, "verification spec is missing 'type' field"
 
     if vtype == "http_response":
         port = verification.get("port", 80)
