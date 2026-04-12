@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
                 "cloudflare_record_id": "VARCHAR(64)",
                 "attack_tree_json": "TEXT",
                 "vm_type": "VARCHAR(64)",
+                "base_type": "VARCHAR(64)",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
