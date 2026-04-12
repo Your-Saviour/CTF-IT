@@ -548,13 +548,21 @@
         return STATUS_COLORS[status] || '#888';
     }
 
-    function osBadge(os) {
-        if (!os) return '>';
+    const OS_ICON_PATHS = {
+        linux:   'M4 4h16a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1zm2 5l2 2-2 2 1 1 3-3-3-3-1 1zm6 5h4v2h-4v-2z',
+        windows: 'M3 3h9v9H3V3zm10 0h9v9h-9V3zM3 13h9v9H3v-9zm10 0h9v9h-9v-9z',
+        kali:    'M12 2C7 2 4 5.5 4 9c0 2.6 1.4 4.8 3.5 6L7 18h1v2h8v-2h1l-.5-3C18.6 13.8 20 11.6 20 9c0-3.5-3-7-8-7zm-2 9a1.5 1.5 0 010-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 010-3 1.5 1.5 0 010 3z',
+        server:  'M3 3h18v4H3V3zm0 7h18v4H3v-4zm0 7h18v4H3v-4z',
+    };
+
+    function osBadgePath(os) {
+        if (!os) return OS_ICON_PATHS.server;
         const lower = os.toLowerCase();
+        if (lower.includes('kali')) return OS_ICON_PATHS.kali;
+        if (lower.includes('windows')) return OS_ICON_PATHS.windows;
         if (lower.includes('ubuntu') || lower.includes('linux') || lower.includes('debian') ||
-            lower.includes('centos') || lower.includes('fedora') || lower.includes('rhel')) return '\u{1F427}';
-        if (lower.includes('windows')) return '\u229E';
-        return '>';
+            lower.includes('centos') || lower.includes('fedora') || lower.includes('rhel')) return OS_ICON_PATHS.linux;
+        return OS_ICON_PATHS.server;
     }
 
     function renderTopology() {
@@ -838,9 +846,11 @@
             g.append('circle').attr('cx', badgeX).attr('cy', badgeY)
                 .attr('r', 7).attr('fill', 'var(--bg-deep)')
                 .attr('stroke', color).attr('stroke-width', 0.8);
-            g.append('text').attr('x', badgeX).attr('y', badgeY + 3.5)
-                .attr('text-anchor', 'middle').attr('font-size', '8px')
-                .attr('fill', color).text(osBadge(d.os));
+            const iconSz = 9;
+            g.append('path')
+                .attr('d', osBadgePath(d.os))
+                .attr('fill', color)
+                .attr('transform', `translate(${badgeX - iconSz/2},${badgeY - iconSz/2}) scale(${iconSz/24})`);
 
             g.append('text').attr('class', 'node-label')
                 .attr('y', half + 14).attr('font-size', '9px').text(d.label);
