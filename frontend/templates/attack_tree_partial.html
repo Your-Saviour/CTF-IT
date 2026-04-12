@@ -282,17 +282,10 @@ window.renderAttackTree = (function() {
             var totalW = (layoutedGraph.width || 600) + shiftX;
             var totalH = (layoutedGraph.height || 300) + shiftY;
 
-            // Scale to fit container width — preserves aspect ratio, no horizontal overflow
-            var containerW = container.clientWidth || totalW;
-            var displayH = containerW >= totalW
-                ? totalH
-                : Math.max(Math.round(totalH * containerW / totalW), 160);
-
             var svg = d3.select(container)
                 .append('svg')
-                .attr('viewBox', '0 0 ' + totalW + ' ' + totalH)
-                .attr('width', '100%')
-                .attr('height', displayH);
+                .attr('width', totalW)
+                .attr('height', totalH);
 
             var defs = svg.append('defs');
             // Arrow markers
