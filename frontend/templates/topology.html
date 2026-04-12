@@ -316,12 +316,48 @@
         draft: '#888',
     };
 
-    const NODE_RADIUS = { event: 50, team: 35, vm: 22 };
+    const TIER_Y = { wan: 90, event: 210, vm: 370 };
+    const VM_H_SPACING = 110; // min px between VM node centers
+
+    // Assigns x/y to each node using tier+group layout.
+    // tier controls vertical band; group controls horizontal clustering within a tier.
+    // Structure is designed to extend to firewalls/segments by adding new tiers/groups.
+    function calculateLayout(nodes) {
+        const width = svgEl.clientWidth || 800;
+
+        const wanNodes  = nodes.filter(n => n.type === 'wan');
+        const eventNodes = nodes.filter(n => n.type === 'event');
+        const vmNodes   = nodes.filter(n => n.type === 'vm');
+
+        // WAN — always centered
+        wanNodes.forEach(n => {
+            n.x = width / 2;
+            n.y = TIER_Y.wan;
+        });
+
+        // Events — spread evenly across width
+        const eCount = eventNodes.length;
+        eventNodes.forEach((n, i) => {
+            n.x = (i + 1) * (width / (eCount + 1));
+            n.y = TIER_Y.event;
+        });
+
+        // VMs — per event group, centered under their event node
+        eventNodes.forEach(evNode => {
+            const vms = vmNodes.filter(v => v.event_id === evNode.id);
+            const count = vms.length;
+            if (count === 0) return;
+            const totalW = (count - 1) * VM_H_SPACING;
+            vms.forEach((v, i) => {
+                v.x = evNode.x - totalW / 2 + i * VM_H_SPACING;
+                v.y = TIER_Y.vm;
+            });
+        });
+    }
 
     // ── State ─────────────────────────────────────────────────────────────────
     let currentNodes = [];
     let currentLinks = [];
-    let simulation = null;
     let pollTimer = null;
     let currentEventFilter = '';
 
@@ -391,49 +427,34 @@
     function updateGraph(data) {
         if (!data) return;
 
-        const width = svgEl.clientWidth;
-        const height = svgEl.clientHeight;
+        // Inject synthetic WAN node (client-side only)
+        const wanNode = { id: 'wan', type: 'wan', label: 'INTERNET' };
+        const allNodes = [wanNode, ...data.nodes];
 
-        // If node set changed structurally, rebuild simulation
+        // Add WAN→event links
+        const eventIds = data.nodes.filter(n => n.type === 'event').map(n => n.id);
+        const wanLinks = eventIds.map(eid => ({ source: 'wan', target: eid }));
+        const allLinks = [...wanLinks, ...data.links];
+
         const oldIds = new Set(currentNodes.map(n => n.id));
-        const newIds = new Set(data.nodes.map(n => n.id));
-        const structureChanged = data.nodes.length !== currentNodes.length ||
-            data.nodes.some(n => !oldIds.has(n.id));
+        const structureChanged = allNodes.length !== currentNodes.length ||
+            allNodes.some(n => !oldIds.has(n.id));
 
         if (structureChanged) {
-            // Preserve positions of existing nodes
-            const posMap = {};
-            currentNodes.forEach(n => { posMap[n.id] = { x: n.x, y: n.y, fx: n.fx, fy: n.fy }; });
-
-            currentNodes = data.nodes.map(n => {
-                const existing = posMap[n.id];
-                return existing ? { ...n, x: existing.x, y: existing.y, fx: existing.fx, fy: existing.fy } : { ...n };
-            });
-            currentLinks = data.links.map(l => ({ ...l }));
-
-            if (simulation) simulation.stop();
-            simulation = d3.forceSimulation(currentNodes)
-                .force('link', d3.forceLink(currentLinks).id(d => d.id)
-                    .distance(d => {
-                        const src = typeof d.source === 'object' ? d.source : currentNodes.find(n => n.id === d.source);
-                        return src && src.type === 'event' ? 180 : 100;
-                    }))
-                .force('charge', d3.forceManyBody().strength(-300))
-                .force('center', d3.forceCenter(width / 2, height / 2))
-                .force('collision', d3.forceCollide().radius(d => NODE_RADIUS[d.type] + 15))
-                .on('tick', ticked);
-
+            currentNodes = allNodes.map(n => ({ ...n }));
+            currentLinks = allLinks.map(l => ({ ...l }));
+            calculateLayout(currentNodes);
             renderLinks();
             renderNodes();
+            applyPositions();
         } else {
-            // Just update status/data on existing nodes
+            // Status-only update: merge new data into existing nodes
             data.nodes.forEach(newNode => {
                 const existing = currentNodes.find(n => n.id === newNode.id);
                 if (existing) {
                     const statusChanged = existing.status !== newNode.status;
-                    Object.assign(existing, newNode, { x: existing.x, y: existing.y, fx: existing.fx, fy: existing.fy });
+                    Object.assign(existing, newNode, { x: existing.x, y: existing.y });
                     if (statusChanged) {
-                        // Trigger pulse animation
                         nodeGroup.selectAll('.node-group')
                             .filter(d => d.id === existing.id)
                             .classed('node-pulse', true)
@@ -600,33 +621,36 @@
         });
     }
 
-    // ── Simulation tick ───────────────────────────────────────────────────────
-    function ticked() {
+    // ── Apply positions ───────────────────────────────────────────────────────
+    function applyPositions() {
+        // Resolve link source/target from node id strings to node objects
+        currentLinks.forEach(l => {
+            if (typeof l.source === 'string') l.source = currentNodes.find(n => n.id === l.source) || l.source;
+            if (typeof l.target === 'string') l.target = currentNodes.find(n => n.id === l.target) || l.target;
+        });
+
         linkGroup.selectAll('line')
-            .attr('x1', d => d.source.x)
-            .attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y);
+            .attr('x1', d => (typeof d.source === 'object' ? d.source : currentNodes.find(n => n.id === d.source))?.x ?? 0)
+            .attr('y1', d => (typeof d.source === 'object' ? d.source : currentNodes.find(n => n.id === d.source))?.y ?? 0)
+            .attr('x2', d => (typeof d.target === 'object' ? d.target : currentNodes.find(n => n.id === d.target))?.x ?? 0)
+            .attr('y2', d => (typeof d.target === 'object' ? d.target : currentNodes.find(n => n.id === d.target))?.y ?? 0);
 
         nodeGroup.selectAll('.node-group')
-            .attr('transform', d => `translate(${d.x},${d.y})`);
+            .attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
     }
 
     // ── Drag handlers ─────────────────────────────────────────────────────────
     function dragStarted(event, d) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
         hideContextMenu();
+        d._dragging = true;
     }
     function dragged(event, d) {
-        d.fx = event.x;
-        d.fy = event.y;
+        d.x = event.x;
+        d.y = event.y;
+        applyPositions();
     }
     function dragEnded(event, d) {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+        d._dragging = false;
     }
 
     // ── Tooltip ───────────────────────────────────────────────────────────────
@@ -826,10 +850,8 @@
     // ── Event filter ──────────────────────────────────────────────────────────
     eventFilter.addEventListener('change', () => {
         currentEventFilter = eventFilter.value;
-        // Reset graph
         currentNodes = [];
         currentLinks = [];
-        if (simulation) simulation.stop();
         linkGroup.selectAll('*').remove();
         nodeGroup.selectAll('*').remove();
         refreshData();
