@@ -19,7 +19,7 @@ caldera:
   exploit:
     description: "Read /etc/shadow and stage it for exfiltration"
     command: |
-      cat /etc/shadow > /tmp/.exfil_shadow_$(date +%s) && echo "GOAL_ACHIEVED: shadow file staged at /tmp/.exfil_shadow_*"
+      cat /etc/shadow > /tmp/.exfil_shadow && echo "GOAL_ACHIEVED: shadow file staged at /tmp/.exfil_shadow"
 
 verification:
   type: file_hash_changed
@@ -27,4 +27,4 @@ verification:
 
 revert_verification:
   type: file_absent
-  path: /tmp/.exfil_shadow_0
+  path: /tmp/.exfil_shadow
