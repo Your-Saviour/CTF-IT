@@ -585,7 +585,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
 
                 if role == "target":
                     try:
-                        selected = select_modules(quota, library_list)
+                        selected = select_modules(quota, library_list, base_type_id=None)
                     except ValueError as e:
                         return JSONResponse({"error": str(e)}, status_code=422)
                     sized_plan = plan_for_vm(selected, default_plan, available_plans) if available_plans else default_plan

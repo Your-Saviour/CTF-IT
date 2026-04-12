@@ -70,4 +70,8 @@ def stage_base_files(base_type: BaseType, export_dir: Path) -> None:
                 shutil.copy2(src, files_dir / staged_name)
         elif isinstance(step, PlaybookStep):
             src = base_type.source_dir / step.playbook
-            shutil.copy2(src, files_dir / f"{base_type.id}__{step.playbook}")
+            staged_name = f"{base_type.id}__{step.playbook}"
+            if src.is_dir():
+                shutil.copytree(src, files_dir / staged_name)
+            else:
+                shutil.copy2(src, files_dir / staged_name)

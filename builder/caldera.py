@@ -353,7 +353,7 @@ def generate_caldera_export_multi_path(
 def generate_caldera_export(quota: dict, export_id: str) -> Path:
     """Select modules via quota and generate a Caldera plugin export directory."""
     library = load_all_modules()
-    selected = select_modules(quota, library)
+    selected = select_modules(quota, library, base_type_id=None)
 
     abilities = _build_abilities(selected)
     if not abilities:
