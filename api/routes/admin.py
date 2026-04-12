@@ -330,7 +330,9 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
 
     if "vm_quota" in body:
         from builder.vm_quota_validation import validate_vm_quota
-        errors = validate_vm_quota(body["vm_quota"])
+        from builder.base_loader import load_all_bases
+        valid_base_ids = {b.id for b in load_all_bases() if not b.disabled}
+        errors = validate_vm_quota(body["vm_quota"], valid_base_ids)
         if errors:
             return JSONResponse(
                 {"error": "Invalid vm_quota", "details": errors},
@@ -381,7 +383,9 @@ async def update_event(
             event.vm_quota = None
         else:
             from builder.vm_quota_validation import validate_vm_quota
-            errors = validate_vm_quota(body["vm_quota"])
+            from builder.base_loader import load_all_bases
+            valid_base_ids = {b.id for b in load_all_bases() if not b.disabled}
+            errors = validate_vm_quota(body["vm_quota"], valid_base_ids)
             if errors:
                 return JSONResponse(
                     {"error": "Invalid vm_quota", "details": errors},
@@ -501,7 +505,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         return JSONResponse({"error": "no vm_quota configured"}, status_code=422)
 
     from builder.vm_quota_validation import validate_vm_quota
-    vm_quota_errors = validate_vm_quota(vm_quota)
+    from builder.base_loader import load_all_bases
+    valid_base_ids = {b.id for b in load_all_bases() if not b.disabled}
+    vm_quota_errors = validate_vm_quota(vm_quota, valid_base_ids)
     if vm_quota_errors:
         return JSONResponse({"error": "invalid vm_quota", "details": vm_quota_errors}, status_code=422)
 

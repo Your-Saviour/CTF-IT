@@ -1,12 +1,17 @@
 import re
 
 VALID_ROLES = {"target", "attacker"}
-ALLOWED_KEYS = {"os", "default_plan", "count", "role", "region"}
+ALLOWED_KEYS = {"base_type", "default_plan", "count", "role", "region"}
 SLUG_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 
 
-def validate_vm_quota(vm_quota: dict) -> list[str]:
-    """Validate a vm_quota dict. Returns list of error strings (empty = valid)."""
+def validate_vm_quota(vm_quota: dict, valid_base_ids: set[str]) -> list[str]:
+    """Validate a vm_quota dict. Returns list of error strings (empty = valid).
+
+    Args:
+        vm_quota: The VM quota dict to validate.
+        valid_base_ids: Set of IDs from non-disabled base types (used to validate base_type values).
+    """
     errors: list[str] = []
 
     if not isinstance(vm_quota, dict):
@@ -28,11 +33,19 @@ def validate_vm_quota(vm_quota: dict) -> list[str]:
         if extra:
             errors.append(f"'{key}' has unknown keys: {', '.join(sorted(extra))}")
 
-        if "os" not in spec or not isinstance(spec.get("os"), str) or not spec["os"]:
-            errors.append(f"'{key}.os' is required and must be a non-empty string")
+        base_type = spec.get("base_type")
+        if not isinstance(base_type, str) or not base_type:
+            errors.append(f"'{key}.base_type' is required and must be a non-empty string")
+        elif not SLUG_RE.match(base_type):
+            errors.append(f"'{key}.base_type' must match pattern ^[a-zA-Z0-9_]+$")
+        elif base_type not in valid_base_ids:
+            errors.append(
+                f"'{key}.base_type' references unknown or disabled base type '{base_type}'"
+            )
 
-        if "default_plan" not in spec or not isinstance(spec.get("default_plan"), str) or not spec["default_plan"]:
-            errors.append(f"'{key}.default_plan' is required and must be a non-empty string")
+        if "default_plan" in spec:
+            if not isinstance(spec["default_plan"], str) or not spec["default_plan"]:
+                errors.append(f"'{key}.default_plan' must be a non-empty string if provided")
 
         count = spec.get("count")
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:

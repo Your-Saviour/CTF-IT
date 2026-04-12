@@ -118,6 +118,8 @@ class VM(Base):
     vm_type: Mapped[str] = mapped_column(String(64), nullable=True)
     # Caldera attack tree cache
     attack_tree_json: Mapped[str] = mapped_column(Text, nullable=True)
+    # Base type ID used when provisioned (e.g. "ubuntu_24_server")
+    base_type: Mapped[str] = mapped_column(String(64), nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
