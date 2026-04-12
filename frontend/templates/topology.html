@@ -542,19 +542,38 @@
                 .text('INTERNET');
         });
 
-        // Event nodes — large circle
+        // Event nodes — rounded rect with ×N teams badge
         groups.filter(d => d.type === 'event').each(function(d) {
             const g = d3.select(this);
-            g.append('circle')
-                .attr('r', NODE_RADIUS.event)
-                .attr('fill', 'rgba(0, 229, 255, 0.08)')
-                .attr('stroke', () => statusColor(d.status))
-                .attr('stroke-width', 2)
-                .style('filter', 'drop-shadow(0 0 12px rgba(0, 229, 255, 0.3))');
-            g.append('text').attr('class', 'node-label-type')
-                .attr('y', -8).attr('fill', '#00e5ff').text('EVENT');
+            const w = 130, h = 42, rx = 8;
+            g.append('rect')
+                .attr('x', -w / 2).attr('y', -h / 2)
+                .attr('width', w).attr('height', h)
+                .attr('rx', rx)
+                .attr('fill', 'rgba(0, 229, 255, 0.05)')
+                .attr('stroke', statusColor(d.status))
+                .attr('stroke-width', 1.5)
+                .style('filter', 'drop-shadow(0 0 10px rgba(0, 229, 255, 0.25))');
             g.append('text').attr('class', 'node-label')
-                .attr('y', 8).attr('font-size', '11px').text(d.label);
+                .attr('y', -6).attr('font-size', '11px')
+                .attr('fill', '#00e5ff')
+                .text(d.label);
+            // ×N teams badge
+            if (d.team_count && d.team_count > 0) {
+                g.append('rect')
+                    .attr('x', -32).attr('y', 6)
+                    .attr('width', 64).attr('height', 14)
+                    .attr('rx', 7)
+                    .attr('fill', 'rgba(255,180,0,0.12)')
+                    .attr('stroke', '#ffb400')
+                    .attr('stroke-width', 0.8);
+                g.append('text')
+                    .attr('y', 17)
+                    .attr('text-anchor', 'middle')
+                    .attr('font-size', '8px')
+                    .attr('fill', '#ffb400')
+                    .text(`\u00d7 ${d.team_count} teams`);
+            }
         });
 
         // Team nodes — medium circle
@@ -736,13 +755,12 @@
                 <div class="topo-tooltip-progress"><div class="topo-tooltip-progress-bar" style="width:${pct}%"></div></div>
             `;
         } else if (d.type === 'event') {
-            const eventTeams = currentNodes.filter(n => n.type === 'team' && n.event_id === d.id);
             const eventVMs = currentNodes.filter(n => n.type === 'vm' && n.event_id === d.id);
             html = `
                 <div class="topo-tooltip-row"><span class="topo-tooltip-label">Event</span><span class="topo-tooltip-value">${d.label}</span></div>
                 <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${d.status}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Teams</span><span class="topo-tooltip-value">${eventTeams.length}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs</span><span class="topo-tooltip-value">${eventVMs.length}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Teams</span><span class="topo-tooltip-value">${d.team_count ?? 0}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs (canonical)</span><span class="topo-tooltip-value">${eventVMs.length}</span></div>
             `;
         }
         tooltip.innerHTML = html;
