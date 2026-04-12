@@ -443,3 +443,129 @@ async def vm_results(vm_id: int, request: Request, db: Session = Depends(get_db)
         "operation_id": op.get("id"),
         "operation_name": op.get("name"),
     }
+
+
+# ── Red vs Blue Scoreboard ─────────────────────────────────────────────────────
+
+@router.get("/scoreboard")
+async def caldera_scoreboard(
+    event_id: int | None = None,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """Red vs blue scoreboard.
+
+    Returns per-team breakdown of:
+    - Blue defensive score: preapplied module completions
+    - Blue reactive score: goal reverts (defend_count × defend_points)
+    - Red offensive score: goal achievements (achievement_count × red_points)
+    """
+    from api.models import Event, Team, VM, VMModule, VMGoal
+
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    # Build VM filter
+    vm_query = db.query(VM)
+    if event_id:
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return JSONResponse({"error": "Event not found"}, status_code=404)
+        vm_query = vm_query.filter(VM.event_id == event_id)
+
+    vms = vm_query.all()
+    vm_ids = [v.id for v in vms]
+
+    if not vm_ids:
+        return {"event_id": event_id, "teams": [], "totals": {"red": 0, "blue_defensive": 0, "blue_reactive": 0}}
+
+    # Load all VMModules for these VMs
+    modules = db.query(VMModule).filter(VMModule.vm_id.in_(vm_ids)).all()
+    # Load all VMGoals for these VMs
+    goals = db.query(VMGoal).filter(VMGoal.vm_id.in_(vm_ids)).all()
+
+    # Index by vm_id
+    vm_modules: dict[int, list[VMModule]] = {}
+    for m in modules:
+        vm_modules.setdefault(m.vm_id, []).append(m)
+
+    vm_goals: dict[int, list[VMGoal]] = {}
+    for g in goals:
+        vm_goals.setdefault(g.vm_id, []).append(g)
+
+    # Build per-VM scores
+    vm_map = {v.id: v for v in vms}
+
+    def _vm_scores(vm_id: int) -> dict:
+        mods = vm_modules.get(vm_id, [])
+        gls = vm_goals.get(vm_id, [])
+
+        blue_defensive = sum(
+            m.points for m in mods
+            if m.completed and m.stage == "preapplied"
+        )
+        blue_reactive = sum(
+            g.defend_points * g.defend_count for g in gls
+        )
+        red_offensive = sum(
+            g.red_points * g.achievement_count for g in gls
+        )
+        return {
+            "vm_id": vm_id,
+            "hostname": vm_map[vm_id].hostname,
+            "blue_defensive": blue_defensive,
+            "blue_reactive": blue_reactive,
+            "blue_total": blue_defensive + blue_reactive,
+            "red_offensive": red_offensive,
+            "goals": [
+                {
+                    "module_id": g.module_id,
+                    "status": g.status,
+                    "achievement_count": g.achievement_count,
+                    "defend_count": g.defend_count,
+                }
+                for g in gls
+            ],
+        }
+
+    # Group VMs by team
+    team_ids = {v.team_id for v in vms}
+    teams_data = db.query(Team).filter(Team.id.in_(team_ids)).all()
+    team_map = {t.id: t for t in teams_data}
+
+    team_vms: dict[int, list[int]] = {}
+    for v in vms:
+        team_vms.setdefault(v.team_id, []).append(v.id)
+
+    teams_result = []
+    for team_id, t_vm_ids in team_vms.items():
+        vm_score_list = [_vm_scores(vid) for vid in t_vm_ids]
+        team_blue_def = sum(s["blue_defensive"] for s in vm_score_list)
+        team_blue_react = sum(s["blue_reactive"] for s in vm_score_list)
+        team_red = sum(s["red_offensive"] for s in vm_score_list)
+        teams_result.append({
+            "team_id": team_id,
+            "team_name": team_map[team_id].name if team_id in team_map else str(team_id),
+            "blue_defensive": team_blue_def,
+            "blue_reactive": team_blue_react,
+            "blue_total": team_blue_def + team_blue_react,
+            "red_offensive": team_red,
+            "vms": vm_score_list,
+        })
+
+    # Sort teams: highest blue total first
+    teams_result.sort(key=lambda t: t["blue_total"], reverse=True)
+
+    totals = {
+        "red": sum(t["red_offensive"] for t in teams_result),
+        "blue_defensive": sum(t["blue_defensive"] for t in teams_result),
+        "blue_reactive": sum(t["blue_reactive"] for t in teams_result),
+        "blue_total": sum(t["blue_total"] for t in teams_result),
+    }
+
+    return {
+        "event_id": event_id,
+        "teams": teams_result,
+        "totals": totals,
+    }
