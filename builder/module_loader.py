@@ -98,9 +98,6 @@ def load_all_modules() -> list[Module]:
         with open(yaml_path) as f:
             data = yaml.safe_load(f)
         module_type = data["type"]
-        # Stage: explicit YAML value takes precedence; fall back to type default
-        raw_stage = data.get("stage")
-        stage = raw_stage if raw_stage is not None else _default_stage(module_type)
         modules.append(Module(
             id=data["id"],
             name=data["name"],
@@ -123,7 +120,7 @@ def load_all_modules() -> list[Module]:
             min_ram_mb=data.get("min_ram_mb", 0),
             min_vcpu=data.get("min_vcpu", 0),
             supported_bases=data.get("supported_bases", []),
-            stage=stage,
+            stage=data.get("stage"),
             red_points=data.get("red_points", 0),
             defend_points=data.get("defend_points", 0),
             revert_verification=data.get("revert_verification", {}),
