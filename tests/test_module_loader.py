@@ -48,7 +48,6 @@ class TestGoalFields:
         assert m.revert_verification == {}
 
 
-@pytest.mark.skip(reason="goal YAMLs not yet created — created in Task 2")
 class TestLoadGoalModule:
     def test_goal_modules_loaded(self):
         """Verifies goal modules from modules/goals/ are picked up by load_all_modules()."""

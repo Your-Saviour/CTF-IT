@@ -1,0 +1,30 @@
+id: exfil_shadow
+name: Exfiltrate Shadow File
+description: Read and exfiltrate the /etc/shadow file containing password hashes, demonstrating credential access on the target system.
+type: goal
+difficulty: medium
+points: 0
+red_points: 400
+defend_points: 250
+category: credential-access
+tags: [exfil, credentials, collection]
+conflicts: []
+requires: []
+
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  exploit:
+    description: "Read /etc/shadow and stage it for exfiltration"
+    command: |
+      cat /etc/shadow > /tmp/.exfil_shadow_$(date +%s) && echo "GOAL_ACHIEVED: shadow file staged at /tmp/.exfil_shadow_*"
+
+verification:
+  type: file_hash_changed
+  path: /etc/shadow
+
+revert_verification:
+  type: file_absent
+  path: /tmp/.exfil_shadow_0

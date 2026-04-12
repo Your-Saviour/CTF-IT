@@ -1,0 +1,32 @@
+id: deface_website
+name: Deface Website
+description: Replace the target web application homepage with attacker content, demonstrating successful exploitation of the web stack.
+type: goal
+difficulty: medium
+points: 0
+red_points: 300
+defend_points: 200
+category: impact
+tags: [web, defacement, impact]
+conflicts: []
+requires: [vulnerable_flask_app]
+
+caldera:
+  tactic: impact
+  technique:
+    attack_id: T1491.001
+    name: "Defacement: Internal Defacement"
+  exploit:
+    description: "Replace web app homepage with attacker defacement page"
+    command: |
+      echo '<html><body><h1>HACKED BY RED TEAM</h1><p>This system has been compromised.</p></body></html>' > /opt/flask_app/templates/index.html && echo "GOAL_ACHIEVED: website defaced"
+
+verification:
+  type: http_response
+  label: localhost_5000
+  body_contains: "HACKED BY RED TEAM"
+
+revert_verification:
+  type: http_response
+  label: localhost_5000
+  body_not_contains: "HACKED BY RED TEAM"
