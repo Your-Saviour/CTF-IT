@@ -468,7 +468,7 @@ async def caldera_scoreboard(
 
     # Build VM filter
     vm_query = db.query(VM)
-    if event_id:
+    if event_id is not None:
         event = db.query(Event).filter(Event.id == event_id).first()
         if not event:
             return JSONResponse({"error": "Event not found"}, status_code=404)
@@ -478,7 +478,7 @@ async def caldera_scoreboard(
     vm_ids = [v.id for v in vms]
 
     if not vm_ids:
-        return {"event_id": event_id, "teams": [], "totals": {"red": 0, "blue_defensive": 0, "blue_reactive": 0}}
+        return {"event_id": event_id, "teams": [], "totals": {"red": 0, "blue_defensive": 0, "blue_reactive": 0, "blue_total": 0}}
 
     # Load all VMModules for these VMs
     modules = db.query(VMModule).filter(VMModule.vm_id.in_(vm_ids)).all()
