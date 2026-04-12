@@ -295,11 +295,22 @@ window.renderAttackTree = (function() {
             var totalW = maxNodeRight + PADDING;
             var totalH = maxNodeBottom + PADDING;
 
-            var svg = d3.select(container)
+            // Create an inner scroll wrapper so horizontal overflow actually
+            // triggers a scrollbar.  Without this, browsers (especially Safari)
+            // let the block-level SVG expand the parent instead of scrolling.
+            var scrollWrap = document.createElement('div');
+            scrollWrap.style.overflowX = 'auto';
+            scrollWrap.style.overflowY = 'hidden';
+            scrollWrap.style.maxWidth = '100%';
+            scrollWrap.style.width = '100%';
+            container.appendChild(scrollWrap);
+
+            var svg = d3.select(scrollWrap)
                 .append('svg')
                 .attr('width', totalW)
                 .attr('height', totalH)
-                .style('overflow', 'visible');
+                .style('overflow', 'visible')
+                .style('display', 'inline-block');
 
             var defs = svg.append('defs');
             // Arrow markers
