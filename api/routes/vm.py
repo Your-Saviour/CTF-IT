@@ -1317,6 +1317,8 @@ def _provision_event_vms(event_id: int) -> None:
                                 )
                                 if sized_plan != vm.vultr_plan:
                                     vm.vultr_plan = sized_plan
+                            else:
+                                _log.warning(f"VM {vm.hostname}: no base_type set, skipping plan sizing (using default_plan from vm_quota)")
 
                     db.commit()
                     vm_ids.append(vm.id)
