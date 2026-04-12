@@ -1,226 +1,440 @@
 # CTF-IT
 
-A CTF training platform where each user gets a uniquely generated Docker container with randomized vulnerabilities and hardening tasks. Users fix issues inside their container, then submit verification to the platform for scoring.
+A CTF training platform where each user gets a uniquely generated Docker container with randomised vulnerabilities and hardening tasks. Users fix issues inside their container and submit verification to the platform for scoring. Supports red team emulation via MITRE Caldera, automated VM provisioning via Vultr, and Ansible export for bare-metal deployments.
+
+## Features
+
+- **Docker image generation** — each participant gets a container with a randomised set of modules selected from the event quota
+- **Multi-event support** — independent leaderboards, quotas, and settings per event
+- **Blue team scoring** — vulnerabilities, hardening tasks, and payloads; points awarded when fixed
+- **Red team emulation** — MITRE Caldera integration with attack trees, adversary operations, and goal objectives
+- **VM auto-provisioning** — Vultr VPS creation and Ansible module deployment via Semaphore
+- **Ansible export** — generate playbooks from any event quota for bare-metal deployments
+- **Network topology** — live D3 force-directed graph of event → team → VM hierarchy
 
 ## Quick Start
 
+This guide covers deploying on a VPS with a domain. The full production stack lives in `deploy/` and uses Traefik for TLS termination and subdomain routing.
+
 ### Prerequisites
 
-- Docker with Docker Compose
+- VPS with Docker + Docker Compose installed
+- Domain with DNS A record pointing to the server's public IP
+- Firewall ports open:
+  - `80`, `443` — Traefik (HTTP redirect + HTTPS)
+  - `7010`–`7012`, `8022`, `2222`, `8853`, `8888` — Caldera agent communication (direct, not proxied)
 
-### 1. Configure environment variables
+### 1. Clone the repository
 
 ```bash
-cp .env.example .env        # edit .env — at minimum change SECRET_KEY
-echo "ROOT_PASSWORD=changeme123" > base/.env  # change the password if you like
+git clone <repo-url> ctf-it
+cd ctf-it
 ```
 
-See the `.env.example` files for documentation on each variable. For LAN deployments, set `REGISTRY_HOST` to the server's LAN IP (e.g. `192.168.1.50:5050`).
+### 2. Configure `deploy/.env`
 
-### 2. Build the base image
+```bash
+cp deploy/.env.example deploy/.env
+```
+
+Edit `deploy/.env`:
+
+| Variable | Description | How to generate |
+|---|---|---|
+| `DOMAIN` | Base domain, e.g. `example.com` | Your domain |
+| `ACME_EMAIL` | Let's Encrypt notification email | Your email |
+| `TRAEFIK_DASHBOARD_AUTH` | Basic auth for Traefik dashboard | `echo "$(htpasswd -nB admin)" \| sed 's/\$/\$\$/g'` |
+| `REGISTRY_AUTH` | Basic auth for Docker registry | Same as above |
+| `SEMAPHORE_ADMIN_PASSWORD` | Semaphore admin password | `openssl rand -base64 32` |
+| `SEMAPHORE_POSTGRES_PASSWORD` | Semaphore database password | `openssl rand -base64 32` |
+| `SEMAPHORE_ACCESS_KEY_ENCRYPTION` | Semaphore secrets encryption key | `openssl rand -base64 32` |
+| `CALDERA_AGENT_URL` | Public address agents beacon to | `http://<SERVER_IP>:8888` — use the server's **public IP**, not the domain. Port 8888 is published directly, not reverse-proxied. |
+
+Optional VM provisioning variables:
+
+```bash
+VULTR_API_KEY=your-key            # Enables Vultr VM creation from admin panel
+VULTR_DEFAULT_REGION=ewr          # Default Vultr region (ewr, lax, syd, mel, ams, etc.)
+CLOUDFLARE_API_TOKEN=your-token   # Auto-creates DNS A records on VM creation
+CLOUDFLARE_DOMAIN=example.com
+```
+
+### 3. Configure root `.env`
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+| Variable | Description | How to generate |
+|---|---|---|
+| `SECRET_KEY` | Session signing + deterministic flag generation | `openssl rand -base64 32` |
+| `EVENT_QUOTA` | Default module quota for the first event | See [Events & Scoring](#events--scoring) |
+| `ROOT_PASSWORD` | Default root password baked into base images | Choose a value; `password_changed` modules check against this |
+
+### 4. Set base image password
+
+```bash
+echo "ROOT_PASSWORD=changeme123" > base/.env
+```
+
+This sets the default root password baked into user containers. The `password_changed` hardening module checks that participants change it from this value. Choose any password — participants will need to change it as part of the challenge.
+
+### 5. Configure Caldera
+
+```bash
+cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
+```
+
+Edit `deploy/caldera/config/local.yml` and replace **every** `REPLACE_ME` value:
+
+- `api_key_blue`, `api_key_red`, `encryption_key`, `crypt_salt` — generate each with `openssl rand -base64 32`
+- `users.blue.blue`, `users.red.admin`, `users.red.red` — set passwords
+- `app.contact.tunnel.ssh.user_password`, `app.contact.ftp.pword` — set passwords
+
+### 6. Build the base image
 
 ```bash
 docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
 
-**Cross-architecture builds (e.g. AMD64 server → Apple Silicon users):**
-
-If the server and user machines have different CPU architectures, you need to register QEMU emulation first (one-time setup):
+**Cross-architecture builds** (e.g. AMD64 server, Apple Silicon users):
 
 ```bash
+# One-time QEMU registration
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-```
 
-Then build with `--platform` targeting the users' architecture:
-
-```bash
+# Build for target architecture
 docker build --platform linux/arm64 --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
 
-Also set `DOCKER_PLATFORM=linux/arm64` in `.env` so the builder generates user images for the same architecture. This is only needed when building for a different architecture — skip this if the server and users are on the same platform.
+Also set `DOCKER_PLATFORM=linux/arm64` in root `.env`.
 
-### 3. Start the platform
+### 7. Start the stack
 
 ```bash
+cd deploy
 docker compose up -d
 ```
 
-This starts two services:
-- **API** at `http://localhost:8080`
-- **Docker Registry** at `http://localhost:5050`
+Services become available at (replace `example.com` with your `DOMAIN`):
 
-Built images are automatically pushed to the local registry. Users pull images with `docker pull localhost:5050/ctf-<uuid>`.
+| Service | URL | Description |
+|---|---|---|
+| CTF dashboard | `https://ctf.example.com` | User registration, dashboard, scoreboard |
+| MITRE Caldera | `https://caldera.example.com` | Red team C2 server |
+| Ansible Semaphore | `https://semaphore.example.com` | Playbook execution UI |
+| Docker registry | `https://registry.example.com` | Built image distribution |
+| Dockhand | `https://dockhand.example.com` | Container management UI |
+| Traefik dashboard | `https://traefik.example.com` | Reverse proxy dashboard |
 
-## How It Works
+### 8. Create the admin account
 
-1. User registers on the platform
-2. A Docker image is built in the background with randomly selected modules based on the event quota
-3. The image is pushed to the local Docker registry
-4. User pulls and runs their container from the registry
-5. User fixes vulnerabilities and implements hardening tasks inside the container
-6. User runs `audit.py` inside the container to gather system state
-7. Results are submitted to `/api/verify` for scoring
+Navigate to `https://ctf.example.com` and register. **The first user to register automatically becomes admin.** Register before sharing the URL with participants.
 
-## Project Structure
+### 9. Configure Docker registry login (user machines)
 
+The registry is behind TLS and basic auth. Every machine that pulls images (including the server itself during development) must log in:
+
+```bash
+docker login registry.example.com
+# Username: admin (or whatever you set in REGISTRY_AUTH)
+# Password: the password you set
 ```
-CTF-IT/
-  api/                  # FastAPI application
-    routes/             # auth, images, verify, scoreboard, admin, ansible_export, caldera_export, caldera_setup, vm
-    services/           # semaphore.py — Ansible Semaphore REST client
-    models.py           # User, UserImage, UserModule, Event, Team, VM, VMModule, PlatformSettings
-    main.py             # App entry point
-  base/                 # Base Docker image (Ubuntu 22.04 + systemd)
-  builder/              # Image build orchestration
-    main.py             # Build entry point
-    selector.py         # Module selection with quota/conflicts/deps
-    renderer.py         # Dockerfile + manifest generation
-    ansible.py          # Ansible playbook export generation
-    caldera.py          # MITRE Caldera plugin export generation
-    registry.py         # Image tagging, push to local registry
-    module_loader.py    # YAML module parsing
-  modules/              # Module definitions
-    vulns/              # Vulnerability modules (one folder per module)
-    hardening/          # Hardening modules (one folder per module)
-    application_external/  # External application modules (web apps, services for vulns to target)
-    application_internal/  # Internal application modules (system services like Docker, VS Code)
-    payloads/              # Payload modules (malicious artifacts users must find and remove)
-  templates/
-    Dockerfile.j2       # Jinja2 template for user images
-    playbook.yml.j2     # Jinja2 template for Ansible playbook export
-  frontend/
-    templates/          # Jinja2 HTML templates
-  playbooks/            # Ansible playbooks for Vultr VM lifecycle (run via Semaphore)
-    create-vm.yml       # Provision Vultr VPS + optional Cloudflare DNS A record
-    destroy-vm.yml      # Destroy Vultr instance + remove DNS record
-    collections/
-      requirements.yml  # vultr.cloud + community.general (auto-installed by Semaphore)
-  audit.py              # In-container audit script (broad system snapshot)
-  docker-compose.yml    # Production deployment
-  requirements.txt      # Python dependencies
+
+No `insecure-registries` config needed — Traefik provides valid TLS certificates via Let's Encrypt.
+
+## Events & Scoring
+
+Events are the central organising unit. Each event has its own module quota, leaderboard, and settings. Users register into exactly one event.
+
+### Event lifecycle
+
+| Status | Meaning |
+|---|---|
+| `draft` | Invisible to users; safe to configure |
+| `open` | Accepts user registration |
+| `stopped` | Archived; leaderboard frozen; verification blocked |
+
+Manage events from the admin panel: create → configure → start → stop.
+
+### Creating an event
+
+Required fields: name, quota JSON.
+
+Optional: description (shown on registration page), welcome message (shown on user dashboard after registration), time limit in minutes (display only — enforcement is manual via stop).
+
+### Quota JSON
+
+The quota defines how many modules of each type and difficulty are selected per user at registration time.
+
+```json
+{
+  "vulnerability": {"easy": 1, "medium": 2, "hard": 1},
+  "hardening":     {"easy": 1, "medium": 1, "hard": 0},
+  "payload":       {"easy": 1, "medium": 0, "hard": 0},
+  "application_external": {"easy": 1},
+  "goal":          {"easy": 1},
+  "categories":    {"authentication": 2},
+  "tags":          {"privilege-escalation": 1}
+}
 ```
+
+Valid type keys: `vulnerability`, `hardening`, `payload`, `application_external`, `application_internal`, `goal`.
+
+`categories` and `tags` are inclusive filters — modules already selected by type/difficulty count toward these totals. Use them to guarantee coverage of a particular topic without double-selecting.
+
+### Scoring model
+
+| Score type | Awarded when | Formula |
+|---|---|---|
+| Blue defensive | User completes a `preapplied` module | `points` per module |
+| Blue reactive | Blue team reverts a red team goal | `defend_points × defend_count` per goal |
+| Red offensive | Red team achieves a goal | `red_points × achievement_count` per goal |
+
+### Scoreboards
+
+- `GET /api/scoreboard?event_id=N` — blue team per-event rankings (public)
+- `GET /admin/caldera/scoreboard?event_id=N` — red vs blue combined view (admin only)
+- `GET /api/scoreboard/events` — lists all non-draft events for the selector dropdown
+
+Leaderboards are frozen when event status transitions to `stopped`.
 
 ## Modules
 
-Modules are self-contained YAML definitions with optional shell scripts. See [MODULE_GUIDE.md](MODULE_GUIDE.md) for a complete guide on creating new modules.
+Modules are self-contained YAML definitions with optional shell scripts. See [MODULE_GUIDE.md](MODULE_GUIDE.md) for the full reference: YAML fields, verification types, build steps, and examples.
 
-Each module lives in its own folder:
+### Module types
 
-```
-modules/
-  vulns/
-    world_writable_shadow/
-      world_writable_shadow.yaml
-      world_writable_shadow.sh
-    suid_find/
-      suid_find.yaml
-      suid_find.sh
-    writable_cron_script/
-      writable_cron_script.yaml
-      writable_cron_script.sh
-    nopasswd_sudo/
-      nopasswd_sudo.yaml
-      nopasswd_sudo.sh
-    unauthorized_ssh_key/
-      unauthorized_ssh_key.yaml
-      unauthorized_ssh_key.sh
-    flask_defacement/
-      flask_defacement.yaml
-      deface_flask.sh
-  hardening/
-    change_root_password/
-      change_root_password.yaml
-    disable_ssh_root_login/
-      disable_ssh_root_login.yaml
-    install_fail2ban/
-      install_fail2ban.yaml
-    setup_ssh_key_auth/
-      setup_ssh_key_auth.yaml
-  application_external/
-    vulnerable_flask_app/
-      vulnerable_flask_app.yaml
-      install_flask_app.sh
-  payloads/
-    <module_id>/
-      <module_id>.yaml
-      <module_id>.sh
-```
+| Type | Description | Points |
+|---|---|---|
+| `vulnerability` | Misconfiguration introduced at build time; user fixes it | `points` on fix |
+| `hardening` | Security measure the user must implement from scratch | `points` on completion |
+| `payload` | Malicious artifact planted at build time; user finds and removes it | `points` on removal |
+| `application_external` | Network-accessible service (web app, API) targeted by other modules | 0 |
+| `application_internal` | System-level tool (Docker daemon, VS Code Server) targeted by other modules | 0 |
+| `goal` | Red team objective — drives red vs blue scoring | see below |
 
-## Running a User Container
+### `stage` field (vulnerability and payload modules only)
 
-Pull your image from the local registry, then run with systemd flags:
+| Stage | Effect |
+|---|---|
+| `preapplied` (default) | Visible on blue team dashboard; scored when fixed |
+| `caldera` | Hidden from blue team dashboard, hints, and scoring; Caldera discovers and exploits it |
+
+### Goal modules
+
+Goal modules represent red team objectives: deface a website, install a C2 beacon, exfiltrate `/etc/shadow`. They live in `modules/goals/` and appear as terminal nodes (phase 8) in the attack tree.
+
+**Lifecycle (cyclical):** `pending → achieved → defended → achieved → ...`
+
+Each cycle increments `achievement_count` (red team points) or `defend_count` (blue team points). Blue team is incentivised to fix root causes — Caldera can re-exploit on the next check cycle.
+
+Key YAML fields beyond standard module fields:
+
+| Field | Description |
+|---|---|
+| `red_points` | Awarded to red team each time the goal is achieved |
+| `defend_points` | Awarded to blue team each time the goal is reverted |
+| `verification` | Detects goal was achieved (e.g. `http_response` body_contains) |
+| `revert_verification` | Detects blue team reverted it |
+
+→ See [MODULE_GUIDE.md](MODULE_GUIDE.md) for full YAML reference, all verification types, build steps, and complete examples.
+
+## Red Team (Caldera)
+
+The Caldera integration generates an adversary emulation plugin from selected modules, loads it into MITRE Caldera, and runs attack operations against blue team VMs. It is a core feature, not an add-on.
+
+### How it works
+
+1. Modules with `caldera` metadata define reconnaissance and exploitation steps
+2. CTF-IT generates a Caldera plugin (abilities + adversary definitions) from these modules
+3. The plugin is installed into the running Caldera container
+4. Caldera runs adversary operations against VMs; results feed back into the attack tree
+5. Goal modules act as terminal objectives — achieving or reverting them awards red/blue points
+
+### Setup
+
+Before using Caldera features:
+
+1. Ensure `deploy/caldera/config/local.yml` has all `REPLACE_ME` values replaced (see Quick Start)
+2. Set `CALDERA_AGENT_URL=http://<SERVER_IP>:8888` in `deploy/.env` — this is the address agents on target VMs use to beacon back. Use the **public IP** (not domain), because port 8888 is published directly to the host, not reverse-proxied through Traefik
+3. Ensure firewall allows inbound on: `7010`, `7011/udp`, `7012`, `8022`, `2222`, `8853`, `8888`
+
+### Plugin export
+
+Download the Caldera plugin zip for inspection or manual upload:
 
 ```bash
-docker pull localhost:5050/ctf-<uuid>
-
-docker run -d --privileged --cgroupns=private \
-  --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
-  -p 2222:22 localhost:5050/ctf-<uuid>
+curl -X POST https://ctf.example.com/admin/caldera-export \
+  -H "Cookie: session=<admin_session>" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": 1}' \
+  -o ctf-exploit.zip
 ```
 
-> `--privileged` is required because systemd needs read-write access to the cgroup filesystem. `--cgroupns=private` isolates the container's cgroup namespace from the host to prevent container escape.
+Or use `{"quota": {...}}` instead of `{"event_id": N}` to export from an arbitrary quota.
 
-Connect via SSH:
+### One-click setup
 
-```bash
-ssh root@localhost -p 2222
+The recommended path — does everything automatically:
+
+**Admin panel → Caldera → Setup** (or `POST /admin/caldera-setup` with `{"event_id": N}`)
+
+This:
+1. Generates the plugin from the event's modules
+2. Installs it to `deploy/caldera/plugins/ctf-exploit/`
+3. Patches `deploy/caldera/config/local.yml` to enable the `ctf-exploit` plugin
+4. Restarts the Caldera container and waits for it to become healthy
+5. Creates a "CTF Red Team Emulation" operation
+6. Caches attack tree JSON on each VM in the event
+
+### Attack trees
+
+Each VM gets a directed acyclic graph (DAG) of its assigned modules ordered by ATT&CK kill chain phase:
+
+| Phase | Name |
+|---|---|
+| -1 | infrastructure |
+| 0 | initial-access |
+| 1 | execution |
+| 2 | persistence |
+| 3 | privilege-escalation |
+| 4 | credential-access |
+| 5 | collection |
+| 6 | impact |
+| 7 | command-and-control |
+| 8 | goal (terminal nodes) |
+
+Node colours in the visualisation: green = exploited, red = defended, gray = skipped, cyan = running.
+
+Attack trees are rendered on the VM detail page and the Caldera operation detail page.
+
+**API:**
+- `GET /admin/caldera/attack-tree/{vm_id}` — raw tree JSON
+- `GET /admin/caldera/operations/{op_id}?include_tree=true` — tree annotated with operation results
+
+### Operations
+
+```
+GET    /admin/caldera/operations            # List operations
+POST   /admin/caldera/operations            # Create operation {"event_id": N}
+DELETE /admin/caldera/operations/{op_id}    # Delete operation
+GET    /admin/caldera/vm-summary            # Per-VM attack aggregates
+GET    /admin/caldera/vm/{vm_id}/results    # VM-specific operation results
 ```
 
-### Insecure Registry (HTTP without TLS)
+### Goal state machine
 
-The local registry runs over plain HTTP. Docker requires you to explicitly allow this, otherwise pulls and pushes will fail with a TLS error.
+Run a check cycle against a VM's goal:
 
-Edit `/etc/docker/daemon.json` (create it if it doesn't exist):
+```
+POST /admin/vms/{vm_id}/goals/{goal_id}/check
+```
+
+CTF-IT runs `verification` (did red team achieve the goal?) and `revert_verification` (did blue team revert it?) against the VM, transitions the state, and awards points accordingly.
+
+Currently supports `http_response` verification type for remote VMs. Other verification types return `501 Not Implemented`.
+
+### Red vs blue scoreboard
+
+```
+GET /admin/caldera/scoreboard?event_id=N
+```
+
+Returns per-team `blue_defensive` (completed preapplied module points), `blue_reactive` (goal reverts × defend_points), and `red_offensive` (goal achievements × red_points).
+
+## VM Provisioning
+
+CTF-IT can provision and manage VMs for team-based events. VMs are team-scoped. Modules are assigned to VMs the same way they are to Docker containers.
+
+### Teams
+
+Create teams per event from the admin panel (Admin → Teams & VMs). Teams cannot be deleted while they have VMs.
+
+### Registering an existing VM
+
+Use **Register Existing** in the admin panel to add a machine already provisioned elsewhere (bare metal, another cloud, etc.). Only IP address and SSH connection details are required — no Vultr API key needed.
+
+### Vultr provisioning
+
+Requires `VULTR_API_KEY` and `VULTR_DEFAULT_REGION` in root `.env`.
+
+1. Admin panel → Teams & VMs → **Create VM** → **Create on Vultr** tab
+2. Choose team, OS, and plan (dropdowns populated live from the Vultr API)
+3. Submit — CTF-IT stages `playbooks/create-vm.yml`, runs it via Semaphore, and polls for result
+4. VM is registered with its public IP; if `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_DOMAIN` are set, a DNS A record (`hostname.DOMAIN`) is created automatically
+
+To destroy: VM detail page → **Destroy on Vultr** — runs `playbooks/destroy-vm.yml`, removes the Vultr instance, deletes the DNS record, and removes the VM from the database.
+
+### VM quota (auto-provisioning on event start)
+
+Define a `vm_quota` JSON on an event to automatically provision all VMs when the event starts.
 
 ```json
 {
-  "insecure-registries": ["localhost:5050"]
+  "ubuntu_target": {
+    "os": "Ubuntu 24.04 LTS x64",
+    "default_plan": "vc2-1c-2gb",
+    "count": 3,
+    "role": "target",
+    "region": "ewr"
+  },
+  "red_team": {
+    "os": "Ubuntu 24.04 LTS x64",
+    "default_plan": "vc2-2c-4gb",
+    "count": 1,
+    "role": "attacker"
+  }
 }
 ```
 
-For LAN deployments where users pull from a different machine, use the server's IP instead:
+| Role | Behaviour |
+|---|---|
+| `target` | Modules assigned, Ansible playbook deployed after VM creation. Plan auto-sized from module `min_ram_mb`/`min_vcpu` requirements. |
+| `attacker` | Bare OS only, no modules. Goes directly to `active` after Vultr creation. |
 
-```json
-{
-  "insecure-registries": ["192.168.1.50:5050"]
-}
-```
+`POST /admin/events/{id}/start` triggers auto-provisioning when `vm_quota` is present.
 
-Then restart Docker:
+**Provisioning status:**
 
-```bash
-# Linux
-sudo systemctl restart docker
+`GET /admin/events/{id}/provision-status` — returns aggregate progress (`total`, `creating`, `registered`, `provisioning`, `active`, `failed`) and a per-VM status list. The admin UI polls this every 5 seconds and shows a real-time progress bar and "Retry Failed" button.
 
-# macOS / Windows
-# Restart Docker Desktop
-```
+### Network topology
 
-This must be done on **every machine** that pulls or pushes images (the server and all user machines).
+`/admin/topology` — interactive D3 force-directed graph showing the event → team → VM hierarchy.
+
+- Hover for IP, OS, and module progress bar
+- Right-click for context menu (view details, provision, assign modules, export playbook, destroy)
+- Double-click to navigate to detail page
+- Live polling every 5 seconds — new nodes fade in, removed nodes fade out
+- VM node border colour reflects status: green (active), amber (creating/provisioning), red (failed), grey (registered/stopped)
+- Filter by event with the dropdown in the toolbar
 
 ## Ansible Export
 
-As an alternative to Docker containers, administrators can export modules as Ansible playbooks. This generates a playbook that applies the same vulnerabilities, hardening tasks, and applications to bare machines or VMs.
+As an alternative to Docker containers, administrators can export modules as Ansible playbooks to apply the same vulnerabilities, hardening tasks, and applications to bare machines or VMs.
 
-### API
+### Export
 
 ```bash
-# Export using a quota
-curl -X POST http://localhost:8080/admin/ansible-export \
-  -H "Cookie: session=<admin_session>" \
-  -H "Content-Type: application/json" \
-  -d '{"quota": {"vulnerability": {"easy": 2, "medium": 1, "hard": 0}}}' \
-  -o ctf-playbook.zip
-
-# Export using an event's quota
-curl -X POST http://localhost:8080/admin/ansible-export \
+# Export from an event's quota
+curl -X POST https://ctf.example.com/admin/ansible-export \
   -H "Cookie: session=<admin_session>" \
   -H "Content-Type: application/json" \
   -d '{"event_id": 1}' \
   -o ctf-playbook.zip
+
+# Export from an explicit quota
+curl -X POST https://ctf.example.com/admin/ansible-export \
+  -H "Cookie: session=<admin_session>" \
+  -H "Content-Type: application/json" \
+  -d '{"quota": {"vulnerability": {"easy": 2, "medium": 1, "hard": 0}}}' \
+  -o ctf-playbook.zip
 ```
 
-### Running the Playbook
+### Running the playbook
 
 ```bash
 unzip ctf-playbook.zip -d ctf-playbook
@@ -228,74 +442,110 @@ cd ctf-playbook
 ansible-playbook -i inventory playbook.yml --become
 ```
 
-The target machine should be Ubuntu 22.04 with the same base packages as the `ctf-base` Docker image. The playbook runs all module scripts and copies all module files in dependency order.
+Target machines should be Ubuntu 22.04 with the same base packages as the `ctf-base` Docker image.
 
-### Output Structure
+### Output structure
 
 ```
 ctf-playbook/
-  playbook.yml              # Ansible playbook
-  scripts/                  # Module shell scripts
+  playbook.yml
+  scripts/
     suid_find__suid_find.sh
     inventory_dashboard__setup.sh
-  files/                    # Module files (for copy steps)
+  files/
     inventory_dashboard__app.py
     inventory_dashboard__inventory.service
 ```
 
-## Vultr VM Provisioning
+### Module compatibility
 
-When `VULTR_API_KEY` is set, admins can provision and destroy Vultr VPS instances directly from the admin panel. Playbooks run via the existing Ansible Semaphore integration — no external dependencies beyond the environment variables below.
+All modules are automatically compatible with Ansible export. The playbook uses:
+- `ansible.builtin.script` for `run` steps (same `.sh` scripts as Docker builds)
+- `ansible.builtin.copy` for `copy` steps (same files, same destination paths)
 
-### Prerequisites
+**Note for module authors:** Docker builds create parent directories automatically when copying files; Ansible on bare machines does not. Use `mkdir -p` in `run` steps before copying files to new directories.
 
-Set in `.env` (see `.env.example` for details):
+## Project Structure
 
-```bash
-VULTR_API_KEY=your-vultr-api-key
-VULTR_DEFAULT_REGION=ewr          # Vultr region code for new instances
-
-# Optional — auto-creates hostname.domain DNS A records
-CLOUDFLARE_API_TOKEN=your-cf-token
-CLOUDFLARE_DOMAIN=example.com
 ```
-
-The Semaphore container also needs `VULTR_API_KEY` — the `deploy/docker-compose.yml` passes it through automatically via `${VULTR_API_KEY:-}`.
-
-### Create a VM
-
-1. Admin panel → Teams & VMs → **Create VM** → select **Create on Vultr** tab
-2. Choose team, OS, and plan (dropdowns populated live from the Vultr API)
-3. Submit — CTF-IT stages `playbooks/create-vm.yml`, runs it via Semaphore, and polls for the result
-4. The VM detail page shows a live step-by-step progress card while the instance is being created
-5. Once complete, the VM is registered with its IP address (and DNS record if Cloudflare is configured) and ready for module assignment
-
-### Destroy a VM
-
-On the VM detail page, click **Destroy on Vultr** (appears when `vultr_id` is set). CTF-IT runs `playbooks/destroy-vm.yml` via Semaphore, which deletes the Vultr instance and the Cloudflare DNS record, then removes the VM from the database.
-
-### Register an Existing VM
-
-Use the **Register Existing** tab on the Create VM form to add a machine you've already provisioned elsewhere (bare metal, another cloud, etc.). Only the IP address and connection details are needed — no Vultr API key required.
-
-### Ansible Collections
-
-`playbooks/collections/requirements.yml` lists the `vultr.cloud` and `community.general` collections. Semaphore installs them automatically before the first playbook run — no manual setup needed.
-
-## Key Design Decisions
-
-- **Deterministic flags**: `HMAC(SECRET_KEY, user_id)` ensures the same user always gets the same flag, enabling rebuilds without storing flags separately
-- **Stateless verification**: the flag in the payload proves container legitimacy, no session required
-- **Modular content**: adding a new module is typically just a YAML file and optional shell script — no code changes needed unless introducing a new verification type
-
-## Registry
-
-The platform includes a local Docker Registry (`registry:2`) running on port 5050. Built images are automatically pushed to this registry after each build, and local copies are cleaned up to save disk space.
-
-- **Registry catalog**: `curl http://localhost:5050/v2/_catalog`
-- **Image tags**: `curl http://localhost:5050/v2/ctf-<uuid>/tags/list`
-- **Data persistence**: registry data is stored in the `registry_data` Docker volume and survives restarts
+CTF-IT/
+  api/                          # FastAPI application
+    routes/                     # Route handlers
+      auth.py                   # Registration, login, logout
+      images.py                 # Image build status polling
+      verify.py                 # Submission and scoring
+      scoreboard.py             # Per-event blue team scoreboard
+      admin.py                  # Admin panel and event management
+      ansible_export.py         # Ansible playbook export
+      caldera_export.py         # Caldera plugin export
+      caldera_setup.py          # One-click Caldera setup
+      caldera_ops.py            # Caldera operations and results API
+      caldera_tree.py           # Attack tree API
+      vm.py                     # Team/VM CRUD and topology
+      vm_goals.py               # VMGoal state machine API
+    services/
+      semaphore.py              # Ansible Semaphore REST client
+    models.py                   # Database models
+    main.py                     # App entry point
+  base/                         # Base Docker image (Ubuntu 22.04 + systemd)
+  builder/                      # Image build orchestration
+    main.py                     # Build entry point
+    selector.py                 # Module selection (quota, conflicts, deps)
+    renderer.py                 # Dockerfile + manifest generation
+    ansible.py                  # Ansible playbook export
+    caldera.py                  # Caldera plugin generation
+    attack_tree.py              # Attack tree DAG construction and DFS path extraction
+    registry.py                 # Image tagging and registry push
+    module_loader.py            # YAML module parsing
+    plan_sizing.py              # Vultr plan sizing from module resource requirements
+    vm_quota_validation.py      # vm_quota JSON schema validation
+    quota_validation.py         # EVENT_QUOTA JSON schema validation
+  modules/                      # Module definitions
+    vulns/                      # Vulnerability modules
+    hardening/                  # Hardening modules
+    payloads/                   # Payload modules
+    application_external/       # External application modules
+    application_internal/       # Internal application modules
+    goals/                      # Goal modules (red team objectives)
+  templates/
+    Dockerfile.j2               # Jinja2 template for user images
+    playbook.yml.j2             # Jinja2 template for Ansible playbook export
+  frontend/
+    templates/                  # Jinja2 HTML templates
+  playbooks/                    # Ansible playbooks for Vultr VM lifecycle
+    create-vm.yml               # Provision Vultr VPS + optional Cloudflare DNS record
+    destroy-vm.yml              # Destroy Vultr instance + remove DNS record
+    collections/
+      requirements.yml          # vultr.cloud + community.general (auto-installed by Semaphore)
+  deploy/                       # Production deployment stack
+    docker-compose.yml          # Traefik + Dockhand + API + Registry + Caldera + Semaphore
+    .env.example                # Deployment environment variables
+    caldera/
+      config/
+        local.yml.example       # Caldera configuration template
+      plugins/
+        ctf-exploit/            # Caldera plugin directory (populated by caldera-setup)
+    traefik/
+      traefik.yml               # Traefik static configuration
+  audit.py                      # In-container audit script (broad system snapshot)
+  docker-compose.yml            # Development/testing stack only (no Traefik, no TLS)
+  requirements.txt              # Python dependencies
+  MODULE_GUIDE.md               # Module authoring reference
+  TEST_PLAN.md                  # End-to-end integration test plan
+```
 
 ## Testing
 
-See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test. Copy `.env.test` to `.env` to use a test configuration that selects all modules.
+> **Note:** Tests run against the root `docker-compose.yml` (the development stack, no Traefik). **Do not** run tests against `deploy/docker-compose.yml`.
+
+See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test.
+
+To run the automated e2e test:
+
+```bash
+docker compose down -v && tests/e2e_test.sh
+```
+
+`.env.test` is checked into the repo with a quota that selects all 10 modules (9 scored + 1 app). The e2e script copies it to `.env` automatically.
+
+`ROOT_PASSWORD` in `base/.env` is `changeme123` — this is the known default the `password_changed` verification module checks against.
