@@ -1,12 +1,11 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
+import logging
 
 import yaml
 
 from builder.module_loader import CopyStep, RunStep
-
-Step = Union[CopyStep, RunStep]
 
 
 @dataclass
@@ -17,7 +16,7 @@ class PlaybookStep:
 BaseStep = Union[CopyStep, RunStep, PlaybookStep]
 
 
-def _parse_base_steps(data: dict, source_dir: Path) -> list[BaseStep]:
+def _parse_base_steps(data: dict) -> list[BaseStep]:
     """Parse steps from YAML data, handling run:, copy:, and playbook: entries."""
     if "steps" in data:
         steps = []
@@ -58,20 +57,25 @@ BASES_DIR = Path(__file__).resolve().parent.parent / "bases"
 def load_base_type(base_id: str) -> BaseType:
     """Load a single base type by ID from bases/<base_id>/<base_id>.yaml."""
     yaml_path = BASES_DIR / base_id / f"{base_id}.yaml"
-    with open(yaml_path) as f:
-        data = yaml.safe_load(f)
-    source_dir = yaml_path.parent
-    return BaseType(
-        id=data["id"],
-        name=data["name"],
-        description=data["description"],
-        os=data["os"],
-        default_plan=data["default_plan"],
-        packages=data.get("packages", []),
-        steps=_parse_base_steps(data, source_dir),
-        disabled=bool(data.get("disabled", False)),
-        source_dir=source_dir,
-    )
+    try:
+        with open(yaml_path) as f:
+            data = yaml.safe_load(f)
+        source_dir = yaml_path.parent
+        return BaseType(
+            id=data["id"],
+            name=data["name"],
+            description=data["description"],
+            os=data["os"],
+            default_plan=data["default_plan"],
+            packages=data.get("packages", []),
+            steps=_parse_base_steps(data),
+            disabled=bool(data.get("disabled", False)),
+            source_dir=source_dir,
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Base type '{base_id}' not found at {yaml_path}") from exc
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"Base type '{base_id}' ({yaml_path}) is malformed: {exc}") from exc
 
 
 def load_all_bases() -> list[BaseType]:
@@ -84,6 +88,7 @@ def load_all_bases() -> list[BaseType]:
             continue
         yaml_path = base_dir / f"{base_dir.name}.yaml"
         if not yaml_path.exists():
+            logging.warning(f"bases/{base_dir.name}/ has no matching YAML file, skipping")
             continue
         bases.append(load_base_type(base_dir.name))
     return bases
