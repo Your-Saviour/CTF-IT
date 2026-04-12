@@ -547,6 +547,7 @@
             const g = d3.select(this);
             const w = 130, h = 42, rx = 8;
             g.append('rect')
+                .attr('class', 'event-bg')
                 .attr('x', -w / 2).attr('y', -h / 2)
                 .attr('width', w).attr('height', h)
                 .attr('rx', rx)
@@ -671,6 +672,9 @@
                     .style('filter', `drop-shadow(0 0 6px ${color}50)`);
                 g.selectAll('.vm-rack').attr('stroke', color);
                 g.selectAll('.vm-led').attr('fill', color);
+            } else if (d.type === 'event') {
+                const color = statusColor(d.status);
+                g.select('.event-bg').attr('stroke', color);
             }
         });
     }
@@ -731,14 +735,15 @@
     // ── Tooltip ───────────────────────────────────────────────────────────────
     function showTooltip(event, d) {
         if (d.type === 'wan') return;
+        const esc = s => { const el = document.createElement('div'); el.textContent = s ?? ''; return el.innerHTML; };
         let html = '';
         if (d.type === 'vm') {
             const pct = d.modules_total > 0 ? Math.round((d.modules_completed / d.modules_total) * 100) : 0;
             html = `
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Hostname</span><span class="topo-tooltip-value">${d.hostname || d.label}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">IP</span><span class="topo-tooltip-value">${d.ip || '—'}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">OS</span><span class="topo-tooltip-value">${d.os || '—'}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${d.status}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Hostname</span><span class="topo-tooltip-value">${esc(d.hostname || d.label)}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">IP</span><span class="topo-tooltip-value">${esc(d.ip || '—')}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">OS</span><span class="topo-tooltip-value">${esc(d.os || '—')}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${esc(d.status)}</span></div>
                 <div class="topo-tooltip-row"><span class="topo-tooltip-label">Modules</span><span class="topo-tooltip-value">${d.modules_completed}/${d.modules_total}</span></div>
                 <div class="topo-tooltip-progress"><div class="topo-tooltip-progress-bar" style="width:${pct}%"></div></div>
             `;
@@ -757,10 +762,10 @@
         } else if (d.type === 'event') {
             const eventVMs = currentNodes.filter(n => n.type === 'vm' && n.event_id === d.id);
             html = `
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Event</span><span class="topo-tooltip-value">${d.label}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${d.status}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Event</span><span class="topo-tooltip-value">${esc(d.label)}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">Status</span><span class="topo-tooltip-value" style="color:${statusColor(d.status)}">${esc(d.status)}</span></div>
                 <div class="topo-tooltip-row"><span class="topo-tooltip-label">Teams</span><span class="topo-tooltip-value">${d.team_count ?? 0}</span></div>
-                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs (canonical)</span><span class="topo-tooltip-value">${eventVMs.length}</span></div>
+                <div class="topo-tooltip-row"><span class="topo-tooltip-label">VMs</span><span class="topo-tooltip-value">${eventVMs.length}</span></div>
             `;
         }
         tooltip.innerHTML = html;
