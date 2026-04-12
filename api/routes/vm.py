@@ -1547,7 +1547,7 @@ async def topology_data(
 
     for event in events:
         event_node_id = f"event-{event.id}"
-        teams = db.query(Team).filter(Team.event_id == event.id).all()
+        teams = db.query(Team).filter(Team.event_id == event.id).order_by(Team.id).all()
         team_count = len(teams)
 
         nodes.append({
