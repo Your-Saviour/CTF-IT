@@ -15,7 +15,10 @@
 {%- if op.type == "package_install" and op.packages %}
     - name: "Install base packages"
       ansible.builtin.apt:
-        name: {{ op.packages | to_yaml | trim }}
+        name:
+{%- for pkg in op.packages %}
+          - "{{ pkg }}"
+{%- endfor %}
         state: present
         update_cache: true
 {%- elif op.type == "run" %}
