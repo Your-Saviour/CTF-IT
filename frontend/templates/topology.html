@@ -119,7 +119,7 @@
 .topo-tier-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 9px;
-    fill: #2a2a2a;
+    fill: #444;
     text-transform: uppercase;
     letter-spacing: 2px;
     pointer-events: none;
@@ -379,7 +379,7 @@
 
     const svg = d3.select(svgEl);
     const container = svg.append('g');
-    const tierGroup = container.append('g').attr('class', 'tiers');
+    const tierGroup = svg.append('g').attr('class', 'tiers');
     const linkGroup = container.append('g').attr('class', 'links');
     const nodeGroup = container.append('g').attr('class', 'nodes');
 
@@ -390,6 +390,7 @@
             container.attr('transform', event.transform);
             const pct = Math.round(event.transform.k * 100);
             zoomBadge.textContent = `ZOOM: ${pct}%`;
+            if (currentNodes.length > 0) renderTierLabels();
         });
     svg.call(zoomBehavior);
 
@@ -676,23 +677,22 @@
     // ── Tier labels ───────────────────────────────────────────────────────────
     function renderTierLabels() {
         tierGroup.selectAll('*').remove();
-        const labels = [
+        const transform = d3.zoomTransform(svgEl);
+        const width = svgEl.clientWidth || 800;
+        const tiers = [
             { y: TIER_Y.wan,   text: 'INTERNET / WAN' },
             { y: TIER_Y.event, text: 'EVENT' },
             { y: TIER_Y.vm,    text: 'VMs' },
         ];
-        const width = svgEl.clientWidth || 800;
-        labels.forEach(({ y, text }) => {
-            const labelY = y - 30;
-            // Horizontal rule
+        tiers.forEach(({ y, text }) => {
+            const screenY = transform.applyY(y) - 30;
             tierGroup.append('line')
-                .attr('x1', 0).attr('y1', labelY + 4)
-                .attr('x2', width).attr('y2', labelY + 4)
-                .attr('stroke', '#111').attr('stroke-width', 1);
-            // Label text
+                .attr('x1', 0).attr('y1', screenY + 4)
+                .attr('x2', width).attr('y2', screenY + 4)
+                .attr('stroke', '#2a2a2a').attr('stroke-width', 1);
             tierGroup.append('text')
                 .attr('class', 'topo-tier-label')
-                .attr('x', 14).attr('y', labelY)
+                .attr('x', 14).attr('y', screenY)
                 .text(text);
         });
     }
@@ -711,6 +711,7 @@
 
     // ── Tooltip ───────────────────────────────────────────────────────────────
     function showTooltip(event, d) {
+        if (d.type === 'wan') return;
         let html = '';
         if (d.type === 'vm') {
             const pct = d.modules_total > 0 ? Math.round((d.modules_completed / d.modules_total) * 100) : 0;
@@ -761,6 +762,7 @@
         event.preventDefault();
         event.stopPropagation();
         hideTooltip();
+        if (d.type === 'wan') return;
 
         let items = '';
         if (d.type === 'vm') {
