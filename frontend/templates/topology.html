@@ -438,8 +438,10 @@
         const allLinks = [...wanLinks, ...data.links];
 
         const oldIds = new Set(currentNodes.map(n => n.id));
+        const newIds = new Set(allNodes.map(n => n.id));
         const structureChanged = allNodes.length !== currentNodes.length ||
-            allNodes.some(n => !oldIds.has(n.id));
+            allNodes.some(n => !oldIds.has(n.id)) ||
+            currentNodes.some(n => !newIds.has(n.id));
 
         if (structureChanged) {
             currentNodes = allNodes.map(n => ({ ...n }));
@@ -643,7 +645,6 @@
     // ── Drag handlers ─────────────────────────────────────────────────────────
     function dragStarted(event, d) {
         hideContextMenu();
-        d._dragging = true;
     }
     function dragged(event, d) {
         d.x = event.x;
@@ -651,7 +652,6 @@
         applyPositions();
     }
     function dragEnded(event, d) {
-        d._dragging = false;
     }
 
     // ── Tooltip ───────────────────────────────────────────────────────────────
@@ -834,7 +834,7 @@
         if (!document.querySelector('.topo-empty')) {
             const el = document.createElement('div');
             el.className = 'topo-empty';
-            el.innerHTML = '<h3>No VMs found</h3><p>Create teams and register VMs to see them here.</p>';
+            el.innerHTML = '<h3>No topology data</h3><p>Create an open event with teams and VMs to see them here.</p>';
             svgEl.closest('.topology-container').appendChild(el);
         }
     }
@@ -872,6 +872,15 @@
     loadEventFilter();
     refreshData();
     startPolling();
+
+    // Re-run layout on resize
+    new ResizeObserver(() => {
+        if (currentNodes.length > 0) {
+            calculateLayout(currentNodes);
+            if (typeof renderTierLabels === 'function') renderTierLabels();
+            applyPositions();
+        }
+    }).observe(svgEl);
 })();
 </script>
 {% endblock %}
