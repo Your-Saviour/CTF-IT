@@ -299,7 +299,7 @@ async def assign_modules(vm_id: int, request: Request, db: Session = Depends(get
 
     try:
         library = load_all_modules()
-        selected = select_modules(quota, library)
+        selected = select_modules(quota, library, base_type_id=vm.base_type)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=422)
 
@@ -1294,7 +1294,7 @@ def _provision_event_vms(event_id: int) -> None:
 
                     if role == "target":
                         # Select modules for this VM
-                        selected = select_modules(module_quota, library)
+                        selected = select_modules(module_quota, library, base_type_id=vm_spec.get("base_type"))
                         for mod in selected:
                             db.add(VMModule(
                                 vm_id=vm.id,

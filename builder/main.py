@@ -41,7 +41,7 @@ def build_image_for_user(user_id: str, quota: dict) -> dict:
     secret_key = os.environ["SECRET_KEY"]
 
     library = load_all_modules()
-    selected = select_modules(quota, library)
+    selected = select_modules(quota, library, base_type_id=None)
     flag = generate_flag(secret_key, user_id)
     image_tag = generate_image_tag()
 

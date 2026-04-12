@@ -66,7 +66,7 @@ def _stage_files(modules: list[Module], output_dir: Path) -> None:
 def generate_ansible_export(quota: dict, export_id: str) -> Path:
     """Select modules via quota and generate an Ansible playbook export directory."""
     library = load_all_modules()
-    selected = select_modules(quota, library)
+    selected = select_modules(quota, library, base_type_id=None)
 
     output_dir = ANSIBLE_EXPORTS_DIR / export_id
     output_dir.mkdir(parents=True, exist_ok=True)

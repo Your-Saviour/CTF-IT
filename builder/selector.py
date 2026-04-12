@@ -44,8 +44,20 @@ def _pull_requires(pick: Module, selected: list[Module], library: list[Module]):
             selected.append(req)
 
 
-def select_modules(quota: dict, module_library: list[Module]) -> list[Module]:
+def select_modules(
+    quota: dict,
+    module_library: list[Module],
+    base_type_id: str | None = None,
+) -> list[Module]:
     module_library = [m for m in module_library if not m.disabled]
+
+    # Phase 0: base type filtering
+    if base_type_id:
+        module_library = [
+            m for m in module_library
+            if not m.supported_bases or base_type_id in m.supported_bases
+        ]
+
     selected: list[Module] = []
 
     # Phase 1: type → difficulty selection (existing behaviour)
