@@ -62,6 +62,7 @@ class Module:
     disabled: bool = False
     min_ram_mb: int = 0
     min_vcpu: int = 0
+    supported_bases: list[str] = field(default_factory=list)
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
@@ -93,5 +94,6 @@ def load_all_modules() -> list[Module]:
             disabled=bool(data.get("disabled", False)),
             min_ram_mb=data.get("min_ram_mb", 0),
             min_vcpu=data.get("min_vcpu", 0),
+            supported_bases=data.get("supported_bases", []),
         ))
     return modules
