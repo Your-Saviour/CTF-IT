@@ -9,7 +9,7 @@ defend_points: 250
 category: credential-access
 tags: [exfil, credentials, collection]
 conflicts: []
-requires: []
+requires: [world_writable_shadow]
 
 caldera:
   tactic: collection

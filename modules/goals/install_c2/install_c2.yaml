@@ -9,7 +9,7 @@ defend_points: 350
 category: command-and-control
 tags: [c2, persistence, command-and-control]
 conflicts: []
-requires: []
+requires: [nopasswd_sudo]
 
 caldera:
   tactic: command-and-control
