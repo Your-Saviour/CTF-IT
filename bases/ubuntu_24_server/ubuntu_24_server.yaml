@@ -3,6 +3,7 @@ name: Ubuntu 24.04 LTS Server
 description: Base Ubuntu 24.04 LTS server image with essential system packages, SSH configured, and systemd enabled for container/VM deployments.
 os: "Ubuntu 24.04 LTS x64"
 default_plan: vc2-1c-2gb
+icon: ubuntu
 packages:
   - systemd
   - systemd-sysv

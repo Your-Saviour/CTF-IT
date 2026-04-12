@@ -1659,6 +1659,9 @@ async def topology_data(
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
+    from builder.base_loader import load_all_bases
+    base_icons = {b.id: b.icon for b in load_all_bases()}
+
     eq = db.query(Event)
     if event_id:
         eq = eq.filter(Event.id == event_id)
@@ -1698,6 +1701,7 @@ async def topology_data(
                     "ip": vm.ip_address,
                     "status": vm.status,
                     "os": vm.os,
+                    "icon": base_icons.get(vm.base_type) if vm.base_type else None,
                     "event_id": event_node_id,
                     "modules_total": total,
                     "modules_completed": completed,

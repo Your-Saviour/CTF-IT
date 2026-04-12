@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 import logging
 
 import yaml
@@ -49,6 +49,9 @@ class BaseType:
     steps: list[BaseStep] = field(default_factory=list)
     disabled: bool = False
     source_dir: Path = field(default_factory=Path)
+    # Icon for topology graph: either a keyword string (e.g. "ubuntu", "windows")
+    # or a dict with {"svg_path": "M...", "viewbox": "0 0 24 24"} for custom SVG paths.
+    icon: Any = field(default="server")
 
 
 BASES_DIR = Path(__file__).resolve().parent.parent / "bases"
@@ -71,6 +74,7 @@ def load_base_type(base_id: str) -> BaseType:
             steps=_parse_base_steps(data),
             disabled=bool(data.get("disabled", False)),
             source_dir=source_dir,
+            icon=data.get("icon", "server"),
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"Base type '{base_id}' not found at {yaml_path}") from exc

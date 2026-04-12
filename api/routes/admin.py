@@ -677,6 +677,7 @@ async def get_base_types(request: Request, db: Session = Depends(get_db)):
             "name": b.name,
             "description": b.description,
             "default_plan": b.default_plan,
+            "icon": b.icon,
         }
         for b in bases
     ]
