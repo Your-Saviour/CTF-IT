@@ -1535,7 +1535,6 @@ async def topology_data(
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
-    # Query events (non-draft unless filtered)
     eq = db.query(Event)
     if event_id:
         eq = eq.filter(Event.id == event_id)
@@ -1545,35 +1544,24 @@ async def topology_data(
 
     nodes = []
     links = []
-    team_color_map = {}
-    color_idx = 0
 
     for event in events:
         event_node_id = f"event-{event.id}"
+        teams = db.query(Team).filter(Team.event_id == event.id).all()
+        team_count = len(teams)
+
         nodes.append({
             "id": event_node_id,
             "type": "event",
             "label": event.name,
             "status": event.status,
+            "team_count": team_count,
         })
 
-        teams = db.query(Team).filter(Team.event_id == event.id).all()
-        for team in teams:
-            team_node_id = f"team-{team.id}"
-            if team.id not in team_color_map:
-                team_color_map[team.id] = _TEAM_COLORS[color_idx % len(_TEAM_COLORS)]
-                color_idx += 1
-
-            nodes.append({
-                "id": team_node_id,
-                "type": "team",
-                "label": team.name,
-                "event_id": event_node_id,
-                "color": team_color_map[team.id],
-            })
-            links.append({"source": event_node_id, "target": team_node_id})
-
-            vms = db.query(VM).filter(VM.team_id == team.id).all()
+        # Show VMs from first team only (canonical setup — all teams identical)
+        first_team = teams[0] if teams else None
+        if first_team:
+            vms = db.query(VM).filter(VM.team_id == first_team.id).all()
             for vm in vms:
                 total = len(vm.modules)
                 completed = sum(1 for m in vm.modules if m.completed)
@@ -1586,11 +1574,10 @@ async def topology_data(
                     "ip": vm.ip_address,
                     "status": vm.status,
                     "os": vm.os,
-                    "team_id": team_node_id,
                     "event_id": event_node_id,
                     "modules_total": total,
                     "modules_completed": completed,
                 })
-                links.append({"source": team_node_id, "target": vm_node_id})
+                links.append({"source": event_node_id, "target": vm_node_id})
 
     return {"nodes": nodes, "links": links}
