@@ -1,0 +1,40 @@
+---
+# CTF Base Setup Playbook
+# Applies base environment configuration to target hosts.
+# Base type: {{ base_type.id }}
+#
+# Requirements: Target must be a supported Ubuntu host.
+# Usage:
+#   ansible-playbook -i inventory base_playbook.yml --become
+
+- name: Apply CTF base environment
+  hosts: all
+  become: true
+  tasks:
+{%- for op in ops %}
+{%- if op.type == "package_install" %}
+    - name: "Install base packages"
+      ansible.builtin.apt:
+        name: {{ op.packages | to_yaml | trim }}
+        state: present
+        update_cache: true
+{%- elif op.type == "run" %}
+    - name: "Run script: {{ op.script }} [{{ base_type.id }}]"
+      ansible.builtin.script:
+        cmd: "scripts/{{ op.script }}"
+      args:
+        executable: /bin/bash
+{%- elif op.type == "copy" %}
+    - name: "Copy file: {{ op.src }} [{{ base_type.id }}]"
+      ansible.builtin.copy:
+        src: "files/{{ op.src }}"
+        dest: "{{ op.dest }}"
+{%- if op.mode %}
+        mode: "{{ op.mode }}"
+{%- endif %}
+{%- elif op.type == "playbook" %}
+    - name: "Include tasks: {{ op.tasks_file }} [{{ base_type.id }}]"
+      ansible.builtin.include_tasks:
+        file: "{{ op.tasks_file }}"
+{%- endif %}
+{%- endfor %}
