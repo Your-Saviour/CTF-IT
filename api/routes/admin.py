@@ -568,9 +568,13 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     for type_key, spec in vm_quota.items():
         role = spec.get("role", "target")
         count_per_team = int(spec.get("count", 1))
-        os_name = spec.get("os", "")
         default_plan = spec.get("default_plan", "vc2-1c-1gb")
         region = spec.get("region", "")
+        base_type_id = spec.get("base_type")
+        from builder.base_loader import load_base_type as _load_base_type
+        _base_type_obj = _load_base_type(base_type_id) if base_type_id else None
+        os_name = spec.get("os", "") or (_base_type_obj.os if _base_type_obj else "")
+        icon_name = (_base_type_obj.icon if _base_type_obj else None)
 
         vms = []
 
@@ -609,6 +613,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                         "id": vm_node_id, "type": "vm",
                         "label": hostname, "hostname": hostname,
                         "ip": None, "status": "projected", "os": os_name,
+                        "icon": icon_name,
                         "event_id": f"event-{event_id}",
                         "modules_total": len(module_list), "modules_completed": 0,
                     })

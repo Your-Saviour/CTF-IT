@@ -555,9 +555,12 @@
         server:  'M3 3h18v4H3V3zm0 7h18v4H3v-4zm0 7h18v4H3v-4z',
     };
 
-    function osBadgePath(os) {
-        if (!os) return OS_ICON_PATHS.server;
-        const lower = os.toLowerCase();
+    function osBadgePath(iconOrOs) {
+        if (!iconOrOs) return OS_ICON_PATHS.server;
+        // Direct keyword match (e.g. icon: "ubuntu" from base_type YAML)
+        if (OS_ICON_PATHS[iconOrOs]) return OS_ICON_PATHS[iconOrOs];
+        // OS string fallback
+        const lower = iconOrOs.toLowerCase();
         if (lower.includes('kali')) return OS_ICON_PATHS.kali;
         if (lower.includes('windows')) return OS_ICON_PATHS.windows;
         if (lower.includes('ubuntu') || lower.includes('linux') || lower.includes('debian') ||
@@ -848,7 +851,7 @@
                 .attr('stroke', color).attr('stroke-width', 0.8);
             const iconSz = 9;
             g.append('path')
-                .attr('d', osBadgePath(d.os))
+                .attr('d', osBadgePath(d.icon || d.os))
                 .attr('fill', color)
                 .attr('transform', `translate(${badgeX - iconSz/2},${badgeY - iconSz/2}) scale(${iconSz/24})`);
 
