@@ -259,8 +259,28 @@ window.renderAttackTree = (function() {
 
         var elk = new ELK();
         elk.layout(graph).then(function(layoutedGraph) {
-            var totalW = layoutedGraph.width || 600;
-            var totalH = layoutedGraph.height || 300;
+            // ELK padding isn't always applied — shift everything right/down so
+            // no node is closer than PADDING to the left or top edge.
+            var minX = Infinity, minY = Infinity;
+            layoutedGraph.children.forEach(function(n) {
+                minX = Math.min(minX, n.x);
+                minY = Math.min(minY, n.y);
+            });
+            var shiftX = Math.max(0, PADDING - minX);
+            var shiftY = Math.max(0, PADDING - minY);
+            if (shiftX > 0 || shiftY > 0) {
+                layoutedGraph.children.forEach(function(n) { n.x += shiftX; n.y += shiftY; });
+                (layoutedGraph.edges || []).forEach(function(e) {
+                    (e.sections || []).forEach(function(s) {
+                        s.startPoint.x += shiftX; s.startPoint.y += shiftY;
+                        (s.bendPoints || []).forEach(function(p) { p.x += shiftX; p.y += shiftY; });
+                        s.endPoint.x += shiftX; s.endPoint.y += shiftY;
+                    });
+                });
+            }
+
+            var totalW = (layoutedGraph.width || 600) + shiftX;
+            var totalH = (layoutedGraph.height || 300) + shiftY;
 
             var svg = d3.select(container)
                 .append('svg')
@@ -345,9 +365,9 @@ window.renderAttackTree = (function() {
                     .attr('width', NODE_W)
                     .attr('height', NODE_H);
 
-                // Module name (truncated)
+                // Module name (truncated to fit NODE_W at 11px monospace ~7px/char)
                 var displayName = nodeData.name || nodeData.id;
-                if (displayName.length > 20) displayName = displayName.substring(0, 18) + '...';
+                if (displayName.length > 22) displayName = displayName.substring(0, 21) + '\u2026';
                 g.append('text')
                     .attr('class', 'at-node-label')
                     .attr('x', NODE_W / 2)
