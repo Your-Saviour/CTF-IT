@@ -145,6 +145,12 @@
 /* Error banner */
 .plan-error { background: rgba(255,23,68,0.08); border: 1px solid rgba(255,23,68,0.3); border-radius: 6px; padding: 12px 16px; color: var(--red); font-size: 12px; margin-bottom: 16px; display: none; }
 
+/* Warning banner */
+.plan-warnings { background: var(--amber-glow); border: 1px solid var(--amber-dim); border-radius: 6px; padding: 12px 16px; color: var(--amber); font-size: 12px; margin-bottom: 16px; display: none; }
+.plan-warnings-title { font-weight: bold; margin-bottom: 4px; }
+.plan-warnings ul { margin: 4px 0 0 16px; padding: 0; }
+.plan-warnings li { margin-bottom: 2px; }
+
 /* Responsive */
 @media (max-width: 768px) {
     .plan-stats { grid-template-columns: repeat(2, 1fr); }
@@ -175,6 +181,12 @@
 
 <!-- Error banner -->
 <div class="plan-error" id="plan-error"></div>
+
+<!-- Warning banner -->
+<div class="plan-warnings" id="plan-warnings">
+    <div class="plan-warnings-title">&#9888; Module Variation Warning</div>
+    <ul id="plan-warnings-list"></ul>
+</div>
 
 <!-- Stats bar -->
 <div class="plan-stats" id="plan-stats">
@@ -302,6 +314,18 @@
             previewData = await resp.json();
             topoDataVersion++;
             updateStats(previewData.summary);
+
+            // Show/hide variation warnings
+            const warningsEl = document.getElementById('plan-warnings');
+            const warningsList = document.getElementById('plan-warnings-list');
+            if (previewData.warnings && previewData.warnings.length > 0) {
+                warningsList.innerHTML = previewData.warnings.map(w => `<li>${w}</li>`).join('');
+                warningsEl.style.display = 'block';
+            } else {
+                warningsEl.style.display = 'none';
+                warningsList.innerHTML = '';
+            }
+
             renderActiveTab();
         } catch (e) {
             showError('Network error: ' + e.message);
@@ -916,6 +940,18 @@
             // All VMs got new random draws — re-render the full VM plan and attack paths
             // so nothing shows stale data. Topology also updated via topoDataVersion.
             updateStats(newData.summary);
+
+            // Update variation warnings
+            const warningsElR = document.getElementById('plan-warnings');
+            const warningsListR = document.getElementById('plan-warnings-list');
+            if (newData.warnings && newData.warnings.length > 0) {
+                warningsListR.innerHTML = newData.warnings.map(w => `<li>${w}</li>`).join('');
+                warningsElR.style.display = 'block';
+            } else {
+                warningsElR.style.display = 'none';
+                warningsListR.innerHTML = '';
+            }
+
             renderVmPlan();
             renderAttackPaths();
         } finally {

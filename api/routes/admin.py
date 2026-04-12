@@ -633,6 +633,36 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             "vms": vms,
         })
 
+    # Variation check: warn if target VMs within a type share identical module sets
+    warnings = []
+    for vm_type_entry in vm_types:
+        if vm_type_entry["role"] != "target":
+            continue
+        sets = [frozenset(m["id"] for m in vm["modules"]) for vm in vm_type_entry["vms"]]
+        if not sets:
+            continue
+        unique_count = len(set(sets))
+        total_count = len(sets)
+        if total_count > 1 and unique_count / total_count < 0.5:
+            saturated = []
+            for module_type, tiers in quota.items():
+                if not isinstance(tiers, dict):
+                    continue
+                for difficulty, requested in tiers.items():
+                    available = sum(
+                        1 for m in library_list
+                        if m.type == module_type and m.difficulty == difficulty and not m.disabled
+                    )
+                    if available > 0 and requested / available >= 0.8:
+                        saturated.append(f"{difficulty} {module_type} ({requested}/{available})")
+            tier_msg = f" Tiers at capacity: {', '.join(saturated)}." if saturated else ""
+            warnings.append(
+                f"Low module variation in '{vm_type_entry['type_key']}': "
+                f"{unique_count} unique assignment{'s' if unique_count != 1 else ''} across "
+                f"{total_count} VMs.{tier_msg} "
+                f"Add more modules or reduce quota counts for greater diversity."
+            )
+
     return {
         "summary": {
             "total_vms": sum(t["total_count"] for t in vm_types),
@@ -644,6 +674,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         "teams": [t.name for t in teams],
         "vm_types": vm_types,
         "topology": {"nodes": topology_nodes, "links": topology_links},
+        "warnings": warnings,
     }
 
 
