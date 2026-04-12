@@ -113,9 +113,17 @@
 
 /* Links */
 .topo-link {
-    stroke-dasharray: 4 4;
     fill: none;
-    opacity: 0.3;
+    opacity: 0.6;
+}
+.topo-tier-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    fill: #2a2a2a;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    pointer-events: none;
+    user-select: none;
 }
 
 /* Tooltip */
@@ -371,6 +379,7 @@
 
     const svg = d3.select(svgEl);
     const container = svg.append('g');
+    const tierGroup = container.append('g').attr('class', 'tiers');
     const linkGroup = container.append('g').attr('class', 'links');
     const nodeGroup = container.append('g').attr('class', 'nodes');
 
@@ -447,6 +456,7 @@
             currentNodes = allNodes.map(n => ({ ...n }));
             currentLinks = allLinks.map(l => ({ ...l }));
             calculateLayout(currentNodes);
+            renderTierLabels();
             renderLinks();
             renderNodes();
             applyPositions();
@@ -479,11 +489,11 @@
             .enter()
             .append('line')
             .attr('class', 'topo-link')
-            .attr('stroke', d => {
-                const target = typeof d.target === 'object' ? d.target : currentNodes.find(n => n.id === d.target);
-                return (target && target.color) || '#00e5ff';
-            })
-            .attr('stroke-width', 1);
+            .attr('stroke', '#2a2a2a')
+            .attr('stroke-width', d => {
+                const src = typeof d.source === 'object' ? d.source : currentNodes.find(n => n.id === d.source);
+                return src && src.type === 'wan' ? 2 : 1.5;
+            });
     }
 
     // ── Render nodes ──────────────────────────────────────────────────────────
@@ -509,6 +519,27 @@
                 if (d.type === 'vm') window.location = `/admin/vm/${d.id.replace('vm-', '')}`;
                 else if (d.type === 'event') window.location = '/admin';
             });
+
+        // WAN node — dashed circle with globe icon
+        groups.filter(d => d.type === 'wan').each(function(d) {
+            const g = d3.select(this);
+            g.append('circle')
+                .attr('r', 28)
+                .attr('fill', 'rgba(80,80,80,0.06)')
+                .attr('stroke', '#444')
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '5 3');
+            g.append('text')
+                .attr('y', -4)
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '14px')
+                .attr('fill', '#555')
+                .text('⊕');
+            g.append('text').attr('class', 'node-label')
+                .attr('y', 14).attr('font-size', '9px')
+                .attr('fill', '#555')
+                .text('INTERNET');
+        });
 
         // Event nodes — large circle
         groups.filter(d => d.type === 'event').each(function(d) {
@@ -640,6 +671,30 @@
 
         nodeGroup.selectAll('.node-group')
             .attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
+    }
+
+    // ── Tier labels ───────────────────────────────────────────────────────────
+    function renderTierLabels() {
+        tierGroup.selectAll('*').remove();
+        const labels = [
+            { y: TIER_Y.wan,   text: 'INTERNET / WAN' },
+            { y: TIER_Y.event, text: 'EVENT' },
+            { y: TIER_Y.vm,    text: 'VMs' },
+        ];
+        const width = svgEl.clientWidth || 800;
+        labels.forEach(({ y, text }) => {
+            const labelY = y - 30;
+            // Horizontal rule
+            tierGroup.append('line')
+                .attr('x1', 0).attr('y1', labelY + 4)
+                .attr('x2', width).attr('y2', labelY + 4)
+                .attr('stroke', '#111').attr('stroke-width', 1);
+            // Label text
+            tierGroup.append('text')
+                .attr('class', 'topo-tier-label')
+                .attr('x', 14).attr('y', labelY)
+                .text(text);
+        });
     }
 
     // ── Drag handlers ─────────────────────────────────────────────────────────
