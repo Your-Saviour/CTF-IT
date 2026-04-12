@@ -285,13 +285,14 @@ window.renderAttackTree = (function() {
                 });
             }
 
-            var totalW = (layoutedGraph.width || 600) + shiftX;
-            var totalH = (layoutedGraph.height || 300) + shiftY;
+            var totalW = (layoutedGraph.width || 600) + shiftX + PADDING;
+            var totalH = (layoutedGraph.height || 300) + shiftY + PADDING;
 
             var svg = d3.select(container)
                 .append('svg')
                 .attr('width', totalW)
-                .attr('height', totalH);
+                .attr('height', totalH)
+                .style('overflow', 'visible');
 
             var defs = svg.append('defs');
             // Arrow markers
