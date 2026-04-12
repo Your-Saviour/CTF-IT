@@ -59,9 +59,9 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Key Components
 
-- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `caldera_ops`, `caldera_tree`, `vm` (Team/VM CRUD, topology data).
+- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `caldera_ops`, `caldera_tree`, `vm` (Team/VM CRUD, topology data), `vm_goals` (VMGoal state machine API).
 - **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules; supports both flat (single adversary) and multi-path (per-path adversaries with skip logic) modes. `attack_tree.py` builds directed acyclic graphs (attack trees) from a VM's assigned modules, ordered by ATT&CK kill chain phase, and extracts distinct attack paths via DFS. `vm_quota_validation.py` validates the vm_quota JSON schema. `plan_sizing.py` picks the cheapest Vultr plan that meets module resource requirements.
-- **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), and internal applications (`application_internal/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
+- **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), internal applications (`application_internal/`), and red team objectives (`goals/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`templates/playbook.yml.j2`** — Jinja2 template for Ansible playbook export. Generates tasks using `ansible.builtin.script` and `ansible.builtin.copy` to apply the same modules on bare machines.
 - **`base/`** — Base Docker image (Ubuntu 22.04 + common tools). All user images inherit from `ctf-base:latest`.
@@ -71,13 +71,17 @@ User selects an open event and registers → user is bound to that event (`User.
 
 ### Module System
 
-Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/payload/application_external/application_internal), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`. Optional resource fields: `min_ram_mb`, `min_vcpu` (used by `builder/plan_sizing.py` to auto-size Vultr plans when VM quota provisioning is active).
+Each module is a YAML file with: `id`, `name`, `type` (vulnerability/hardening/payload/application_external/application_internal/goal), `difficulty`, `points`, `category`, `script` (optional .sh), `verification` spec, `hints`, `conflicts`, `requires`. Optional resource fields: `min_ram_mb`, `min_vcpu` (used by `builder/plan_sizing.py` to auto-size Vultr plans when VM quota provisioning is active).
+
+**`stage` field** (vulnerability and payload modules only): `preapplied` (default) — installed at build time, visible to blue team, scored when fixed. `caldera` — installed at build time but hidden from blue team; Caldera discovers and exploits these during red team operations. Stage does not affect module selection quotas.
 
 Application modules install infrastructure that vulnerability/payload modules can target via `requires`. They award 0 points and are selected via their own quota keys (`"application_external"` or `"application_internal"` in `EVENT_QUOTA`). Payload modules are scored like vulnerabilities — users must find and remove malicious artifacts for points.
 
+**Goal modules** (`type: goal`, lives in `modules/goals/`) represent red team objectives. Additional YAML fields: `red_points` (awarded to red team on achievement), `defend_points` (awarded to blue team on revert), `revert_verification` (detects blue team revert). Goal modules are never scored through the normal blue team flow — they track state via `VMGoal` records. Goal quota key is `"goal"` in `EVENT_QUOTA`. The selector processes goals after applications so `requires` dependencies on app modules are available.
+
 Verification types: `file_permissions`, `file_contains`, `file_not_contains`, `service_running`, `package_installed`, `port_closed`, `flag_contents`, `password_not_default`, `password_changed`, `http_response`, `process_running`, `file_absent`, `file_hash_changed`, `cron_not_present`, `user_not_exists`.
 
-The selector (`builder/selector.py`) runs three phases: (1) type/difficulty quotas, (2) category quotas, (3) tag quotas. Category/tag counts are inclusive — modules already picked by earlier phases count toward later quotas. Respects bidirectional conflict exclusions, auto-resolves dependencies, and counts dependency-pulled modules toward their type/difficulty quota. Quota validation lives in `builder/quota_validation.py`.
+The selector (`builder/selector.py`) runs in ordered phases: (1) application modules, (2) goal modules, (3) vulnerability/payload modules, (4) hardening modules — then (5) category quotas, (6) tag quotas. This ordering ensures goal `requires` dependencies on apps are satisfied. Category/tag counts are inclusive. Respects bidirectional conflict exclusions, auto-resolves dependencies. Quota validation lives in `builder/quota_validation.py`.
 
 ### Key Design Decisions
 
@@ -119,12 +123,43 @@ An optional red team emulation layer using MITRE Caldera. Generates a Caldera pl
 - **`POST /admin/caldera-export`** — Download the Caldera plugin as a zip (abilities YAML + adversary definition). Accepts `{"quota": {...}}` or `{"event_id": N}`. Manual alternative to `caldera-setup`.
 - **`POST /admin/caldera-setup`** — Fully automated: generates the plugin, copies it to the shared bind mount, patches `local.yml` to enable the `ctf-exploit` plugin, restarts the Caldera container, waits for health, creates a "CTF Red Team Emulation" operation, and caches attack tree JSON on each VM in the event.
 - **`builder/caldera.py`** — Generates the plugin: iterates selected modules, creates one ability YAML per module (recon + exploit steps). Two generation modes: `generate_caldera_export()` (flat, single "CTF Full Exploit Chain" adversary) and `generate_caldera_export_multi_path()` (per-path adversaries with shell-level skip logic using marker files at `/tmp/.ctf_phase_{N}`).
-- **`builder/attack_tree.py`** — Builds attack tree DAGs from a VM's assigned modules. Nodes are modules with `caldera` metadata, tagged with kill chain phase (mapped from ATT&CK tactic). Edges come from `requires` dependencies and phase ordering. `extract_paths()` runs DFS from initial-access nodes to extract distinct attack paths (max 20, pruned by length). `serialize_tree()` outputs JSON for storage and frontend rendering.
+- **`builder/attack_tree.py`** — Builds attack tree DAGs from a VM's assigned modules. Nodes are modules with `caldera` metadata, tagged with kill chain phase (mapped from ATT&CK tactic). Edges come from `requires` dependencies and phase ordering. `extract_paths()` runs DFS from initial-access nodes to extract distinct attack paths (max 20, pruned by length). `serialize_tree()` outputs JSON for storage and frontend rendering. Goal modules appear as terminal nodes at `GOAL_PHASE = 8` (`is_goal=True`); paths now terminate at goal nodes.
 - **Attack tree API**: `GET /admin/caldera/attack-tree/{vm_id}` returns the attack tree for a VM computed from its `VMModule` assignments. `GET /admin/caldera/operations/{op_id}?include_tree=true` annotates tree nodes with operation result statuses (succeeded/failed/skipped/pending).
-- **Operations API**: `GET/POST/DELETE /admin/caldera/operations` for CRUD. `GET /admin/caldera/vm-summary` for per-VM attack aggregates. `GET /admin/caldera/vm/{vm_id}/results` for VM-specific operation results.
+- **Operations API**: `GET/POST/DELETE /admin/caldera/operations` for CRUD. `GET /admin/caldera/vm-summary` for per-VM attack aggregates. `GET /admin/caldera/vm/{vm_id}/results` for VM-specific operation results. `GET /admin/caldera/scoreboard?event_id=N` — red vs blue scoreboard: per-team `blue_defensive` (completed preapplied module points), `blue_reactive` (goal reverts: `defend_points × defend_count`), `red_offensive` (goal achievements: `red_points × achievement_count`).
 - **Visual attack graph**: Interactive DAG visualization using elkjs (layout) + D3.js (rendering) via CDN. Nodes are color-coded by status (green=exploited, red=defended, gray=skipped, cyan=running). Rendered on the VM detail page and Caldera operation detail page via `attack_tree_partial.html`. Nodes are partitioned by kill chain phase to ensure correct column placement.
-- **Kill chain phases**: infrastructure(-1) → initial-access(0) → execution(1) → persistence(2) → privilege-escalation(3) → credential-access(4) → collection(5) → impact(6) → command-and-control(7). Modules can override via `phase_override` in their caldera YAML.
+- **Kill chain phases**: infrastructure(-1) → initial-access(0) → execution(1) → persistence(2) → privilege-escalation(3) → credential-access(4) → collection(5) → impact(6) → command-and-control(7) → **goal(8)**. Modules can override via `phase_override` in their caldera YAML.
 - **Caldera env vars** (internal container-to-container, set in docker-compose): `CALDERA_PLUGIN_DIR` (bind mount path, default `/caldera-plugin/ctf-exploit`), `CALDERA_CONFIG_PATH` (default `/caldera-config/local.yml`), `CALDERA_INTERNAL_URL` (default `http://ctf-caldera:8888`), `CALDERA_CONTAINER_NAME` (default `ctf-caldera`), `CALDERA_STARTUP_TIMEOUT` (seconds, default `120`).
+
+### Vulnerability Stages & Goal Objectives
+
+Red vs blue scoring layer built on top of the Caldera integration.
+
+**`stage` field** distinguishes two classes of vulnerability/payload modules:
+- `preapplied` (default) — blue team sees, fixes, and earns `points`. Included in Caldera attack tree if the module has `caldera` metadata.
+- `caldera` — hidden from blue team dashboard, hints, and scoring. Caldera discovers and exploits these. Set `points: 0` by convention (not enforced). Stage is stored on `VMModule.stage` and propagated from YAML at assignment time.
+
+**Goal modules** (`type: goal`, `modules/goals/`) are terminal red team objectives (deface website, install C2 beacon, exfiltrate `/etc/shadow`). They sit at phase 8 in the attack tree as terminal nodes. Key YAML fields:
+
+| Field | Description |
+|-------|-------------|
+| `red_points` | Awarded to red team each time the goal is achieved |
+| `defend_points` | Awarded to blue team each time the goal is reverted |
+| `verification` | Detects goal was achieved (e.g. `http_response` body_contains) |
+| `revert_verification` | Detects blue team reverted it |
+
+**Goal state machine** (per VM, cyclical): `pending → achieved → defended → achieved → ...`
+
+Each achievement increments `VMGoal.achievement_count`; each defence increments `VMGoal.defend_count`. Blue team is incentivised to fix root causes rather than just revert symptoms — Caldera can re-exploit on the next check cycle.
+
+**VMGoal API** (`api/routes/vm_goals.py`):
+- `GET /admin/vms/{vm_id}/goals` — list goal states for a VM
+- `POST /admin/vms/{vm_id}/goals/{goal_id}/check` — run `verification` + `revert_verification` against VM, transition state, award points. Supports `http_response` verification type for remote VMs (uses `httpx`); other types return 501 (not yet implemented).
+
+**Scoring model**:
+- Blue defensive: sum of `points` for completed `preapplied` VMModules (unchanged from existing flow)
+- Blue reactive: `defend_points × defend_count` per VMGoal
+- Red offensive: `red_points × achievement_count` per VMGoal
+- Scoreboard: `GET /admin/caldera/scoreboard?event_id=N`
 
 ### Semaphore Integration
 
@@ -223,4 +258,4 @@ An interactive D3.js force-directed graph at `/admin/topology` that visualizes t
 
 ### Database Models (api/models.py)
 
-Eight models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, `vm_quota` JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, `vm_type` — traces which vm_quota entry created this VM; provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`; Caldera: `attack_tree_json` — cached serialized attack tree with generation timestamp), `VMModule` (mirrors UserModule — completion tracking per module per VM), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.
+Nine models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, `vm_quota` JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, `vm_type` — traces which vm_quota entry created this VM; provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`; Caldera: `attack_tree_json` — cached serialized attack tree with generation timestamp), `VMModule` (mirrors UserModule — completion tracking per module per VM; `stage` column: `"preapplied"`, `"caldera"`, or `null` for non-vuln types), `VMGoal` (tracks cyclical red team goal state per VM: `status` pending/achieved/defended, `achievement_count`, `defend_count`, `red_points`, `defend_points`, `achieved_at`, `defended_at`), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.
