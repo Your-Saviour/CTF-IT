@@ -205,6 +205,7 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "provision_step": vm.provision_step,
         "provision_error": vm.provision_error,
         "vm_type": vm.vm_type,
+        "base_type": vm.base_type,
     }
 
 
@@ -514,6 +515,10 @@ def _update_provision_step(db, vm, step: str) -> None:
 def _run_provision(vm_id: int) -> None:
     """Synchronous background task: provision a VM via Ansible Semaphore.
 
+    Two-phase provisioning:
+    1. Base playbook (if vm.base_type is set) — installs base packages/config
+    2. Module playbook — applies the VM's assigned CTF modules
+
     Follows the asyncio.to_thread pattern from api/routes/auth.py::_run_build.
     """
     from api.database import SessionLocal
@@ -525,12 +530,98 @@ def _run_provision(vm_id: int) -> None:
 
     db = SessionLocal()
     playbook_dir = None
+    base_playbook_dir = None
     try:
         vm = db.query(VM).filter(VM.id == vm_id).first()
         if not vm:
             return
 
         vm.status = "provisioning"
+
+        # ── Phase 0: Base playbook (optional) ────────────────────────────────
+        if vm.base_type:
+            from builder.base_ansible import render_base_playbook, stage_base_files
+            from builder.base_loader import load_base_type
+
+            _update_provision_step(db, vm, "generating_base_playbook")
+
+            base_type_obj = load_base_type(vm.base_type)
+            base_export_id = f"base_{vm_id}_{uuid.uuid4().hex[:8]}"
+            base_playbook_dir = Path(SHARED_PLAYBOOK_DIR) / base_export_id
+            base_playbook_dir.mkdir(parents=True, exist_ok=True)
+
+            base_playbook_content = render_base_playbook(base_type_obj)
+            (base_playbook_dir / "playbook.yml").write_text(base_playbook_content)
+            stage_base_files(base_type_obj, base_playbook_dir)
+
+            _update_provision_step(db, vm, "running_base_playbook")
+
+            private_key, _ = get_or_create_platform_keypair(db)
+            event = vm.event
+
+            with SemaphoreClient() as client:
+                client.login()
+
+                # Get-or-create the event-level Semaphore project and SSH key.
+                if event.semaphore_project_id:
+                    project_id = event.semaphore_project_id
+                    key_id = event.semaphore_key_id
+                else:
+                    project_id = client.create_project(f"CTF Event {event.id}: {event.name}")
+                    key_id = client.create_key(
+                        project_id,
+                        name="platform-key",
+                        private_key_pem=private_key,
+                    )
+                    event.semaphore_project_id = project_id
+                    event.semaphore_key_id = key_id
+                    db.commit()
+
+                inventory_id = client.create_inventory(
+                    project_id,
+                    name=f"vm-{vm_id}-base",
+                    ip=vm.ip_address,
+                    ssh_user=vm.ssh_user or "root",
+                    ssh_port=vm.ssh_port or 22,
+                    key_id=key_id,
+                )
+                repo_id = client.create_repository(
+                    project_id,
+                    name=f"base-playbook-vm-{vm_id}",
+                    local_path=str(base_playbook_dir),
+                    key_id=key_id,
+                )
+                template_id = client.create_template(
+                    project_id,
+                    name=f"base-provision-vm-{vm_id}",
+                    playbook="playbook.yml",
+                    inventory_id=inventory_id,
+                    repository_id=repo_id,
+                    key_id=key_id,
+                )
+
+                task_id = client.run_task(project_id, template_id)
+                vm.semaphore_project_id = project_id
+                vm.semaphore_task_id = task_id
+                vm.updated_at = utcnow()
+                db.commit()
+
+                while True:
+                    status = client.get_task_status(project_id, task_id)
+                    if status == "success":
+                        break
+                    elif status in ("error", "stopped"):
+                        output_lines = client.get_task_output(project_id, task_id)
+                        tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
+                        raise RuntimeError(f"Base playbook failed (status={status}):\n{tail}")
+                    time.sleep(5)
+
+            # Clean up base playbook files now that it succeeded
+            if base_playbook_dir and base_playbook_dir.exists():
+                shutil.rmtree(base_playbook_dir, ignore_errors=True)
+                base_playbook_dir = None
+
+        # ── Phase 1: Module playbook ─────────────────────────────────────────
         # ── Step 1: Generate playbook files ──────────────────────────────────
         _update_provision_step(db, vm, "generating_playbook")
 
@@ -638,6 +729,8 @@ def _run_provision(vm_id: int) -> None:
         # Clean up playbook files after completion (success or failure)
         if playbook_dir and playbook_dir.exists():
             shutil.rmtree(playbook_dir, ignore_errors=True)
+        if base_playbook_dir and base_playbook_dir.exists():
+            shutil.rmtree(base_playbook_dir, ignore_errors=True)
 
 
 @router.post("/vms/{vm_id}/provision")
@@ -661,7 +754,7 @@ async def provision_vm(vm_id: int, request: Request, db: Session = Depends(get_d
 
     from api.models import utcnow
     vm.status = "provisioning"
-    vm.provision_step = "generating_playbook"
+    vm.provision_step = "generating_base_playbook" if vm.base_type else "generating_playbook"
     vm.provision_error = None
     vm.updated_at = utcnow()
     db.commit()
@@ -1281,6 +1374,7 @@ def _provision_event_vms(event_id: int) -> None:
                         os=vm_spec.get("os", "Ubuntu 24.04 LTS x64"),
                         status="creating",
                         vm_type=vm_type_key,
+                        base_type=vm_spec.get("base_type"),
                         vultr_plan=default_plan,
                         vultr_region=region,
                         team_id=team.id,
