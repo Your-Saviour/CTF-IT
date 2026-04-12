@@ -2,28 +2,34 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from builder.base_loader import BaseType
     from builder.module_loader import Module
 
 logger = logging.getLogger(__name__)
 
 
 def plan_for_vm(
+    base_type: "BaseType",
     modules: list["Module"],
-    default_plan: str,
+    vm_quota_override_plan: "str | None",
     available_plans: list[dict],
 ) -> str:
     """Pick the cheapest Vultr plan that satisfies module resource requirements.
 
+    ``base_type`` provides the baseline plan when no vm_quota override is given.
+    ``vm_quota_override_plan`` is an optional per-entry override from the vm_quota JSON.
     ``available_plans`` entries must have keys: id, ram (MB), vcpu_count, monthly_cost.
     Returns the Vultr plan ID string.
     """
+    floor_plan = vm_quota_override_plan or base_type.default_plan
+
     if not available_plans:
-        return default_plan
+        return floor_plan
 
     plans_by_id = {p["id"]: p for p in available_plans}
 
-    # Determine baseline from default plan
-    default = plans_by_id.get(default_plan)
+    # Determine baseline from floor plan
+    default = plans_by_id.get(floor_plan)
     if default:
         base_ram = default["ram"]
         base_vcpu = default["vcpu_count"]
@@ -46,10 +52,10 @@ def plan_for_vm(
 
     if candidates:
         best = min(candidates, key=lambda p: p["monthly_cost"])
-        if best["id"] != default_plan:
+        if best["id"] != floor_plan:
             logger.info(
                 "Upgraded plan from %s to %s (need %dMB RAM, %d vCPU)",
-                default_plan, best["id"], required_ram, required_vcpu,
+                floor_plan, best["id"], required_ram, required_vcpu,
             )
         return best["id"]
 

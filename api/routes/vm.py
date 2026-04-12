@@ -1199,6 +1199,7 @@ def _provision_event_vms(event_id: int) -> None:
 
     from api.database import SessionLocal
     from api.models import utcnow
+    from builder.base_loader import load_base_type
     from builder.module_loader import load_all_modules
     from builder.plan_sizing import plan_for_vm
     from builder.selector import select_modules
@@ -1305,9 +1306,17 @@ def _provision_event_vms(event_id: int) -> None:
                             ))
                         # Size the plan based on module requirements
                         if available_plans:
-                            sized_plan = plan_for_vm(selected, default_plan, available_plans)
-                            if sized_plan != default_plan:
-                                vm.vultr_plan = sized_plan
+                            base_type_id = vm_spec.get("base_type")
+                            loaded_base_type = load_base_type(base_type_id) if base_type_id else None
+                            if loaded_base_type is not None:
+                                sized_plan = plan_for_vm(
+                                    base_type=loaded_base_type,
+                                    modules=selected,
+                                    vm_quota_override_plan=vm_spec.get("default_plan"),
+                                    available_plans=available_plans,
+                                )
+                                if sized_plan != vm.vultr_plan:
+                                    vm.vultr_plan = sized_plan
 
                     db.commit()
                     vm_ids.append(vm.id)
