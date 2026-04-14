@@ -739,6 +739,10 @@ def _run_provision(vm_id: int) -> None:
         vm.updated_at = utcnow()
         db.commit()
 
+        # If this VM has a VPC IP assigned, configure its VPC network interface
+        if vm.vpc_ip:
+            _run_configure_vpc_interface(vm_id)
+
     except Exception as exc:
         from api.models import utcnow as _utcnow
         _log.exception("Provision failed for VM %d", vm_id)
@@ -1424,6 +1428,109 @@ def _run_firewall_create(vm_id: int) -> None:
             shutil.rmtree(playbook_dir, ignore_errors=True)
 
 
+# ── VPC Interface Configuration ───────────────────────────────────────────────
+
+def _run_configure_vpc_interface(vm_id: int) -> None:
+    """Configure the VPC network interface on a target Ubuntu VM after provisioning.
+
+    Deploys a netplan config for the VPC secondary NIC (ens7 on Vultr), assigns the
+    static VPC IP (stored in vm.vpc_ip), and applies it.
+    """
+    import shutil as _shutil
+
+    from api.database import SessionLocal
+    from api.models import utcnow
+    from api.services.semaphore import SemaphoreClient
+    from api.services.ssh_keys import get_or_create_platform_keypair
+
+    db = SessionLocal()
+    playbook_dir = None
+    try:
+        vm = db.query(VM).filter(VM.id == vm_id).first()
+        if not vm or not vm.vpc_ip or not vm.ip_address:
+            return
+        team = db.query(Team).filter(Team.id == vm.team_id).first()
+
+        _update_provision_step(db, vm, "configuring_vpc_interface")
+
+        export_id = f"vpcif_{vm_id}_{uuid.uuid4().hex[:8]}"
+        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
+        playbook_dir.mkdir(parents=True, exist_ok=True)
+
+        _shutil.copy(
+            PLAYBOOKS_DIR / "configure-vpc-interface.yml",
+            playbook_dir / "configure-vpc-interface.yml",
+        )
+        templates_dir = playbook_dir / "templates"
+        templates_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            TEMPLATES_DIR / "vpc-netplan.yaml.j2",
+            templates_dir / "vpc-netplan.yaml.j2",
+        )
+        collections_dir = playbook_dir / "collections"
+        collections_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            PLAYBOOKS_DIR / "collections" / "requirements.yml",
+            collections_dir / "requirements.yml",
+        )
+
+        private_key, _ = get_or_create_platform_keypair(db)
+        team_index = team.team_index if team else 1
+        vpc_gateway = f"10.{team_index}.1.1"
+
+        extra_vars = {
+            "vpc_ip": vm.vpc_ip,
+            "vpc_subnet_mask": 24,
+            "vpc_gateway": vpc_gateway,
+            "vpc_interface": "ens7",
+        }
+
+        with SemaphoreClient() as client:
+            client.login()
+            project_id = vm.event.semaphore_project_id if vm.event and vm.event.semaphore_project_id else None
+            if not project_id:
+                project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
+            else:
+                key_id = vm.event.semaphore_key_id
+
+            inv_id = client.create_inventory(
+                project_id, f"vpcif-{vm_id}", vm.ip_address,
+                ssh_user=vm.ssh_user or "root", ssh_port=vm.ssh_port or 22, key_id=key_id,
+            )
+            repo_id = client.create_repository(
+                project_id, f"vpcif-{vm_id}", str(playbook_dir), key_id
+            )
+            tmpl_id = client.create_template(
+                project_id, f"vpcif-{vm_id}", "configure-vpc-interface.yml",
+                inv_id, repo_id, key_id, extra_vars=extra_vars,
+            )
+            task_id = client.run_task(project_id, tmpl_id)
+            vm.semaphore_task_id = task_id
+            vm.updated_at = utcnow()
+            db.commit()
+
+            while True:
+                status = client.get_task_status(project_id, task_id)
+                if status == "success":
+                    break
+                elif status in ("error", "stopped"):
+                    output_lines = client.get_task_output(project_id, task_id)
+                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
+                    _log.warning("VPC interface config failed for VM %d:\n%s", vm_id, tail)
+                    # Non-fatal: VM is still usable via public IP
+                    return
+                time.sleep(5)
+
+        _log.info("VPC interface configured on VM %d: %s via %s", vm_id, vm.vpc_ip, vpc_gateway)
+
+    except Exception as exc:
+        _log.warning("VPC interface configuration failed for VM %d (non-fatal): %s", vm_id, exc)
+    finally:
+        db.close()
+        if playbook_dir and playbook_dir.exists():
+            shutil.rmtree(playbook_dir, ignore_errors=True)
+
+
 # ── Vultr VM Creation ──────────────────────────────────────────────────────────
 
 def _run_vultr_create(vm_id: int) -> None:
@@ -1583,10 +1690,12 @@ def _run_vultr_create(vm_id: int) -> None:
 def _provision_event_vms(event_id: int) -> None:
     """Synchronous background task: create all VMs for an event based on vm_quota.
 
-    For each team in the event, creates VMs per the vm_quota spec:
-    - Target VMs get modules assigned and plans sized based on resource needs.
-    - Attacker VMs use the default plan with no modules.
-    Each VM creation is spawned as a separate thread via _run_vultr_create().
+    If the quota contains a 'firewall' role, provisions in phases:
+      Phase 1: Create Vultr VPCs (one per team, via REST API)
+      Phase 2: Create and bootstrap OPNsense firewall VMs (threads, joined)
+      Phase 3: Create target + attacker VMs (threads, not joined)
+
+    Without a firewall role, all VMs are spawned concurrently as before.
     """
     import threading
 
@@ -1594,6 +1703,7 @@ def _provision_event_vms(event_id: int) -> None:
 
     from api.database import SessionLocal
     from api.models import utcnow
+
     from builder.base_loader import load_base_type
     from builder.module_loader import load_all_modules
     from builder.plan_sizing import plan_for_vm
@@ -1612,14 +1722,10 @@ def _provision_event_vms(event_id: int) -> None:
             _log.warning("No teams for event %d — skipping VM provisioning", event_id)
             return
 
-        # Load module library once
-        library = load_all_modules()
+        has_firewall = any(spec.get("role") == "firewall" for spec in vm_quota.values())
 
-        # Pre-create Semaphore project for the event (avoids race condition
-        # when multiple _run_provision threads check event.semaphore_project_id)
-        has_targets = any(
-            spec.get("role", "target") == "target" for spec in vm_quota.values()
-        )
+        # Pre-create Semaphore project for target VM provisioning
+        has_targets = any(spec.get("role") == "target" for spec in vm_quota.values())
         if has_targets and not event.semaphore_project_id:
             from api.services.semaphore import SemaphoreClient
             from api.services.ssh_keys import get_or_create_platform_keypair
@@ -1649,19 +1755,41 @@ def _provision_event_vms(event_id: int) -> None:
                 )
                 resp.raise_for_status()
                 available_plans = [
-                    {
-                        "id": p["id"],
-                        "ram": p["ram"],
-                        "vcpu_count": p["vcpu_count"],
-                        "monthly_cost": p["monthly_cost"],
-                    }
+                    {"id": p["id"], "ram": p["ram"], "vcpu_count": p["vcpu_count"], "monthly_cost": p["monthly_cost"]}
                     for p in resp.json().get("plans", [])
                     if p.get("id", "").startswith("vc2-")
                 ]
             except Exception as exc:
                 _log.warning("Failed to fetch Vultr plans for sizing: %s", exc)
 
-        vm_ids = []
+        # ── Phase 0: Assign team indexes (only needed when firewall is present) ──
+        if has_firewall:
+            teams_ordered = sorted(teams, key=lambda t: t.id)
+            for idx, team in enumerate(teams_ordered, start=1):
+                team.team_index = idx
+            db.commit()
+            teams = teams_ordered  # use sorted order from here
+
+            # ── Phase 1: Create Vultr VPCs ────────────────────────────────────
+            # Find firewall spec to get the region
+            firewall_region = VULTR_DEFAULT_REGION
+            for spec in vm_quota.values():
+                if spec.get("role") == "firewall":
+                    firewall_region = spec.get("region") or VULTR_DEFAULT_REGION
+                    break
+
+            for team in teams:
+                _log.info("Creating VPC for team %d (index %d)", team.id, team.team_index)
+                _create_team_vpc(team.id, event_id, firewall_region)
+            db.expire_all()  # refresh team objects with vpc_id values
+
+        # ── Create all VM records ─────────────────────────────────────────────
+        library = load_all_modules()
+        firewall_vm_ids = []
+        other_vm_ids = []
+        # Track per-team target VM count for VPC IP assignment
+        team_target_counter: dict[int, int] = {}
+
         for team in teams:
             for vm_type_key, vm_spec in vm_quota.items():
                 count = vm_spec.get("count", 1)
@@ -1689,12 +1817,22 @@ def _provision_event_vms(event_id: int) -> None:
                         created_at=utcnow(),
                         updated_at=utcnow(),
                     )
-                    db.add(vm)
-                    db.flush()  # get vm.id
 
-                    if role == "target":
+                    if role == "firewall":
+                        # Firewall VMs get the gateway IP on the team VPC
+                        team_idx = team.team_index or 1
+                        vm.vpc_ip = f"10.{team_idx}.1.1"
+                        vm.os = "FreeBSD 14 x64"  # OPNsense base OS
+                        db.add(vm)
+                        db.flush()
+                        db.commit()
+                        firewall_vm_ids.append(vm.id)
+
+                    elif role == "target":
                         # Select modules for this VM
                         selected = select_modules(module_quota, library, base_type_id=base_type_id)
+                        db.add(vm)
+                        db.flush()
                         for mod in selected:
                             db.add(VMModule(
                                 vm_id=vm.id,
@@ -1703,30 +1841,53 @@ def _provision_event_vms(event_id: int) -> None:
                                 difficulty=mod.difficulty,
                                 points=mod.points,
                             ))
-                        # Size the plan based on module requirements
-                        if available_plans:
-                            if loaded_base_type is not None:
-                                sized_plan = plan_for_vm(
-                                    base_type=loaded_base_type,
-                                    modules=selected,
-                                    vm_quota_override_plan=vm_spec.get("default_plan"),
-                                    available_plans=available_plans,
-                                )
-                                if sized_plan != vm.vultr_plan:
-                                    vm.vultr_plan = sized_plan
-                            else:
-                                _log.warning("VM %s: no base_type set, skipping plan sizing (using default_plan from vm_quota)", vm.hostname)
+                        if available_plans and loaded_base_type is not None:
+                            sized_plan = plan_for_vm(
+                                base_type=loaded_base_type,
+                                modules=selected,
+                                vm_quota_override_plan=vm_spec.get("default_plan"),
+                                available_plans=available_plans,
+                            )
+                            if sized_plan != vm.vultr_plan:
+                                vm.vultr_plan = sized_plan
 
-                    db.commit()
-                    vm_ids.append(vm.id)
+                        # Assign VPC IP if this event has a firewall
+                        if has_firewall:
+                            team_idx = team.team_index or 1
+                            counter = team_target_counter.get(team.id, 0)
+                            vm.vpc_ip = f"10.{team_idx}.1.{10 + counter}"
+                            team_target_counter[team.id] = counter + 1
+
+                        db.commit()
+                        other_vm_ids.append(vm.id)
+
+                    else:
+                        # Attacker (or any other role): no modules, no VPC
+                        db.add(vm)
+                        db.flush()
+                        db.commit()
+                        other_vm_ids.append(vm.id)
 
         _log.info(
-            "Event %d: queued %d VMs for creation across %d teams",
-            event_id, len(vm_ids), len(teams),
+            "Event %d: queued %d firewall + %d other VMs across %d teams",
+            event_id, len(firewall_vm_ids), len(other_vm_ids), len(teams),
         )
 
-        # Spawn Vultr creation threads for all VMs
-        for vid in vm_ids:
+        if has_firewall and firewall_vm_ids:
+            # ── Phase 2: Create and bootstrap firewall VMs, then wait ────────
+            _log.info("Event %d: starting firewall provisioning (%d VMs)", event_id, len(firewall_vm_ids))
+            firewall_threads = [
+                threading.Thread(target=_run_firewall_create, args=(vid,), daemon=True)
+                for vid in firewall_vm_ids
+            ]
+            for t in firewall_threads:
+                t.start()
+            for t in firewall_threads:
+                t.join()
+            _log.info("Event %d: all firewall VMs provisioned, starting target/attacker VMs", event_id)
+
+        # ── Phase 3 (or only phase without firewall): target + attacker VMs ──
+        for vid in other_vm_ids:
             t = threading.Thread(target=_run_vultr_create, args=(vid,), daemon=True)
             t.start()
 
