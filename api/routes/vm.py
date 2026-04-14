@@ -31,6 +31,7 @@ CLOUDFLARE_DOMAIN = os.environ.get("CLOUDFLARE_DOMAIN", "")
 # Path to the bundled VM provisioning playbooks (relative to project root)
 _HERE = Path(__file__).parent.parent.parent
 PLAYBOOKS_DIR = _HERE / "playbooks"
+TEMPLATES_DIR = _HERE / "templates"
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -1145,6 +1146,60 @@ def _get_or_create_vultr_semaphore_project(db, client, private_key: str) -> tupl
     db.commit()
 
     return project_id, key_id
+
+
+# ── VPC Creation ───────────────────────────────────────────────────────────────
+
+def _create_team_vpc(team_id: int, event_id: int, region: str) -> None:
+    """Create a Vultr VPC for a team and store the VPC ID on the team record.
+
+    Uses the Vultr REST API directly (no Semaphore needed for a single API call).
+    VPC description format: "ctf-event-{event_id}-team-{team_index}"
+    Subnet format: "10.{team_index}.1.0/24"
+    """
+    import httpx as _httpx
+
+    from api.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if not team or team.team_index is None:
+            _log.error("_create_team_vpc: team %d not found or missing team_index", team_id)
+            return
+
+        vpc_description = f"ctf-event-{event_id}-team-{team.team_index}"
+        v4_subnet = f"10.{team.team_index}.1.0"
+
+        _log.info(
+            "Creating VPC '%s' (%s/24) in region %s for team %d",
+            vpc_description, v4_subnet, region, team_id,
+        )
+
+        resp = _httpx.post(
+            "https://api.vultr.com/v2/vpcs",
+            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
+            json={
+                "region": region,
+                "v4_subnet": v4_subnet,
+                "v4_subnet_mask": 24,
+                "description": vpc_description,
+            },
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+
+        vpc_id = resp.json()["vpc"]["id"]
+        team.vpc_id = vpc_id
+        db.commit()
+
+        _log.info("VPC '%s' created with ID %s", vpc_description, vpc_id)
+
+    except Exception as exc:
+        _log.exception("Failed to create VPC for team %d: %s", team_id, exc)
+        raise
+    finally:
+        db.close()
 
 
 # ── Vultr VM Creation ──────────────────────────────────────────────────────────
