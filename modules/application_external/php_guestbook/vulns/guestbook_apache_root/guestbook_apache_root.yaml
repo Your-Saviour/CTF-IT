@@ -1,0 +1,34 @@
+id: guestbook_apache_root
+name: Apache Running as Root
+description: The Apache global configuration sets User root and Group root, causing all worker processes to run with full root privileges. Any web vulnerability becomes an immediate root compromise.
+type: vulnerability
+difficulty: hard
+points: 300
+category: services
+tags: [privilege-escalation, apache, misconfiguration, services]
+conflicts: []
+requires: [php_guestbook]
+script: guestbook_apache_root.sh
+verification:
+  type: file_not_contains
+  path: /etc/apache2/apache2.conf
+  pattern: "User root"
+suggested_fix: "Edit /etc/apache2/apache2.conf and change 'User root' back to 'User www-data' and 'Group root' back to 'Group www-data', then run: systemctl restart apache2"
+hints:
+  - "Check what user the Apache web server process is running as"
+  - "Review the User and Group directives in /etc/apache2/apache2.conf"
+  - "Change 'User root' to 'User www-data' and 'Group root' to 'Group www-data' in apache2.conf, then restart Apache"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548
+    name: "Abuse Elevation Control Mechanism"
+  recon:
+    description: "Check if Apache workers are running as root"
+    command: |
+      ps aux | grep apache2 | grep -v grep | grep -q "^root" && echo "VULNERABLE: Apache running as root" || echo "SECURE: Apache not running as root"
+  exploit:
+    description: "Confirm root execution via a PHP command via the web server"
+    command: |
+      curl -s "http://localhost:8080/?cmd=id" 2>/dev/null || echo "Exploit requires code execution via an existing web vulnerability"
+      grep -q "User root" /etc/apache2/apache2.conf && echo "Confirmed: Apache configured to run as root"
