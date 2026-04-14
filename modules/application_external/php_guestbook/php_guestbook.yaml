@@ -12,7 +12,6 @@ steps:
   - run: setup.sh
   - copy: { src: index.php, dest: /opt/guestbook/index.php }
   - copy: { src: config.php, dest: /opt/guestbook/config.php }
-  - copy: { src: phpinfo.php, dest: /opt/guestbook/phpinfo.php }
   - copy: { src: guestbook.conf, dest: /etc/apache2/sites-available/guestbook.conf }
   - run: finalize.sh
 verification:

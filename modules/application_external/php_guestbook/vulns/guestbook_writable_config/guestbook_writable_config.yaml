@@ -13,7 +13,7 @@ verification:
   type: file_permissions
   path: /opt/guestbook/config.php
   expected: "640"
-suggested_fix: "chmod 640 /opt/guestbook/config.php && chown root:www-data /opt/guestbook/config.php"
+suggested_fix: "chmod 640 /opt/guestbook/config.php"
 hints:
   - "Check file permissions on PHP configuration files"
   - "Look at the permissions on /opt/guestbook/config.php"
