@@ -739,9 +739,14 @@ def _run_provision(vm_id: int) -> None:
         vm.updated_at = utcnow()
         db.commit()
 
-        # If this VM has a VPC IP assigned, configure its VPC network interface
+        # If this VM has a VPC IP assigned, configure its VPC network interface.
+        # Spawned as a daemon thread so _run_provision's DB session can close
+        # before the (potentially long) netplan config task begins.
         if vm.vpc_ip:
-            _run_configure_vpc_interface(vm_id)
+            import threading as _threading
+            _threading.Thread(
+                target=_run_configure_vpc_interface, args=(vm_id,), daemon=True
+            ).start()
 
     except Exception as exc:
         from api.models import utcnow as _utcnow
@@ -1528,7 +1533,7 @@ def _run_configure_vpc_interface(vm_id: int) -> None:
     finally:
         db.close()
         if playbook_dir and playbook_dir.exists():
-            shutil.rmtree(playbook_dir, ignore_errors=True)
+            _shutil.rmtree(playbook_dir, ignore_errors=True)
 
 
 # ── Vultr VM Creation ──────────────────────────────────────────────────────────
