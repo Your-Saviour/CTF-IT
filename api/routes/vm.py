@@ -1161,6 +1161,10 @@ def _create_team_vpc(team_id: int, event_id: int, region: str) -> None:
 
     from api.database import SessionLocal
 
+    if not VULTR_API_KEY:
+        _log.error("_create_team_vpc: VULTR_API_KEY is not configured — skipping VPC creation for team %d", team_id)
+        return
+
     db = SessionLocal()
     try:
         team = db.query(Team).filter(Team.id == team_id).first()
@@ -1197,9 +1201,223 @@ def _create_team_vpc(team_id: int, event_id: int, region: str) -> None:
 
     except Exception as exc:
         _log.exception("Failed to create VPC for team %d: %s", team_id, exc)
-        raise
     finally:
         db.close()
+
+
+# ── OPNsense Firewall Provisioning ─────────────────────────────────────────────
+
+def _run_firewall_create(vm_id: int) -> None:
+    """Synchronous background task: create a Vultr FreeBSD VM, attach it to the team VPC,
+    then bootstrap it into OPNsense.
+
+    Stores admin password on vm.admin_password.
+    Sets vm.status = "active" on success, "failed" on error.
+    """
+    import re as _re
+    import shutil as _shutil
+
+    import bcrypt as _bcrypt
+
+    from api.database import SessionLocal
+    from api.models import utcnow
+    from api.services.semaphore import SemaphoreClient
+    from api.services.ssh_keys import get_or_create_platform_keypair
+
+    db = SessionLocal()
+    playbook_dir = None
+    try:
+        vm = db.query(VM).filter(VM.id == vm_id).first()
+        if not vm:
+            return
+        team = db.query(Team).filter(Team.id == vm.team_id).first()
+        if not team:
+            raise RuntimeError(f"Team {vm.team_id} not found for firewall VM {vm_id}")
+
+        # ── Stage 1: Create Vultr VM via create-firewall.yml ────────────────
+        _update_provision_step(db, vm, "staging_playbook")
+
+        export_id = f"firewall_{vm_id}_{uuid.uuid4().hex[:8]}"
+        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
+        playbook_dir.mkdir(parents=True, exist_ok=True)
+
+        _shutil.copy(PLAYBOOKS_DIR / "create-firewall.yml", playbook_dir / "create-firewall.yml")
+        collections_dir = playbook_dir / "collections"
+        collections_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            PLAYBOOKS_DIR / "collections" / "requirements.yml",
+            collections_dir / "requirements.yml",
+        )
+
+        _update_provision_step(db, vm, "configuring_semaphore")
+
+        private_key, public_key = get_or_create_platform_keypair(db)
+
+        vpc_description = f"ctf-event-{vm.event_id}-team-{team.team_index}"
+
+        extra_vars: dict = {
+            "vm_hostname": vm.hostname or f"ctf-fw-{vm_id}",
+            "vm_plan": vm.vultr_plan or "vc2-2c-4gb",
+            "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
+            "ssh_key_name": "ctf-platform",
+            "ssh_public_key": public_key,
+            "vultr_api_key": VULTR_API_KEY,
+            "vpc_description": vpc_description,
+        }
+        if CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
+            extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
+            extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
+
+        _update_provision_step(db, vm, "creating_instance")
+
+        with SemaphoreClient() as client:
+            client.login()
+            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
+            inv_id = client.create_localhost_inventory(project_id, f"localhost-fw-{vm_id}", key_id)
+            repo_id = client.create_repository(
+                project_id, f"create-fw-{vm_id}", str(playbook_dir), key_id
+            )
+            tmpl_id = client.create_template(
+                project_id, f"create-fw-{vm_id}", "create-firewall.yml",
+                inv_id, repo_id, key_id, extra_vars=extra_vars,
+            )
+            task_id = client.run_task(project_id, tmpl_id)
+            vm.semaphore_task_id = task_id
+            vm.updated_at = utcnow()
+            db.commit()
+
+            while True:
+                status = client.get_task_status(project_id, task_id)
+                if status == "success":
+                    break
+                elif status in ("error", "stopped"):
+                    output_lines = client.get_task_output(project_id, task_id)
+                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
+                    raise RuntimeError(f"create-firewall.yml failed:\n{tail}")
+                time.sleep(10)
+
+            output_lines = client.get_task_output(project_id, task_id)
+
+        # Parse IP from output
+        _update_provision_step(db, vm, "extracting_results")
+        _ansi = _re.compile(r'\x1b\[[0-9;]*[mGKHF]')
+        cleaned = " ".join(_ansi.sub('', line).strip() for line in output_lines)
+
+        match = _re.search(r'VULTR_RESULT=(\{.*?\})', cleaned)
+        if not match:
+            raise RuntimeError("Could not extract firewall VM IP from playbook output")
+        vultr_result = json.loads(match.group(1))
+        if not vultr_result.get("ip"):
+            raise RuntimeError("VULTR_RESULT missing ip field")
+
+        vm.ip_address = vultr_result["ip"]
+        vm.vultr_id = vultr_result.get("vultr_id", "")
+        vm.cloudflare_record_id = vultr_result.get("dns_record_id") or None
+        vm.status = "registered"
+        vm.provision_step = "bootstrapping_opnsense"
+        vm.updated_at = utcnow()
+        db.commit()
+
+        # ── Stage 2: Bootstrap OPNsense ──────────────────────────────────────
+        # Generate admin credentials in Python (no Ansible passlib dependency needed)
+        import secrets as _secrets
+        import string as _string
+        admin_password = ''.join(
+            _secrets.choice(_string.ascii_letters + _string.digits)
+            for _ in range(20)
+        )
+        # OPNsense expects bcrypt $2y$ format; Python bcrypt produces $2b$ which OPNsense accepts
+        password_hash = _bcrypt.hashpw(
+            admin_password.encode(), _bcrypt.gensalt(rounds=10)
+        ).decode()
+
+        bootstrap_dir = playbook_dir / "bootstrap"
+        bootstrap_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            PLAYBOOKS_DIR / "bootstrap-opnsense.yml",
+            bootstrap_dir / "bootstrap-opnsense.yml",
+        )
+        # Stage templates/ subdirectory so Ansible finds opnsense_config.xml.j2
+        bootstrap_templates_dir = bootstrap_dir / "templates"
+        bootstrap_templates_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            TEMPLATES_DIR / "opnsense_config.xml.j2",
+            bootstrap_templates_dir / "opnsense_config.xml.j2",
+        )
+        bootstrap_collections_dir = bootstrap_dir / "collections"
+        bootstrap_collections_dir.mkdir(exist_ok=True)
+        _shutil.copy(
+            PLAYBOOKS_DIR / "collections" / "requirements.yml",
+            bootstrap_collections_dir / "requirements.yml",
+        )
+
+        team_index = team.team_index or 1
+        bootstrap_extra_vars = {
+            "opnsense_hostname": vm.hostname or f"ctf-fw-{vm_id}",
+            "opnsense_lan_ip": f"10.{team_index}.1.1",
+            "opnsense_lan_subnet": 24,
+            "opnsense_admin_password_hash": password_hash,
+            "opnsense_ssh_pubkey": public_key,
+            "opnsense_release": "25.1",
+        }
+
+        firewall_ip = vm.ip_address
+        with SemaphoreClient() as client:
+            client.login()
+            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
+            # Remote inventory pointing to the firewall's public IP
+            fw_inv_id = client.create_inventory(
+                project_id, f"fw-host-{vm_id}", firewall_ip,
+                ssh_user="root", ssh_port=22, key_id=key_id,
+            )
+            repo_id = client.create_repository(
+                project_id, f"bootstrap-fw-{vm_id}", str(bootstrap_dir), key_id
+            )
+            tmpl_id = client.create_template(
+                project_id, f"bootstrap-fw-{vm_id}", "bootstrap-opnsense.yml",
+                fw_inv_id, repo_id, key_id, extra_vars=bootstrap_extra_vars,
+            )
+            task_id = client.run_task(project_id, tmpl_id)
+            vm.semaphore_task_id = task_id
+            vm.updated_at = utcnow()
+            db.commit()
+
+            # Bootstrap takes 10-15 minutes; poll patiently
+            while True:
+                status = client.get_task_status(project_id, task_id)
+                if status == "success":
+                    break
+                elif status in ("error", "stopped"):
+                    output_lines = client.get_task_output(project_id, task_id)
+                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
+                    raise RuntimeError(f"bootstrap-opnsense.yml failed:\n{tail}")
+                time.sleep(15)
+
+        # Store credentials and mark active
+        vm.admin_password = admin_password
+        vm.vpc_ip = f"10.{team_index}.1.1"
+        vm.status = "active"
+        vm.provision_step = "completed"
+        vm.updated_at = utcnow()
+        db.commit()
+
+        _log.info("Firewall VM %d (%s) provisioned and active at %s", vm_id, vm.hostname, vm.ip_address)
+
+    except Exception as exc:
+        from api.models import utcnow as _utcnow
+        _log.exception("Firewall VM creation failed for VM %d", vm_id)
+        try:
+            vm.status = "failed"
+            vm.provision_step = "failed"
+            vm.provision_error = str(exc)
+            vm.updated_at = _utcnow()
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+        if playbook_dir and playbook_dir.exists():
+            shutil.rmtree(playbook_dir, ignore_errors=True)
 
 
 # ── Vultr VM Creation ──────────────────────────────────────────────────────────
