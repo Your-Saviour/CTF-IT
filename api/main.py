@@ -38,6 +38,8 @@ async def lifespan(app: FastAPI):
                 "attack_tree_json": "TEXT",
                 "vm_type": "VARCHAR(64)",
                 "base_type": "VARCHAR(64)",
+                "vpc_ip": "VARCHAR(45)",
+                "admin_password": "VARCHAR(128)",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
@@ -51,6 +53,15 @@ async def lifespan(app: FastAPI):
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))
+
+        if inspector.has_table("teams"):
+            existing = {col["name"] for col in inspector.get_columns("teams")}
+            for col, typ in {
+                "vpc_id": "VARCHAR(64)",
+                "team_index": "INTEGER",
+            }.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE teams ADD COLUMN {col} {typ}"))
 
         if inspector.has_table("vm_modules"):
             existing = {col["name"] for col in inspector.get_columns("vm_modules")}

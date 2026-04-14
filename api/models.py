@@ -54,6 +54,10 @@ class Team(Base):
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    # VPC networking (set when event has a firewall role in vm_quota)
+    vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    team_index: Mapped[int] = mapped_column(Integer, nullable=True)
+
     event: Mapped["Event"] = relationship(back_populates="teams")
     vms: Mapped[list["VM"]] = relationship(back_populates="team")
 
@@ -89,6 +93,11 @@ class VM(Base):
     attack_tree_json: Mapped[str] = mapped_column(Text, nullable=True)
     # Base type ID used when provisioned (e.g. "ubuntu_24_server")
     base_type: Mapped[str] = mapped_column(String(64), nullable=True)
+
+    # VPC networking
+    vpc_ip: Mapped[str] = mapped_column(String(45), nullable=True)
+    # OPNsense admin password (firewall VMs only)
+    admin_password: Mapped[str] = mapped_column(String(128), nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
