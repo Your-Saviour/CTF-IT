@@ -1,0 +1,32 @@
+id: open_telnet
+name: Telnet Service Enabled
+description: The telnetd service is installed and running, exposing an unencrypted remote login interface on port 23. All credentials and session data are transmitted in cleartext.
+type: vulnerability
+difficulty: easy
+points: 100
+category: network
+tags: [network, telnet, cleartext, services]
+conflicts: []
+requires: []
+script: open_telnet.sh
+verification:
+  type: port_closed
+  port: 23
+suggested_fix: "Stop and disable the telnet service, then remove the package: systemctl stop inetd && systemctl disable inetd && apt-get remove -y telnetd xinetd"
+hints:
+  - "Scan this machine for legacy remote access services"
+  - "Check if any unencrypted remote login services are running on standard ports"
+  - "Disable and remove the telnet daemon: systemctl stop inetd && systemctl disable inetd && apt-get remove -y telnetd xinetd"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1133
+    name: "External Remote Services"
+  recon:
+    description: "Check if telnet is listening on port 23"
+    command: |
+      ss -tlnp | grep -q ":23" && echo "VULNERABLE: telnet is listening on port 23" || echo "SECURE: port 23 is not listening"
+  exploit:
+    description: "Connect to telnet and attempt login with default credentials"
+    command: |
+      timeout 5 bash -c 'echo -e "root\nchangeme123\n" | nc -q 3 localhost 23' 2>/dev/null | head -10 || echo "Telnet port is open (connect manually for interactive login)"

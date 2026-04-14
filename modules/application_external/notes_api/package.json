@@ -1,0 +1,13 @@
+{
+  "name": "notesapi",
+  "version": "1.0.0",
+  "description": "Simple notes REST API",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "better-sqlite3": "^9.4.3"
+  }
+}

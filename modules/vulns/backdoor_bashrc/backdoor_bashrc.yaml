@@ -1,0 +1,34 @@
+id: backdoor_bashrc
+name: Backdoor in Root .bashrc
+description: A reverse shell one-liner has been appended to /root/.bashrc. Every time root opens an interactive shell, the backdoor attempts to connect back to the attacker's machine.
+type: vulnerability
+difficulty: easy
+points: 100
+category: persistence
+tags: [persistence, backdoor, bashrc, reverse-shell]
+conflicts: []
+requires: []
+script: backdoor_bashrc.sh
+verification:
+  type: file_not_contains
+  path: /root/.bashrc
+  pattern: "nc -e /bin/bash"
+suggested_fix: "Edit /root/.bashrc and remove the line containing 'nc -e /bin/bash'. Alternatively: grep -v 'nc -e /bin/bash' /root/.bashrc > /tmp/bashrc_clean && mv /tmp/bashrc_clean /root/.bashrc"
+hints:
+  - "Check shell configuration files for unusual commands"
+  - "Review /root/.bashrc for any unexpected lines at the end of the file"
+  - "Remove the reverse shell line from /root/.bashrc: grep -v 'nc -e /bin/bash' /root/.bashrc > /tmp/b && mv /tmp/b /root/.bashrc"
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1546.004
+    name: "Event Triggered Execution: Unix Shell Configuration Modification"
+  recon:
+    description: "Check if /root/.bashrc contains a reverse shell backdoor"
+    command: |
+      grep -q "nc -e /bin/bash" /root/.bashrc && echo "VULNERABLE: reverse shell backdoor found in /root/.bashrc" || echo "SECURE: no reverse shell in /root/.bashrc"
+  exploit:
+    description: "Confirm the backdoor payload and display the callback address"
+    command: |
+      grep "nc -e /bin/bash" /root/.bashrc
+      echo "Backdoor will fire on next root interactive login"

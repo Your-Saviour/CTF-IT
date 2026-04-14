@@ -1,0 +1,37 @@
+id: core_dumps_unrestricted
+name: Unrestricted Core Dumps
+description: Core dump restrictions have been removed from /etc/security/limits.conf and fs.suid_dumpable is set to 2. This allows SUID processes to produce core dumps containing sensitive memory — including passwords, cryptographic keys, and other credentials that were in-memory at crash time.
+type: vulnerability
+difficulty: medium
+points: 200
+category: configuration
+tags: [configuration, kernel, credentials, core-dump, information-disclosure]
+conflicts: []
+requires: []
+script: core_dumps_unrestricted.sh
+verification:
+  type: file_contains
+  path: /etc/security/limits.conf
+  pattern: "hard core 0"
+suggested_fix: "Re-add the core dump restriction to /etc/security/limits.conf: echo '* hard core 0' >> /etc/security/limits.conf. Also disable SUID core dumps: sysctl -w fs.suid_dumpable=0 and set fs.suid_dumpable=0 in /etc/sysctl.conf"
+hints:
+  - "Check system limits for core dump configuration"
+  - "Look at /etc/security/limits.conf for core dump size limits and check fs.suid_dumpable via sysctl"
+  - "Add '* hard core 0' to /etc/security/limits.conf and set fs.suid_dumpable=0 in /etc/sysctl.conf, then run sysctl -p"
+caldera:
+  tactic: credential-access
+  technique:
+    attack_id: T1003
+    name: "OS Credential Dumping"
+  recon:
+    description: "Check if core dumps are unrestricted and SUID dumping is enabled"
+    command: |
+      sysctl fs.suid_dumpable | grep -q "= 2" && echo "VULNERABLE: SUID core dumps enabled (fs.suid_dumpable=2)" || \
+      grep -q "hard core 0" /etc/security/limits.conf || echo "VULNERABLE: no core dump size limit in limits.conf"
+      grep -q "hard core 0" /etc/security/limits.conf && echo "SECURE: core dump hard limit is set" || echo "VULNERABLE: missing hard core 0 in limits.conf"
+  exploit:
+    description: "Trigger a core dump from a SUID process and inspect for sensitive data"
+    command: |
+      sysctl fs.suid_dumpable
+      ulimit -c
+      echo "Core dumps unrestricted — crash a SUID process to dump its memory for credential extraction"

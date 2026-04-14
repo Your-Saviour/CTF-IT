@@ -1,0 +1,33 @@
+id: monitord_cmd_injection
+name: Command Injection in Monitord
+description: The monitoring daemon uses eval to process query parameters received over the network, allowing an attacker to inject arbitrary shell commands via the metrics endpoint.
+type: vulnerability
+difficulty: hard
+points: 300
+category: services
+tags: [command-injection, bash, services, rce]
+conflicts: []
+requires: [monitord]
+script: monitord_cmd_injection.sh
+verification:
+  type: file_not_contains
+  path: /opt/monitord/monitord.sh
+  pattern: "eval"
+suggested_fix: "Remove the eval statement from /opt/monitord/monitord.sh. Replace dynamic command execution with a fixed case/esac block that maps known query strings to specific safe commands. Restart the service after editing."
+hints:
+  - "Review the monitoring daemon script for unsafe input processing"
+  - "Look for dangerous shell constructs in /opt/monitord/monitord.sh"
+  - "Replace eval with a case statement that maps specific metric names to hardcoded commands, then restart monitord"
+caldera:
+  tactic: execution
+  technique:
+    attack_id: T1059.004
+    name: "Command and Scripting Interpreter: Unix Shell"
+  recon:
+    description: "Check if monitord uses eval for input processing"
+    command: |
+      grep -q "eval" /opt/monitord/monitord.sh && echo "VULNERABLE: eval detected in monitord.sh" || echo "SECURE: no eval in monitord.sh"
+  exploit:
+    description: "Inject a command via the metrics TCP endpoint"
+    command: |
+      echo "cpu; id" | nc -q 1 localhost 9000

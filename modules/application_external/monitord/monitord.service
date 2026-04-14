@@ -1,0 +1,15 @@
+[Unit]
+Description=Monitord System Metrics Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=monitord
+ExecStart=/bin/bash /opt/monitord/monitord.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/monitord/monitord.log
+StandardError=append:/var/log/monitord/monitord.log
+
+[Install]
+WantedBy=multi-user.target

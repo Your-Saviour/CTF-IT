@@ -1,0 +1,33 @@
+id: fileserver_hidden_files
+name: Directory Listing Exposes Hidden Files
+description: The file server is configured with show_hidden = true, causing dotfiles and hidden directories (e.g. .git, .env, .ssh) to appear in directory listings and be downloadable.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [information-disclosure, web, go, configuration]
+conflicts: []
+requires: [go_fileserver]
+script: fileserver_hidden_files.sh
+verification:
+  type: file_not_contains
+  path: /opt/fileserver/config.toml
+  pattern: "show_hidden = true"
+suggested_fix: "In /opt/fileserver/config.toml, remove or set show_hidden = false, then restart the service: systemctl restart fileserver"
+hints:
+  - "Review the file server configuration for directory listing options"
+  - "Look for hidden file exposure settings in /opt/fileserver/config.toml"
+  - "Set show_hidden = false in config.toml and restart the fileserver service"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if hidden files are exposed in directory listings"
+    command: |
+      grep -q "show_hidden = true" /opt/fileserver/config.toml && echo "VULNERABLE: hidden files exposed" || echo "SECURE: hidden files not shown"
+  exploit:
+    description: "Browse directory listing for hidden files"
+    command: |
+      curl -sk "https://localhost:8000/files/" | grep -oP 'href="[^"]+"' | grep "\."

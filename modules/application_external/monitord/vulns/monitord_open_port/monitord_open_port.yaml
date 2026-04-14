@@ -1,0 +1,34 @@
+id: monitord_open_port
+name: Unauthenticated Metrics Endpoint
+description: The monitoring daemon listens on port 9000 with no authentication, allowing any network-reachable host to query system metrics including CPU usage, memory, running processes, and disk layout.
+type: vulnerability
+difficulty: medium
+points: 200
+category: network
+tags: [network, information-disclosure, unauthenticated, services]
+conflicts: []
+requires: [monitord]
+script: monitord_open_port.sh
+verification:
+  type: port_closed
+  port: 9000
+suggested_fix: "Stop the monitord service and disable it: systemctl stop monitord && systemctl disable monitord. Alternatively, add firewall rules to block external access to port 9000: ufw deny 9000/tcp"
+hints:
+  - "Check what ports this machine is listening on"
+  - "Test whether port 9000 is accessible without any credentials"
+  - "Stop and disable the monitord service (systemctl stop monitord && systemctl disable monitord) or block port 9000 with a firewall rule"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1046
+    name: "Network Service Discovery"
+  recon:
+    description: "Check if port 9000 is listening and unauthenticated"
+    command: |
+      ss -tlnp | grep -q ":9000" && echo "VULNERABLE: port 9000 is open" || echo "SECURE: port 9000 is not listening"
+  exploit:
+    description: "Query system metrics from the unauthenticated endpoint"
+    command: |
+      echo "cpu" | nc -q 1 localhost 9000
+      echo "mem" | nc -q 1 localhost 9000
+      echo "disk" | nc -q 1 localhost 9000

@@ -1,0 +1,14 @@
+[Unit]
+Description=Log Management Application
+After=network.target
+
+[Service]
+Type=simple
+User=logapp
+WorkingDirectory=/opt/logapp
+ExecStart=/usr/bin/java -Dlog4j2.formatMsgNoLookups=true -jar /opt/logapp/logapp.jar --spring.config.location=/opt/logapp/application.properties
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

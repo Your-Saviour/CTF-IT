@@ -1,0 +1,21 @@
+id: monitord
+name: Bash Monitoring Daemon
+description: A lightweight system monitoring daemon written in bash. Collects CPU, memory, and disk metrics from /proc and serves them over a TCP socket on port 9000 using netcat.
+type: application_external
+difficulty: easy
+points: 0
+category: services
+tags: [services, bash, monitoring, daemon]
+conflicts: []
+requires: []
+steps:
+  - run: setup.sh
+  - copy: { src: monitord.sh, dest: /opt/monitord/monitord.sh }
+  - copy: { src: monitord.service, dest: /etc/systemd/system/monitord.service }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: monitord
+  expected: running
+hints:
+  - "Check what custom services are running on this machine"

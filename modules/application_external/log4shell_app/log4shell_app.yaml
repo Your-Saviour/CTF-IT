@@ -1,0 +1,22 @@
+id: log4shell_app
+name: Java Log Management App
+description: A Spring Boot log management application running on port 8081. Provides endpoints for submitting and viewing log entries. Built with the vulnerable Log4j 2.14.1 library.
+type: application_external
+difficulty: hard
+points: 0
+category: web
+tags: [web, java, spring-boot, log4j, log4shell]
+conflicts: []
+requires: []
+steps:
+  - run: setup.sh
+  - run: build.sh
+  - copy: { src: application.properties, dest: /opt/logapp/application.properties }
+  - copy: { src: logapp.service, dest: /etc/systemd/system/logapp.service }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: "0.0.0.0:8081"
+  expected: running
+hints:
+  - "Check what Java services are running on this machine"

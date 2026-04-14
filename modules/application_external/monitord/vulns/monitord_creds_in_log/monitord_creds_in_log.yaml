@@ -1,0 +1,33 @@
+id: monitord_creds_in_log
+name: Credentials Leaked in Monitord Logs
+description: The monitoring daemon script logs the DB_PASSWORD environment variable in plaintext to its log file when the service starts, leaking credentials to anyone who can read the logs.
+type: vulnerability
+difficulty: medium
+points: 200
+category: authentication
+tags: [credentials, logging, information-disclosure, bash]
+conflicts: []
+requires: [monitord]
+script: monitord_creds_in_log.sh
+verification:
+  type: file_not_contains
+  path: /opt/monitord/monitord.sh
+  pattern: "DB_PASSWORD"
+suggested_fix: "Remove the line in /opt/monitord/monitord.sh that logs DB_PASSWORD, and rotate the log files: > /var/log/monitord/monitord.log. Restart the service."
+hints:
+  - "Review what the monitoring daemon logs at startup"
+  - "Search /opt/monitord/monitord.sh for any logging of sensitive environment variables"
+  - "Remove the DB_PASSWORD logging line from monitord.sh, clear the log file, and restart the service"
+caldera:
+  tactic: credential-access
+  technique:
+    attack_id: T1552.003
+    name: "Unsecured Credentials: Bash History"
+  recon:
+    description: "Check if DB_PASSWORD is referenced in the monitord script"
+    command: |
+      grep -q "DB_PASSWORD" /opt/monitord/monitord.sh && echo "VULNERABLE: credentials logged in monitord.sh" || echo "SECURE: no credential logging found"
+  exploit:
+    description: "Extract the database password from monitord logs"
+    command: |
+      grep -i "password\|DB_PASS\|credential" /var/log/monitord/monitord.log 2>/dev/null | head -5

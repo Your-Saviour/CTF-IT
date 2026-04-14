@@ -1,0 +1,36 @@
+id: ip_forwarding_enabled
+name: IP Forwarding Enabled
+description: Kernel IP forwarding is enabled via net.ipv4.ip_forward = 1 in /etc/sysctl.conf. This allows the machine to act as a router, forwarding packets between network interfaces — enabling network pivoting attacks if the host is compromised.
+type: vulnerability
+difficulty: easy
+points: 100
+category: configuration
+tags: [network, configuration, kernel, pivoting]
+conflicts: []
+requires: []
+script: ip_forwarding_enabled.sh
+verification:
+  type: file_not_contains
+  path: /etc/sysctl.conf
+  pattern: "net.ipv4.ip_forward = 1"
+suggested_fix: "Edit /etc/sysctl.conf and remove or comment out the 'net.ipv4.ip_forward = 1' line, then apply: sysctl -p. Also disable at runtime: sysctl -w net.ipv4.ip_forward=0"
+hints:
+  - "Review kernel network configuration parameters"
+  - "Check /etc/sysctl.conf for IP forwarding settings"
+  - "Remove or comment out 'net.ipv4.ip_forward = 1' from /etc/sysctl.conf and apply with sysctl -p"
+caldera:
+  tactic: lateral-movement
+  technique:
+    attack_id: T1599
+    name: "Network Boundary Bridging"
+  recon:
+    description: "Check if IP forwarding is enabled"
+    command: |
+      grep -q "net.ipv4.ip_forward = 1" /etc/sysctl.conf && echo "VULNERABLE: IP forwarding enabled in sysctl.conf" || \
+      sysctl net.ipv4.ip_forward | grep -q "= 1" && echo "VULNERABLE: IP forwarding enabled at runtime" || echo "SECURE: IP forwarding is disabled"
+  exploit:
+    description: "Confirm IP forwarding is active and use for network pivoting"
+    command: |
+      sysctl net.ipv4.ip_forward
+      ip route show
+      echo "IP forwarding active — this host can be used as a network pivot"

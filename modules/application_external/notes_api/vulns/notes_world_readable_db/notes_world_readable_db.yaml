@@ -1,0 +1,33 @@
+id: notes_world_readable_db
+name: World-Readable Notes Database
+description: The SQLite database file is readable by any user on the system, exposing all stored notes and any sensitive data they contain.
+type: vulnerability
+difficulty: easy
+points: 100
+category: filesystem
+tags: [permissions, filesystem, sqlite, data-exposure]
+conflicts: []
+requires: [notes_api]
+script: notes_world_readable_db.sh
+verification:
+  type: file_permissions
+  path: /opt/notesapi/notes.db
+  expected: "640"
+suggested_fix: "chmod 640 /opt/notesapi/notes.db && chown notesapi:notesapi /opt/notesapi/notes.db"
+hints:
+  - "Check file permissions on application data files"
+  - "Look at the permissions on database files in /opt/notesapi/"
+  - "Use chmod 640 to restrict the SQLite database to owner read/write and group read only"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if the notes database is world-readable"
+    command: |
+      stat -c "%a" /opt/notesapi/notes.db | grep -qE "^[0-9][0-9][4-7]$" && echo "VULNERABLE: notes.db is world-readable" || echo "SECURE: notes.db permissions are restricted"
+  exploit:
+    description: "Read the notes database as an unprivileged user"
+    command: |
+      sqlite3 /opt/notesapi/notes.db "SELECT * FROM notes;" 2>/dev/null && echo "Database contents read successfully"

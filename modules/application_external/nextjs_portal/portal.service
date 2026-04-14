@@ -1,0 +1,18 @@
+[Unit]
+Description=Next.js Employee Portal
+After=network.target
+
+[Service]
+Type=simple
+User=portal
+WorkingDirectory=/opt/portal
+Environment=NODE_ENV=production
+Environment=PORT=3001
+Environment=NEXTAUTH_URL=http://localhost:3001
+Environment=NEXTAUTH_SECRET=super-secret-dev-key
+ExecStart=/usr/bin/node node_modules/.bin/next start -p 3001
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+id: fileserver_default_tls_key
+name: World-Readable TLS Private Key
+description: The TLS private key file server.key is readable by all users on the system. An attacker who can read it can decrypt captured HTTPS traffic or impersonate the server.
+type: vulnerability
+difficulty: easy
+points: 100
+category: filesystem
+tags: [tls, permissions, filesystem, cryptography]
+conflicts: []
+requires: [go_fileserver]
+script: fileserver_default_tls_key.sh
+verification:
+  type: file_permissions
+  path: /opt/fileserver/server.key
+  expected: "600"
+suggested_fix: "chmod 600 /opt/fileserver/server.key && chown fileserver:fileserver /opt/fileserver/server.key"
+hints:
+  - "Check permissions on TLS certificate and key files"
+  - "Look at who can read /opt/fileserver/server.key"
+  - "Use chmod 600 to restrict the private key to the owner only: chmod 600 /opt/fileserver/server.key"
+caldera:
+  tactic: credential-access
+  technique:
+    attack_id: T1552.004
+    name: "Unsecured Credentials: Private Keys"
+  recon:
+    description: "Check if the TLS private key is world-readable"
+    command: |
+      stat -c "%a" /opt/fileserver/server.key | grep -qE "^[0-9][0-9][4-7]$" && echo "VULNERABLE: server.key is world-readable" || echo "SECURE: server.key permissions are restricted"
+  exploit:
+    description: "Read the TLS private key as an unprivileged user"
+    command: |
+      cat /opt/fileserver/server.key | head -5
+      echo "Private key exfiltrated — can now decrypt captured HTTPS sessions"

@@ -1,0 +1,10 @@
+# Go File Server configuration
+serve_root = "/opt/fileserver/files"
+listen = "0.0.0.0:8000"
+tls_cert = "/opt/fileserver/server.crt"
+tls_key = "/opt/fileserver/server.key"
+
+# Security options (secure defaults)
+sanitize_paths = true
+show_hidden = false
+allow_anonymous_upload = false

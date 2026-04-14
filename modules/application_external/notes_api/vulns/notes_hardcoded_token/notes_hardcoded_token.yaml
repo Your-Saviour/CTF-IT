@@ -1,0 +1,34 @@
+id: notes_hardcoded_token
+name: Hardcoded Admin API Token
+description: The application source code contains a hardcoded admin API token used to authenticate privileged endpoints. Anyone who can read the source file obtains admin access.
+type: vulnerability
+difficulty: medium
+points: 200
+category: authentication
+tags: [hardcoded-credentials, authentication, nodejs]
+conflicts: []
+requires: [notes_api]
+script: notes_hardcoded_token.sh
+verification:
+  type: file_not_contains
+  path: /opt/notesapi/app.js
+  pattern: "SuperSecret123"
+suggested_fix: "Move the admin token to an environment variable (e.g. ADMIN_TOKEN) set in the systemd service file under [Service] Environment=, and reference it in app.js as process.env.ADMIN_TOKEN"
+hints:
+  - "Review the application source code for embedded secrets"
+  - "Search /opt/notesapi/app.js for hardcoded credential strings"
+  - "Move the token to an environment variable in the systemd unit file and remove it from app.js"
+caldera:
+  tactic: credential-access
+  technique:
+    attack_id: T1552.001
+    name: "Unsecured Credentials: Credentials In Files"
+  recon:
+    description: "Check if app.js contains a hardcoded admin token"
+    command: |
+      grep -q "SuperSecret123" /opt/notesapi/app.js && echo "VULNERABLE: hardcoded admin token found" || echo "SECURE: no hardcoded token detected"
+  exploit:
+    description: "Extract the admin token and access the privileged endpoint"
+    command: |
+      TOKEN=$(grep -oP "SuperSecret123[^'\"]*" /opt/notesapi/app.js | head -1)
+      curl -s -H "X-Admin-Token: $TOKEN" http://localhost:3000/admin/notes | python3 -m json.tool

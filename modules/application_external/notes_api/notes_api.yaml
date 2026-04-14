@@ -1,0 +1,22 @@
+id: notes_api
+name: Node.js Notes API
+description: A Node.js Express REST API for storing and searching notes, backed by a SQLite database. Runs on port 3000 as a systemd service.
+type: application_external
+difficulty: easy
+points: 0
+category: web
+tags: [web, nodejs, express, sqlite, api]
+conflicts: []
+requires: []
+steps:
+  - run: setup.sh
+  - copy: { src: app.js, dest: /opt/notesapi/app.js }
+  - copy: { src: package.json, dest: /opt/notesapi/package.json }
+  - copy: { src: notesapi.service, dest: /etc/systemd/system/notesapi.service }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: "0.0.0.0:3000"
+  expected: running
+hints:
+  - "Check what services are listening on common web ports"

@@ -1,0 +1,28 @@
+id: nextjs_portal
+name: Next.js Employee Portal
+description: A Next.js 14.1.0 employee portal with authentication middleware and an admin API. Deployed to /opt/portal/ and runs on port 3001 as a systemd service.
+type: application_external
+difficulty: hard
+points: 0
+category: web
+tags: [web, nodejs, nextjs, react, employee-portal]
+conflicts: []
+requires: []
+min_ram_mb: 1024
+min_vcpu: 1
+steps:
+  - run: setup.sh
+  - copy: { src: src/package.json, dest: /opt/portal/package.json }
+  - copy: { src: src/next.config.js, dest: /opt/portal/next.config.js }
+  - copy: { src: src/tsconfig.json, dest: /opt/portal/tsconfig.json }
+  - copy: { src: src/middleware.ts, dest: /opt/portal/middleware.ts }
+  - copy: { src: src/app, dest: /opt/portal/ }
+  - copy: { src: src/lib, dest: /opt/portal/ }
+  - copy: { src: portal.service, dest: /etc/systemd/system/portal.service }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: "0.0.0.0:3001"
+  expected: running
+hints:
+  - "Check what web applications are running on higher port numbers"

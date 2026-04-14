@@ -1,0 +1,37 @@
+id: anonymous_ftp
+name: Anonymous FTP Access
+description: The vsftpd FTP server is configured with anonymous_enable=YES, allowing unauthenticated read access to the FTP root directory. Sensitive files left in the FTP root are exposed to any network client.
+type: vulnerability
+difficulty: medium
+points: 200
+category: network
+tags: [network, ftp, anonymous, unauthenticated, services]
+conflicts: []
+requires: []
+script: anonymous_ftp.sh
+verification:
+  type: file_not_contains
+  path: /etc/vsftpd.conf
+  pattern: "anonymous_enable=YES"
+suggested_fix: "Edit /etc/vsftpd.conf and change anonymous_enable=YES to anonymous_enable=NO, then restart vsftpd: systemctl restart vsftpd"
+hints:
+  - "Check FTP server configuration for authentication requirements"
+  - "Review the vsftpd configuration file for anonymous access settings"
+  - "Set anonymous_enable=NO in /etc/vsftpd.conf and restart vsftpd: systemctl restart vsftpd"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1133
+    name: "External Remote Services"
+  recon:
+    description: "Check if anonymous FTP login is enabled"
+    command: |
+      grep -q "anonymous_enable=YES" /etc/vsftpd.conf && echo "VULNERABLE: anonymous FTP access enabled" || echo "SECURE: anonymous FTP is disabled"
+  exploit:
+    description: "Log in to FTP as anonymous and list/download files"
+    command: |
+      ftp -inv localhost 21 <<EOF 2>/dev/null
+      user anonymous ""
+      ls
+      bye
+      EOF

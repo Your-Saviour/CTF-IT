@@ -1,0 +1,34 @@
+id: malicious_cron_beacon
+name: Malicious Cron Job (C2 Beacon)
+description: A cron entry runs /opt/.hidden/beacon.sh every 5 minutes from root's crontab. The script simulates a C2 beacon — in a real attack this would exfiltrate data or maintain persistence by phoning home.
+type: vulnerability
+difficulty: medium
+points: 200
+category: persistence
+tags: [persistence, cron, c2, beacon, malware]
+conflicts: []
+requires: []
+script: malicious_cron_beacon.sh
+verification:
+  type: cron_not_present
+  pattern: "beacon.sh"
+suggested_fix: "Remove the malicious cron entry from root's crontab: crontab -l | grep -v beacon.sh | crontab - and delete the beacon script: rm -rf /opt/.hidden/"
+hints:
+  - "Review scheduled tasks for suspicious or unexpected entries"
+  - "Check root's crontab for any unfamiliar scripts: crontab -l"
+  - "Remove the beacon.sh cron entry (crontab -e or crontab -l | grep -v beacon | crontab -) and delete /opt/.hidden/"
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1053.003
+    name: "Scheduled Task/Job: Cron"
+  recon:
+    description: "Check if a malicious cron beacon is installed"
+    command: |
+      crontab -l 2>/dev/null | grep -q "beacon.sh" && echo "VULNERABLE: malicious cron beacon found" || echo "SECURE: no beacon.sh in crontab"
+  exploit:
+    description: "Execute the C2 beacon script manually to confirm functionality"
+    command: |
+      crontab -l | grep beacon
+      cat /opt/.hidden/beacon.sh 2>/dev/null
+      bash /opt/.hidden/beacon.sh 2>/dev/null && echo "Beacon executed successfully"

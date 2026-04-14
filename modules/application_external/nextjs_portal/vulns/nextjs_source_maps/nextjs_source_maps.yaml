@@ -1,0 +1,34 @@
+id: nextjs_source_maps
+name: Source Maps Exposed in Production
+description: The Next.js production build is configured with productionBrowserSourceMaps: true in next.config.js, causing the full TypeScript source code to be served as .js.map files alongside the compiled JavaScript.
+type: vulnerability
+difficulty: easy
+points: 100
+category: web
+tags: [information-disclosure, nextjs, source-maps, web, configuration]
+conflicts: []
+requires: [nextjs_portal]
+script: nextjs_source_maps.sh
+verification:
+  type: file_not_contains
+  path: /opt/portal/next.config.js
+  pattern: "productionBrowserSourceMaps: true"
+suggested_fix: "Edit /opt/portal/next.config.js and remove or set productionBrowserSourceMaps: false, then rebuild: cd /opt/portal && node_modules/.bin/next build && systemctl restart portal"
+hints:
+  - "Check the Next.js build configuration for source map settings"
+  - "Look for productionBrowserSourceMaps in /opt/portal/next.config.js"
+  - "Remove or set productionBrowserSourceMaps: false in next.config.js, rebuild with next build, and restart the portal service"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if production source maps are enabled"
+    command: |
+      grep -q "productionBrowserSourceMaps: true" /opt/portal/next.config.js && echo "VULNERABLE: source maps enabled in production" || echo "SECURE: source maps not exposed in production"
+  exploit:
+    description: "Access source map files to read original TypeScript source"
+    command: |
+      curl -s "http://localhost:3001/_next/static/chunks/app/page.js.map" | python3 -m json.tool | grep -i "sources\|sourcesContent" | head -5
+      echo "Source code exposed via .map files"

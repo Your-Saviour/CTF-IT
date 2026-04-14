@@ -1,0 +1,33 @@
+id: notes_debug_mode
+name: Node.js Debug Mode Enabled
+description: The systemd service unit file sets DEBUG=true, causing the application to output verbose debug information including internal state and request details.
+type: vulnerability
+difficulty: easy
+points: 100
+category: web
+tags: [misconfiguration, nodejs, debug, information-disclosure]
+conflicts: []
+requires: [notes_api]
+script: notes_debug_mode.sh
+verification:
+  type: file_not_contains
+  path: /etc/systemd/system/notesapi.service
+  pattern: "DEBUG=true"
+suggested_fix: "Edit /etc/systemd/system/notesapi.service and remove the DEBUG=true line from [Service] Environment=, then run: systemctl daemon-reload && systemctl restart notesapi"
+hints:
+  - "Check the systemd service unit configuration for the notes API"
+  - "Look at environment variables set in /etc/systemd/system/notesapi.service"
+  - "Remove the DEBUG=true environment variable and reload the service with systemctl daemon-reload && systemctl restart notesapi"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if debug mode is enabled in the notesapi service unit"
+    command: |
+      grep -q "DEBUG=true" /etc/systemd/system/notesapi.service && echo "VULNERABLE: debug mode enabled" || echo "SECURE: debug mode not enabled"
+  exploit:
+    description: "Trigger verbose debug output to extract internal application state"
+    command: |
+      curl -s http://localhost:3000/debug 2>/dev/null || curl -v http://localhost:3000/notes 2>&1 | head -50

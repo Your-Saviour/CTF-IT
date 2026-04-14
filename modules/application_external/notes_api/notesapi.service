@@ -1,0 +1,14 @@
+[Unit]
+Description=Notes API
+After=network.target
+
+[Service]
+Type=simple
+User=notesapi
+WorkingDirectory=/opt/notesapi
+ExecStart=/usr/bin/node /opt/notesapi/app.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

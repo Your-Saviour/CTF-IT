@@ -1,0 +1,34 @@
+id: fileserver_running_as_root
+name: File Server Running as Root
+description: The systemd service unit does not specify a User directive, causing the file server process to run as root. Any path traversal or upload vulnerability becomes an immediate full system compromise.
+type: vulnerability
+difficulty: medium
+points: 200
+category: services
+tags: [privilege-escalation, services, misconfiguration, systemd]
+conflicts: []
+requires: [go_fileserver]
+script: fileserver_running_as_root.sh
+verification:
+  type: file_contains
+  path: /etc/systemd/system/fileserver.service
+  pattern: "User=fileserver"
+suggested_fix: "Edit /etc/systemd/system/fileserver.service and ensure the [Service] section contains 'User=fileserver', then run: systemctl daemon-reload && systemctl restart fileserver"
+hints:
+  - "Check what user the file server process is running as"
+  - "Look at the [Service] section of /etc/systemd/system/fileserver.service"
+  - "Add 'User=fileserver' under [Service] in the unit file, then reload and restart: systemctl daemon-reload && systemctl restart fileserver"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548
+    name: "Abuse Elevation Control Mechanism"
+  recon:
+    description: "Check if the file server is running as root"
+    command: |
+      ps aux | grep fileserver | grep -v grep | grep -q "^root" && echo "VULNERABLE: fileserver running as root" || echo "SECURE: fileserver not running as root"
+  exploit:
+    description: "Confirm root execution and chain with path traversal"
+    command: |
+      ps aux | grep fileserver | grep -v grep | awk '{print "Running as: " $1}'
+      curl -sk "https://localhost:8000/files/../../../../root/.ssh/id_rsa" 2>/dev/null | head -5

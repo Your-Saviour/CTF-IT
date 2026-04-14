@@ -1,0 +1,35 @@
+id: monitord_writable_logdir
+name: World-Writable Monitord Log Directory
+description: The daemon's log directory at /var/log/monitord is world-writable, allowing any local user to delete, overwrite, or plant log entries.
+type: vulnerability
+difficulty: easy
+points: 100
+category: filesystem
+tags: [permissions, filesystem, logging]
+conflicts: []
+requires: [monitord]
+script: monitord_writable_logdir.sh
+verification:
+  type: file_permissions
+  path: /var/log/monitord
+  expected: "750"
+suggested_fix: "chmod 750 /var/log/monitord && chown monitord:monitord /var/log/monitord"
+hints:
+  - "Check permissions on log directories for running services"
+  - "Look at the permissions on /var/log/monitord"
+  - "Use chmod 750 to restrict the log directory to the service owner and group"
+caldera:
+  tactic: defense-evasion
+  technique:
+    attack_id: T1070.002
+    name: "Indicator Removal: Clear Linux or Mac System Logs"
+  recon:
+    description: "Check if the monitord log directory is world-writable"
+    command: |
+      [ -w /var/log/monitord ] && stat -c "%a" /var/log/monitord | grep -qE "^[0-9][0-9][2-7]$" && echo "VULNERABLE: /var/log/monitord is world-writable" || echo "SECURE: log directory permissions are restricted"
+  exploit:
+    description: "Tamper with or delete monitoring logs as an unprivileged user"
+    command: |
+      ls /var/log/monitord/
+      echo "TAMPERED" > /var/log/monitord/monitord.log
+      echo "Log file overwritten successfully"

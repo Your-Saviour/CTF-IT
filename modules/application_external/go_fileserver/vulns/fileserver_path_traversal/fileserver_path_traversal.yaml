@@ -1,0 +1,33 @@
+id: fileserver_path_traversal
+name: Path Traversal in File Server
+description: The file server does not sanitise path components, allowing requests like /files/../../../../etc/passwd to read files outside the intended serve root.
+type: vulnerability
+difficulty: hard
+points: 300
+category: web
+tags: [path-traversal, web, go, lfi]
+conflicts: []
+requires: [go_fileserver]
+script: fileserver_path_traversal.sh
+verification:
+  type: file_contains
+  path: /opt/fileserver/config.toml
+  pattern: "sanitize_paths = true"
+suggested_fix: "In /opt/fileserver/config.toml, set sanitize_paths = true and restart the service: systemctl restart fileserver"
+hints:
+  - "Review the file server configuration for path handling settings"
+  - "Look at the sanitize_paths setting in /opt/fileserver/config.toml"
+  - "Set sanitize_paths = true in config.toml and restart the fileserver service"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if path traversal is possible on the file server"
+    command: |
+      grep -q "sanitize_paths = false" /opt/fileserver/config.toml && echo "VULNERABLE: path traversal enabled (sanitize_paths = false)" || echo "SECURE: path sanitisation is active"
+  exploit:
+    description: "Read /etc/passwd via path traversal"
+    command: |
+      curl -sk "https://localhost:8000/files/../../../../etc/passwd" | head -5

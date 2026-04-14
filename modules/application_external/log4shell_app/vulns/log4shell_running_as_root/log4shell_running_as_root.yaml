@@ -1,0 +1,34 @@
+id: log4shell_running_as_root
+name: Log App Running as Root
+description: The logapp systemd service unit does not specify a User directive, causing the JVM process to run with full root privileges. Combined with Log4Shell or other deserialization bugs, this enables instant full system compromise.
+type: vulnerability
+difficulty: medium
+points: 200
+category: services
+tags: [privilege-escalation, services, systemd, java, misconfiguration]
+conflicts: []
+requires: [log4shell_app]
+script: log4shell_running_as_root.sh
+verification:
+  type: file_contains
+  path: /etc/systemd/system/logapp.service
+  pattern: "User=logapp"
+suggested_fix: "Edit /etc/systemd/system/logapp.service and add 'User=logapp' under the [Service] section, then run: systemctl daemon-reload && systemctl restart logapp"
+hints:
+  - "Check what user the Java application is running as"
+  - "Review the [Service] section of /etc/systemd/system/logapp.service for a User= directive"
+  - "Add 'User=logapp' to the [Service] section in logapp.service, reload daemon, and restart the service"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548
+    name: "Abuse Elevation Control Mechanism"
+  recon:
+    description: "Check if the logapp JVM is running as root"
+    command: |
+      ps aux | grep logapp.jar | grep -v grep | grep -q "^root" && echo "VULNERABLE: logapp running as root" || echo "SECURE: logapp not running as root"
+  exploit:
+    description: "Confirm root process ownership of the JVM"
+    command: |
+      ps aux | grep logapp.jar | grep -v grep | awk '{print "Process owner: " $1}'
+      ls -la /proc/$(pgrep -f logapp.jar | head -1)/exe 2>/dev/null

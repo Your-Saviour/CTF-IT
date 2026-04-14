@@ -1,0 +1,34 @@
+id: log4shell_world_readable_logs
+name: Sensitive Logs World-Readable
+description: The application log directory /var/log/logapp is world-readable. Log files contain request bodies submitted to the /log endpoint, which may include JNDI strings, internal user data, or other sensitive content.
+type: vulnerability
+difficulty: easy
+points: 100
+category: filesystem
+tags: [permissions, filesystem, logging, information-disclosure]
+conflicts: []
+requires: [log4shell_app]
+script: log4shell_world_readable_logs.sh
+verification:
+  type: file_permissions
+  path: /var/log/logapp
+  expected: "750"
+suggested_fix: "chmod 750 /var/log/logapp && chown logapp:logapp /var/log/logapp"
+hints:
+  - "Check permissions on application log directories"
+  - "Look at who can read /var/log/logapp"
+  - "Use chmod 750 to restrict the log directory to the service user: chmod 750 /var/log/logapp"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if the logapp log directory is world-readable"
+    command: |
+      stat -c "%a" /var/log/logapp | grep -qE "^[0-9][0-9][4-7]$" && echo "VULNERABLE: /var/log/logapp is world-readable" || echo "SECURE: log directory permissions are restricted"
+  exploit:
+    description: "Read application logs as an unprivileged user"
+    command: |
+      ls /var/log/logapp/
+      cat /var/log/logapp/application.log 2>/dev/null | grep -i "jndi\|password\|secret\|token" | head -10

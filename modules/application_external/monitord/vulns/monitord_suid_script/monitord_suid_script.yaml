@@ -1,0 +1,34 @@
+id: monitord_suid_script
+name: SUID Bit on Daemon Script
+description: The monitord.sh script has the SUID bit set, meaning any user who can execute it will run it with root privileges. The script's bash functionality can be trivially abused for privilege escalation.
+type: vulnerability
+difficulty: medium
+points: 200
+category: filesystem
+tags: [suid, permissions, privilege-escalation, bash]
+conflicts: []
+requires: [monitord]
+script: monitord_suid_script.sh
+verification:
+  type: file_permissions
+  path: /opt/monitord/monitord.sh
+  expected: "750"
+suggested_fix: "chmod 750 /opt/monitord/monitord.sh — SUID is meaningless on shell scripts in Linux (the kernel ignores it), but the bit should be removed to avoid confusion and pass audits: chmod u-s /opt/monitord/monitord.sh"
+hints:
+  - "Check for unusual permission bits on service scripts"
+  - "Look at the permissions on /opt/monitord/monitord.sh"
+  - "Remove the SUID bit: chmod u-s /opt/monitord/monitord.sh (or chmod 750)"
+caldera:
+  tactic: privilege-escalation
+  technique:
+    attack_id: T1548.001
+    name: "Abuse Elevation Control Mechanism: Setuid and Setgid"
+  recon:
+    description: "Check if monitord.sh has the SUID bit set"
+    command: |
+      test -u /opt/monitord/monitord.sh && echo "VULNERABLE: SUID bit set on monitord.sh" || echo "SECURE: no SUID bit on monitord.sh"
+  exploit:
+    description: "Confirm SUID bit presence on the daemon script"
+    command: |
+      stat -c "%a %U %G" /opt/monitord/monitord.sh
+      ls -la /opt/monitord/monitord.sh

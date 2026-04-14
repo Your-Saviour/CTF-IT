@@ -1,0 +1,34 @@
+id: nextjs_unprotected_api
+name: Admin API Route Unprotected
+description: The admin API route at /api/admin/users returns all user records without verifying the caller's session. Any unauthenticated request receives the full user list including usernames, emails, and password hashes.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [authentication, api, nextjs, web, information-disclosure]
+conflicts: []
+requires: [nextjs_portal]
+script: nextjs_unprotected_api.sh
+verification:
+  type: file_contains
+  path: /opt/portal/app/api/admin/users/route.ts
+  pattern: "getServerSession"
+suggested_fix: "Add a session check at the top of the GET handler in /opt/portal/app/api/admin/users/route.ts using getServerSession(). If the session is null, return a 401 response. Then rebuild: cd /opt/portal && node_modules/.bin/next build && systemctl restart portal"
+hints:
+  - "Check the admin API endpoints for authentication controls"
+  - "Review /opt/portal/app/api/admin/users/route.ts for missing session verification"
+  - "Add a getServerSession() check at the start of the GET handler — return NextResponse.json({error:'Unauthorized'},{status:401}) if the session is null. Rebuild and restart."
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if the admin users API is accessible without authentication"
+    command: |
+      HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/admin/users)
+      [ "$HTTP_CODE" = "200" ] && echo "VULNERABLE: /api/admin/users accessible without auth (HTTP $HTTP_CODE)" || echo "SECURE: /api/admin/users returned HTTP $HTTP_CODE"
+  exploit:
+    description: "Dump all user records from the unprotected admin API"
+    command: |
+      curl -s http://localhost:3001/api/admin/users | python3 -m json.tool
