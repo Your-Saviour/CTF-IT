@@ -1306,9 +1306,12 @@ def _run_firewall_create(vm_id: int) -> None:
         match = _re.search(r'VULTR_RESULT=(\{.*?\})', cleaned)
         if not match:
             raise RuntimeError("Could not extract firewall VM IP from playbook output")
-        vultr_result = json.loads(match.group(1))
-        if not vultr_result.get("ip"):
-            raise RuntimeError("VULTR_RESULT missing ip field")
+        try:
+            vultr_result = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            vultr_result = None
+        if not vultr_result or not vultr_result.get("ip"):
+            raise RuntimeError("Could not extract firewall VM IP from playbook output")
 
         vm.ip_address = vultr_result["ip"]
         vm.vultr_id = vultr_result.get("vultr_id", "")
@@ -1407,11 +1410,12 @@ def _run_firewall_create(vm_id: int) -> None:
         from api.models import utcnow as _utcnow
         _log.exception("Firewall VM creation failed for VM %d", vm_id)
         try:
-            vm.status = "failed"
-            vm.provision_step = "failed"
-            vm.provision_error = str(exc)
-            vm.updated_at = _utcnow()
-            db.commit()
+            if vm is not None:
+                vm.status = "failed"
+                vm.provision_step = "failed"
+                vm.provision_error = str(exc)
+                vm.updated_at = _utcnow()
+                db.commit()
         except Exception:
             pass
     finally:
