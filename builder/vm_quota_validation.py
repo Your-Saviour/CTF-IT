@@ -1,6 +1,6 @@
 import re
 
-VALID_ROLES = {"target", "attacker"}
+VALID_ROLES = {"target", "attacker", "firewall"}
 ALLOWED_KEYS = {"base_type", "default_plan", "count", "role", "region"}
 SLUG_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 

@@ -1,0 +1,9 @@
+id: opnsense
+name: OPNsense Firewall
+description: OPNsense firewall/router bootstrapped from FreeBSD 14 on Vultr. Used for per-team firewall VMs in CTF events. Do not use for regular target/attacker VMs.
+os: "FreeBSD 14 x64"
+default_plan: vc2-2c-4gb
+icon: router
+packages: []
+steps: []
+disabled: false
