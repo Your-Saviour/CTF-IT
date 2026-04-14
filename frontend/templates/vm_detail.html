@@ -208,6 +208,10 @@
                 <span class="detail-label">Base Type</span>
                 <span class="detail-value" id="ci-basetype">—</span>
             </div>
+            <div class="detail-row" id="ci-vpc-row" style="display:none;">
+                <span class="detail-label">VPC IP</span>
+                <span class="detail-value" id="ci-vpc-ip">—</span>
+            </div>
         </div>
         <div class="detail-row">
             <span class="detail-label">Agent</span>
@@ -257,6 +261,29 @@
                 <textarea id="as-notes" rows="3" placeholder="Add notes about this VM..."></textarea>
                 <button class="btn btn-sm" onclick="saveNotes()">Save Notes</button>
             </div>
+        </div>
+    </div>
+
+    <!-- OPNsense Firewall Credentials (shown only for firewall VMs) -->
+    <div class="card" id="fw-credentials-card" style="display:none;">
+        <h3>Firewall Credentials</h3>
+        <div class="detail-row">
+            <span class="detail-label">Web UI</span>
+            <span class="detail-value"><a id="fw-web-url" href="#" target="_blank" style="color:var(--cyan);">https://—</a></span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Username</span>
+            <span class="detail-value">root</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Password</span>
+            <span class="detail-value">
+                <span id="fw-password" style="font-family:monospace;">—</span>
+                <button class="btn btn-sm" style="margin-left:0.5rem;" onclick="copyFWPassword()">Copy</button>
+            </span>
+        </div>
+        <div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-secondary);">
+            Web UI uses a self-signed certificate — accept the browser warning.
         </div>
     </div>
 </div>
@@ -438,6 +465,19 @@ function renderVM(data) {
         document.getElementById('ci-basetype').textContent = data.base_type;
         document.getElementById('ci-basetype-row').style.display = 'flex';
     }
+        // VPC IP
+        if (data.vpc_ip) {
+            document.getElementById('ci-vpc-ip').textContent = data.vpc_ip;
+            document.getElementById('ci-vpc-row').style.display = 'flex';
+        }
+        // OPNsense firewall credentials
+        if (data.admin_password && data.ip_address) {
+            var webUrl = 'https://' + data.ip_address;
+            document.getElementById('fw-web-url').href = webUrl;
+            document.getElementById('fw-web-url').textContent = webUrl;
+            document.getElementById('fw-password').textContent = data.admin_password;
+            document.getElementById('fw-credentials-card').style.display = '';
+        }
 
     var sshCmd = data.ip_address
         ? 'ssh ' + (data.ssh_user || 'root') + '@' + data.ip_address + (data.ssh_port && data.ssh_port !== 22 ? ' -p ' + data.ssh_port : '')
@@ -512,6 +552,13 @@ function copySSH() {
     if (text.startsWith('—')) return;
     navigator.clipboard.writeText(text).then(function() {
         showToast('SSH command copied');
+    });
+}
+
+function copyFWPassword() {
+    var pw = document.getElementById('fw-password').textContent;
+    navigator.clipboard.writeText(pw).then(function() {
+        showToast('Password copied!');
     });
 }
 

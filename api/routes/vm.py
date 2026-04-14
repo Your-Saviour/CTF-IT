@@ -207,6 +207,8 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "provision_error": vm.provision_error,
         "vm_type": vm.vm_type,
         "base_type": vm.base_type,
+        "vpc_ip": vm.vpc_ip,
+        "admin_password": vm.admin_password,
     }
 
 
