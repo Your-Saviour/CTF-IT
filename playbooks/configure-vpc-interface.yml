@@ -1,0 +1,37 @@
+---
+# Configure the Vultr VPC network interface on an Ubuntu target VM.
+# The VPC interface (ens7) is assigned a static IP with MTU 1450 (required for Vultr VXLAN).
+#
+# Required extra vars:
+#   vpc_ip          - Static IP to assign (e.g. "10.1.1.10")
+#   vpc_subnet_mask - Subnet mask bits (e.g. 24)
+#   vpc_gateway     - Default gateway on VPC (OPNsense LAN IP, e.g. "10.1.1.1")
+#   vpc_interface   - Interface name for the VPC NIC (default: "ens7" on Vultr Ubuntu)
+
+- name: Configure VPC Interface
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    - name: Ensure netplan config directory exists
+      ansible.builtin.file:
+        path: /etc/netplan
+        state: directory
+        mode: "0755"
+
+    - name: Deploy VPC netplan config
+      ansible.builtin.template:
+        src: vpc-netplan.yaml.j2
+        dest: /etc/netplan/99-vpc.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      vars:
+        vpc_interface: "{{ vpc_interface | default('ens7') }}"
+
+    - name: Apply netplan configuration
+      ansible.builtin.shell:
+        cmd: netplan apply
+      changed_when: true

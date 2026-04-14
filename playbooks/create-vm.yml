@@ -41,6 +41,7 @@
         region: "{{ vm_region }}"
         ssh_keys:
           - "{{ ssh_key_name }}"
+        vpcs: "{{ [vpc_description] if vpc_description is defined and vpc_description else omit }}"
         ddos_protection: false
         backups: false
         enable_ipv6: false
