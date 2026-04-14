@@ -1,0 +1,33 @@
+id: guestbook_dir_listing
+name: Apache Directory Listing Enabled
+description: The Apache vhost configuration enables directory listing (Options +Indexes), exposing all files in /opt/guestbook/ to unauthenticated requests.
+type: vulnerability
+difficulty: easy
+points: 100
+category: web
+tags: [misconfiguration, apache, information-disclosure, directory-listing]
+conflicts: []
+requires: [php_guestbook]
+script: guestbook_dir_listing.sh
+verification:
+  type: file_not_contains
+  path: /etc/apache2/sites-enabled/guestbook.conf
+  pattern: "+Indexes"
+suggested_fix: "Edit /etc/apache2/sites-enabled/guestbook.conf and remove '+Indexes' from the Options directive (or set Options -Indexes), then run: systemctl reload apache2"
+hints:
+  - "Review the Apache vhost configuration for this application"
+  - "Look for directory listing settings in /etc/apache2/sites-enabled/guestbook.conf"
+  - "Change Options +Indexes to Options -Indexes in the vhost config and reload Apache"
+caldera:
+  tactic: collection
+  technique:
+    attack_id: T1005
+    name: "Data from Local System"
+  recon:
+    description: "Check if Apache directory listing is enabled"
+    command: |
+      grep -q "+Indexes" /etc/apache2/sites-enabled/guestbook.conf && echo "VULNERABLE: directory listing enabled" || echo "SECURE: directory listing not enabled"
+  exploit:
+    description: "Browse the web root directory listing to enumerate application files"
+    command: |
+      curl -s http://localhost:8080/ | grep -oP 'href="[^"]+"' | grep -v "^href=\"http" | head -20
