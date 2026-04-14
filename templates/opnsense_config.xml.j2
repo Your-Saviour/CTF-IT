@@ -1,0 +1,149 @@
+<?xml version="1.0"?>
+<opnsense>
+  <theme>opnsense</theme>
+  <sysctl>
+    <item>
+      <descr>Increase UFS read-ahead speeds</descr>
+      <tunable>vfs.read_max</tunable>
+      <value>default</value>
+    </item>
+    <item>
+      <descr>Enable TCP keepalives</descr>
+      <tunable>net.inet.tcp.always_keepalive</tunable>
+      <value>1</value>
+    </item>
+  </sysctl>
+  <system>
+    <optimization>normal</optimization>
+    <hostname>{{ opnsense_hostname }}</hostname>
+    <domain>localdomain</domain>
+    <dnsserver>1.1.1.1</dnsserver>
+    <dnsserver>8.8.8.8</dnsserver>
+    <group>
+      <name>admins</name>
+      <description>System Administrators</description>
+      <scope>system</scope>
+      <gid>1999</gid>
+      <member>0</member>
+      <priv>page-all</priv>
+    </group>
+    <user>
+      <name>root</name>
+      <descr>System Administrator</descr>
+      <scope>system</scope>
+      <groupname>admins</groupname>
+      <password>{{ opnsense_admin_password_hash }}</password>
+      <uid>0</uid>
+      <authorizedkeys>{{ opnsense_ssh_pubkey | b64encode }}</authorizedkeys>
+    </user>
+    <nextuid>2000</nextuid>
+    <nextgid>2000</nextgid>
+    <timezone>UTC</timezone>
+    <language>en_US</language>
+    <disablecheck>1</disablecheck>
+    <ssh>
+      <enabled>enabled</enabled>
+      <port>22</port>
+      <permitrootlogin>1</permitrootlogin>
+      <passwordauth>1</passwordauth>
+    </ssh>
+    <webgui>
+      <protocol>https</protocol>
+      <port>443</port>
+      <ssl-certref>self-signed</ssl-certref>
+      <nohttpreferercheck>1</nohttpreferercheck>
+      <noantilockout>1</noantilockout>
+    </webgui>
+  </system>
+  <interfaces>
+    <wan>
+      <if>vtnet0</if>
+      <descr>WAN</descr>
+      <enable>1</enable>
+      <spoofmac/>
+      <ipaddr>dhcp</ipaddr>
+      <dhcphostname/>
+      <alias-address/>
+      <alias-subnet>32</alias-subnet>
+      <gateway/>
+    </wan>
+    <lan>
+      <if>vtnet1</if>
+      <descr>LAN</descr>
+      <enable>1</enable>
+      <spoofmac/>
+      <ipaddr>{{ opnsense_lan_ip }}</ipaddr>
+      <subnet>{{ opnsense_lan_subnet }}</subnet>
+    </lan>
+  </interfaces>
+  <gateways/>
+  <staticroutes/>
+  <filter>
+    <rule>
+      <type>pass</type>
+      <interface>wan</interface>
+      <ipprotocol>inet46</ipprotocol>
+      <statetype>keep state</statetype>
+      <direction>in</direction>
+      <quick>1</quick>
+      <protocol>tcp</protocol>
+      <source><any>1</any></source>
+      <destination>
+        <network>(self)</network>
+        <port>443</port>
+      </destination>
+      <descr>Allow HTTPS to web UI</descr>
+    </rule>
+    <rule>
+      <type>pass</type>
+      <interface>wan</interface>
+      <ipprotocol>inet46</ipprotocol>
+      <statetype>keep state</statetype>
+      <direction>in</direction>
+      <quick>1</quick>
+      <protocol>tcp</protocol>
+      <source><any>1</any></source>
+      <destination>
+        <network>(self)</network>
+        <port>22</port>
+      </destination>
+      <descr>Allow SSH access</descr>
+    </rule>
+    <rule>
+      <type>pass</type>
+      <interface>wan</interface>
+      <ipprotocol>inet46</ipprotocol>
+      <statetype>keep state</statetype>
+      <direction>out</direction>
+      <quick>1</quick>
+      <source><any>1</any></source>
+      <destination><any>1</any></destination>
+      <descr>Allow all outbound traffic</descr>
+    </rule>
+    <rule>
+      <type>pass</type>
+      <interface>lan</interface>
+      <ipprotocol>inet46</ipprotocol>
+      <statetype>keep state</statetype>
+      <direction>in</direction>
+      <quick>1</quick>
+      <source><any>1</any></source>
+      <destination><any>1</any></destination>
+      <descr>Allow all LAN traffic</descr>
+    </rule>
+  </filter>
+  <nat>
+    <outbound>
+      <mode>automatic</mode>
+    </outbound>
+  </nat>
+  <dhcpd/>
+  <snmpd>
+    <syslocation/>
+    <syscontact/>
+    <rocommunity>public</rocommunity>
+  </snmpd>
+  <syslog>
+    <reverse/>
+  </syslog>
+</opnsense>

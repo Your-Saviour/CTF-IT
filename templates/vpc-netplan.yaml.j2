@@ -1,0 +1,11 @@
+# VPC interface configuration — managed by CTF platform
+network:
+  version: 2
+  ethernets:
+    {{ vpc_interface }}:
+      mtu: 1450
+      addresses:
+        - {{ vpc_ip }}/{{ vpc_subnet_mask }}
+      routes:
+        - to: 10.0.0.0/8
+          via: {{ vpc_gateway }}
