@@ -36,7 +36,8 @@ class TestFirewallRole:
             {"bad": {"base_type": "ubuntu_24_server", "count": 1, "role": "gateway"}},
             valid_base_ids={"ubuntu_24_server"},
         )
-        assert any("role" in e for e in errors)
+        assert len(errors) == 1
+        assert "bad.role" in errors[0]
 
     def test_mixed_quota_with_firewall_valid(self):
         errors = validate_vm_quota(
