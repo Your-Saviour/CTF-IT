@@ -1,0 +1,23 @@
+id: php_guestbook
+name: PHP Guestbook
+description: A PHP 8.1 guestbook web application running under Apache2 on port 8080. Users can post messages that are stored in a flat file.
+type: application_external
+difficulty: easy
+points: 0
+category: web
+tags: [web, php, apache, guestbook]
+conflicts: []
+requires: []
+steps:
+  - run: setup.sh
+  - copy: { src: index.php, dest: /opt/guestbook/index.php }
+  - copy: { src: config.php, dest: /opt/guestbook/config.php }
+  - copy: { src: phpinfo.php, dest: /opt/guestbook/phpinfo.php }
+  - copy: { src: guestbook.conf, dest: /etc/apache2/sites-available/guestbook.conf }
+  - run: finalize.sh
+verification:
+  type: process_running
+  process: apache2
+  expected: running
+hints:
+  - "Check what web servers are running on this machine"
