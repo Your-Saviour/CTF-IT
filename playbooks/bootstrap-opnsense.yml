@@ -1,0 +1,125 @@
+---
+# Bootstrap FreeBSD 14 into OPNsense 25.1.
+# Expects a pre-computed admin password hash and SSH public key as extra vars.
+# The config.xml is deployed BEFORE bootstrapping so OPNsense boots with SSH enabled.
+#
+# Required extra vars:
+#   opnsense_hostname           - hostname to set in config.xml
+#   opnsense_lan_ip             - LAN IP (e.g. "10.1.1.1")
+#   opnsense_lan_subnet         - LAN subnet mask (e.g. 24)
+#   opnsense_admin_password_hash - bcrypt hash of admin password
+#   opnsense_ssh_pubkey         - SSH public key content (for authorized_keys)
+#   opnsense_release            - OPNsense release version (e.g. "25.1")
+
+- name: Bootstrap and Configure OPNsense
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # =====================================================
+    # Phase 1: Deploy config BEFORE bootstrap
+    # =====================================================
+
+    - name: Verify host is running FreeBSD
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "FreeBSD"
+        fail_msg: "Expected FreeBSD but got {{ ansible_os_family }}. OPNsense bootstrap requires a FreeBSD base."
+
+    - name: Ensure /conf directory exists
+      ansible.builtin.file:
+        path: /conf
+        state: directory
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Deploy OPNsense config.xml (before bootstrap)
+      ansible.builtin.template:
+        src: opnsense_config.xml.j2
+        dest: /conf/config.xml
+        owner: root
+        group: wheel
+        mode: "0644"
+
+    - name: Ensure SSH authorized_keys directory exists
+      ansible.builtin.file:
+        path: /root/.ssh
+        state: directory
+        owner: root
+        group: wheel
+        mode: "0700"
+
+    - name: Deploy SSH authorized_keys
+      ansible.builtin.copy:
+        content: "{{ opnsense_ssh_pubkey }}\n"
+        dest: /root/.ssh/authorized_keys
+        owner: root
+        group: wheel
+        mode: "0600"
+
+    # =====================================================
+    # Phase 2: Bootstrap FreeBSD → OPNsense
+    # =====================================================
+
+    - name: Download opnsense-bootstrap.sh
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/opnsense/update/master/src/bootstrap/opnsense-bootstrap.sh.in"
+        dest: /tmp/opnsense-bootstrap.sh
+        mode: "0755"
+
+    - name: Run OPNsense bootstrap (installs packages and reboots)
+      ansible.builtin.shell:
+        cmd: "/tmp/opnsense-bootstrap.sh -r {{ opnsense_release }} -y"
+      async: 600
+      poll: 10
+      ignore_errors: true
+      ignore_unreachable: true
+
+    # =====================================================
+    # Phase 3: Reconnect after reboot
+    # =====================================================
+
+    - name: Clear known_hosts entry (host key changes after OPNsense install)
+      ansible.builtin.known_hosts:
+        name: "{{ ansible_host }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+
+    - name: Wait for SSH to come back (OPNsense booted)
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        state: started
+        timeout: 600
+        delay: 60
+      delegate_to: localhost
+      become: false
+
+    - name: Pause for OPNsense services to initialize
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Re-gather facts on OPNsense host
+      ansible.builtin.setup:
+        gather_subset: min
+
+    # =====================================================
+    # Phase 4: Post-boot configuration
+    # =====================================================
+
+    - name: Reload OPNsense configuration
+      ansible.builtin.shell:
+        cmd: "configctl service reload all"
+      changed_when: true
+
+    - name: Restart OPNsense web UI
+      ansible.builtin.shell:
+        cmd: "configctl webgui restart"
+      changed_when: true
+
+    - name: Signal bootstrap complete
+      ansible.builtin.debug:
+        msg: "OPNSENSE_BOOTSTRAP_OK=true"
