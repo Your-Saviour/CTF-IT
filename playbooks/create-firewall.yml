@@ -62,7 +62,7 @@
         - cloudflare_api_key is defined
         - cloudflare_api_key | length > 0
 
-    - name: Output instance details
+    - name: Output instance details for CTF-IT
       ansible.builtin.debug:
         msg: >-
           VULTR_RESULT={{ {

@@ -65,15 +65,15 @@
 
     - name: Download opnsense-bootstrap.sh
       ansible.builtin.get_url:
-        url: "https://raw.githubusercontent.com/opnsense/update/master/src/bootstrap/opnsense-bootstrap.sh.in"
+        url: "https://raw.githubusercontent.com/opnsense/update/{{ opnsense_release }}/src/bootstrap/opnsense-bootstrap.sh.in"
         dest: /tmp/opnsense-bootstrap.sh
         mode: "0755"
 
     - name: Run OPNsense bootstrap (installs packages and reboots)
       ansible.builtin.shell:
         cmd: "/tmp/opnsense-bootstrap.sh -r {{ opnsense_release }} -y"
-      async: 600
-      poll: 10
+      async: 1
+      poll: 0
       ignore_errors: true
       ignore_unreachable: true
 
