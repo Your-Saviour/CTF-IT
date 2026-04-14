@@ -101,9 +101,6 @@ services:
     env_file: ../.env
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
-      - REGISTRY_HOST=registry.${DOMAIN}
-      - REGISTRY_PUSH_HOST=ctf-registry:5000
-      - API_HOST=ctf.${DOMAIN}
       # Semaphore integration for automated VM provisioning
       - SEMAPHORE_URL=http://ctf-semaphore:3000
       - SEMAPHORE_ADMIN=${SEMAPHORE_ADMIN:-admin}
@@ -123,33 +120,6 @@ services:
       - "traefik.http.routers.ctf-api.entrypoints=websecure"
       - "traefik.http.routers.ctf-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.ctf-api.loadbalancer.server.port=8000"
-    depends_on:
-      registry:
-        condition: service_healthy
-    networks:
-      - ctf-proxy
-      - ctf-internal
-
-  # ─── Docker Registry — Image Distribution ──────────────────────────────────
-  registry:
-    image: registry:2
-    container_name: ctf-registry
-    restart: unless-stopped
-    volumes:
-      - ctf-registry_data:/var/lib/registry
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5000/v2/"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ctf-registry.rule=Host(`registry.${DOMAIN}`)"
-      - "traefik.http.routers.ctf-registry.entrypoints=websecure"
-      - "traefik.http.routers.ctf-registry.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.ctf-registry.middlewares=ctf-registry-auth"
-      - "traefik.http.middlewares.ctf-registry-auth.basicauth.users=${REGISTRY_AUTH:?Please set REGISTRY_AUTH in your .env file}"
-      - "traefik.http.services.ctf-registry.loadbalancer.server.port=5000"
     networks:
       - ctf-proxy
       - ctf-internal
@@ -255,7 +225,6 @@ volumes:
   ctf-letsencrypt:
   ctf-dockhand_data:
   ctf-api_data:
-  ctf-registry_data:
   ctf-caldera_data:
   ctf-semaphore_postgres_data:
   ctf-semaphore_data:

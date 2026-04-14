@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CTF training platform where each user gets a uniquely generated Docker container with randomized vulnerabilities and hardening tasks. Users fix issues locally, then submit verification from inside the container. The platform handles image generation, distribution, verification, and scoring.
+CTF training platform for VM-based red team / blue team exercises. Admins create events, define teams, and provision Vultr VMs with randomized vulnerability and hardening modules via Ansible. The platform handles module selection, VM provisioning, Caldera red team emulation, goal tracking, and scoring.
 
 ## Commands
 
@@ -17,36 +17,23 @@ uvicorn api.main:app --reload
 
 # Run with Docker Compose (production)
 docker compose up -d
-
-# Build base image (required before user images can be built)
-docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/
 ```
 
 ### Testing
 
-See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test, or run the automated script:
+See [TEST_PLAN.md](TEST_PLAN.md) for the integration test plan.
 
-```bash
-docker compose down -v && tests/e2e_test.sh
-```
-
-- `.env.test` is checked into the repo with a quota that selects all 10 modules (9 scored + 1 app) — the e2e script copies it to `.env` automatically
-- `ROOT_PASSWORD` in `base/.env` is `changeme123` — this is the known default the `password_changed` verification checks against
-- Always test via the API docker container (`docker compose`), not by importing Python modules directly — the builder needs Docker socket access
-- Containers require `--privileged --cgroupns=private` for systemd to start (Docker only grants rw cgroup access in privileged mode)
+- Run unit/integration tests: `python -m pytest tests/`
+- Always test via the API docker container (`docker compose`), not by importing Python modules directly
 
 ### Required Environment Variables
 
 See `.env.example` for full documentation. Key variables:
 
-- `SECRET_KEY` — used for session signing and deterministic flag generation (HMAC)
+- `SECRET_KEY` — used for session signing
 - `DATABASE_URL` — defaults to `sqlite:///ctf.db`, use postgres URI for production
 - `EVENT_QUOTA` — JSON defining module selection counts per type/difficulty, with optional `categories` and `tags` keys for additional filtering (see `.env.example`)
-- `REGISTRY_HOST` — user-facing address for the Docker registry (default `localhost:5050`). Set to LAN IP for remote access
-- `REGISTRY_PUSH_HOST` — address the Docker daemon uses to push to the registry (default `localhost:5050`). Only change if running DinD
-- `API_HOST` — address shown in the dashboard verify command (default `host.docker.internal:8080`). Set to server IP/domain for LAN/VPS
 - `API_PORT` — port the API is exposed on (default `8080`)
-- `DOCKER_PLATFORM` — target platform for image builds (e.g. `linux/arm64`). Set when build server and users have different architectures
 - `SEMAPHORE_URL` / `SEMAPHORE_ADMIN` / `SEMAPHORE_ADMIN_PASSWORD` — Ansible Semaphore connection (internal service; defaults work with docker-compose stack)
 - `VULTR_API_KEY` / `VULTR_DEFAULT_REGION` — Vultr cloud provisioning (optional; enables VM create/destroy from admin UI)
 - `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_DOMAIN` — Cloudflare DNS (optional; auto-creates DNS A records for provisioned VMs)
@@ -55,19 +42,16 @@ See `.env.example` for full documentation. Key variables:
 
 ### Request Flow
 
-User selects an open event and registers → user is bound to that event (`User.event_id`) → async background task builds Docker image using the event's quota → image pushed to local Docker registry → dashboard polls `/api/images/status` until ready → user pulls image from registry and runs container → fixes vulns → runs `audit.py` inside container → POSTs broad system snapshot to `/api/verify` → backend matches snapshot against user's assigned modules (server-side) → awards points. Scoreboard is scoped per-event.
+Admin creates an event with a module quota and VM quota → admin creates teams → starting the event auto-provisions Vultr VMs per team via Semaphore/Ansible → modules are selected and applied to target VMs → Caldera red team plugin is generated and loaded → Caldera runs adversary operations against target VMs → goal achievements and defences are tracked via `VMGoal` records → red vs blue scoreboard at `GET /admin/caldera/scoreboard`.
 
 ### Key Components
 
-- **`api/`** — FastAPI app serving both HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `images`, `verify`, `scoreboard`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `caldera_ops`, `caldera_tree`, `vm` (Team/VM CRUD, topology data), `vm_goals` (VMGoal state machine API).
-- **`builder/`** — Image build orchestration. `main.py` is the entry point: loads modules, selects per quota, renders Dockerfile from Jinja2 template, runs `docker build`, pushes to local registry, returns image tag + flag. `ansible.py` provides an alternative export path that generates Ansible playbooks instead of Docker images. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules; supports both flat (single adversary) and multi-path (per-path adversaries with skip logic) modes. `attack_tree.py` builds directed acyclic graphs (attack trees) from a VM's assigned modules, ordered by ATT&CK kill chain phase, and extracts distinct attack paths via DFS. `vm_quota_validation.py` validates the vm_quota JSON schema. `plan_sizing.py` picks the cheapest Vultr plan that meets module resource requirements.
+- **`api/`** — FastAPI app serving HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `caldera_ops`, `caldera_tree`, `vm` (Team/VM CRUD, topology data), `vm_goals` (VMGoal state machine API).
+- **`builder/`** — Module orchestration. `ansible.py` generates Ansible playbooks from selected modules for VM provisioning. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules; supports both flat (single adversary) and multi-path (per-path adversaries with skip logic) modes. `attack_tree.py` builds directed acyclic graphs (attack trees) from a VM's assigned modules, ordered by ATT&CK kill chain phase, and extracts distinct attack paths via DFS. `vm_quota_validation.py` validates the vm_quota JSON schema. `plan_sizing.py` picks the cheapest Vultr plan that meets module resource requirements.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), internal applications (`application_internal/`), and red team objectives (`goals/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
-- **`templates/Dockerfile.j2`** — Jinja2 template for user container images. Copies vuln scripts, runs them, bakes in flag and opaque state file.
 - **`templates/playbook.yml.j2`** — Jinja2 template for Ansible playbook export. Generates tasks using `ansible.builtin.script` and `ansible.builtin.copy` to apply the same modules on bare machines.
-- **`base/`** — Base Docker image (Ubuntu 22.04 + common tools). All user images inherit from `ctf-base:latest`.
 - **`bases/`** — Base VM type definitions for Vultr provisioning. Each subdirectory contains a `<id>.yaml` with `id`, `name`, `description`, `os`, `default_plan`, `packages`, `steps`, `disabled`, and `icon`. The `icon` field controls the badge shown on topology graph VM nodes — either a keyword string (`ubuntu`, `linux`, `debian`, `kali`, `windows`, `attacker`, `router`, `server`) or a dict `{svg_path: "M...", viewbox: "0 0 24 24"}` for a custom inline SVG path. Loaded by `builder/base_loader.py`; exposed at `GET /admin/base-types`.
-- **`audit.py`** — Runs inside user containers. Performs a broad security audit (file permissions, configs, services, packages, ports, HTTP responses, processes, shadow hashes) and outputs a JSON system snapshot. Contains no module-specific logic — the server matches the snapshot against the user's assigned modules.
-- **`frontend/templates/`** — Jinja2 HTML templates. Dark theme, client-side polling for build status.
+- **`frontend/templates/`** — Jinja2 HTML templates. Dark theme admin panel, VM detail pages, network topology, Caldera dashboard.
 - **`playbooks/`** — Ansible playbooks for Vultr VM lifecycle management. `create-vm.yml` provisions a Vultr VPS and optionally creates a Cloudflare DNS A record; `destroy-vm.yml` removes the instance and DNS record. `collections/requirements.yml` lists the `vultr.cloud` and `community.general` collections — Semaphore installs these automatically before running either playbook.
 
 ### Module System
@@ -86,14 +70,8 @@ The selector (`builder/selector.py`) runs in ordered phases: (1) application mod
 
 ### Key Design Decisions
 
-- **Deterministic flags**: `HMAC(secret_key, user_id)` — same user always gets same flag, enables rebuilds without storing flags separately.
-- **Opaque collection**: the container ships only a broad `audit.py` and a minimal `state.json` (user_id + build-time snapshots + `hash_paths`/`check_paths` file lists for payload verification). No module names, verification specs, or expected values are exposed to the user. The server knows which modules are assigned via the `UserModule` table and extracts relevant data from the broad snapshot.
-- **Opaque verify response**: `/api/verify` only returns details (module ID, name) for **completed** challenges. Unsolved modules are hidden — the response includes only summary counts (`completed`, `remaining`, `newly_completed`) to prevent leaking task names.
-- **Stateless verification**: flag in payload proves container legitimacy; no session required for verify endpoint.
-- **In-process async builds**: uses `asyncio.create_task` (not a separate worker). Production spec calls for RQ + Redis but this is not yet implemented.
-- **Local Docker registry**: a `registry:2` sidecar in docker-compose serves built images on port 5050. After build, images are tagged and pushed to the registry, then cleaned from the local daemon. Users `docker pull` from the registry. The push target is `localhost:5050` (not the compose service name) because the Docker daemon runs on the host via socket mount.
-- **Docker socket required**: builder needs `/var/run/docker.sock` mounted to build images and push to the registry.
 - **Auto-admin bootstrap**: the first user to register on a fresh database is automatically granted `is_admin = True`. This removes the need to run `promote_admin.py` after initial deployment. Subsequent registrations are unaffected.
+- **Docker socket**: `/var/run/docker.sock` is mounted so the API can restart the Caldera container after plugin installation (`POST /admin/caldera-setup`).
 
 ### Multi-Event System
 
@@ -259,4 +237,4 @@ An interactive D3.js force-directed graph at `/admin/topology` that visualizes t
 
 ### Database Models (api/models.py)
 
-Nine models: `User` (with `event_id` FK to Event), `UserImage` (build status: queued→building→ready→failed), `UserModule` (completion tracking per module per user), `Event` (name, quota JSON, `vm_quota` JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, `vm_type` — traces which vm_quota entry created this VM; provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`; Caldera: `attack_tree_json` — cached serialized attack tree with generation timestamp), `VMModule` (mirrors UserModule — completion tracking per module per VM; `stage` column: `"preapplied"`, `"caldera"`, or `null` for non-vuln types), `VMGoal` (tracks cyclical red team goal state per VM: `status` pending/achieved/defended, `achievement_count`, `defend_count`, `red_points`, `defend_points`, `achieved_at`, `defended_at`), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.
+Seven models: `User` (with `event_id` FK to Event), `Event` (name, quota JSON, `vm_quota` JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, `vm_type` — traces which vm_quota entry created this VM; provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`; Caldera: `attack_tree_json` — cached serialized attack tree with generation timestamp), `VMModule` (completion tracking per module per VM; `stage` column: `"preapplied"`, `"caldera"`, or `null` for non-vuln types), `VMGoal` (tracks cyclical red team goal state per VM: `status` pending/achieved/defended, `achievement_count`, `defend_count`, `red_points`, `defend_points`, `achieved_at`, `defended_at`), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.

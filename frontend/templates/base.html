@@ -488,14 +488,10 @@
         <a href="/" class="brand">&gt;_ CTF Platform</a>
         <div class="links">
             {% if user %}
-                <a href="/dashboard">Dashboard</a>
-                <a href="/scoreboard">Scoreboard</a>
                 {% if user.is_admin %}
                     <a href="/admin">Admin</a>
                 {% endif %}
                 <a href="/auth/logout">Logout</a>
-            {% else %}
-                <a href="/scoreboard">Scoreboard</a>
             {% endif %}
         </div>
     </nav>

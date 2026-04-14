@@ -11,19 +11,3 @@ class UserLogin(BaseModel):
     password: str
 
 
-class SnapshotPayload(BaseModel):
-    user_id: str
-    flag: str
-    build_state: dict
-    file_permissions: dict
-    file_contents: dict
-    services: dict
-    packages: list[str]
-    listening_ports: list[int]
-    http_responses: dict = {}
-    processes: list[str] = []
-    shadow_hashes: dict
-    passwd_users: list[str] = []
-    cron_entries: list[str] = []
-    file_hashes: dict = {}
-    file_existence: dict = {}

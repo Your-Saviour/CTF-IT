@@ -399,9 +399,6 @@
             <tr>
                 <th>Username</th>
                 <th>Event</th>
-                <th>Build Status</th>
-                <th>Points</th>
-                <th>Actions</th>
             </tr>
         </thead>
         <tbody id="users-body">
@@ -578,26 +575,6 @@
         </tbody>
     </table>
     </div>
-</div>
-
-<!-- Registry -->
-<div class="card">
-    <h3>Container Registry</h3>
-    <div id="registry-status" style="margin-bottom: 1rem;">
-        <span class="progress-label" id="registry-count"></span>
-    </div>
-    <table>
-        <thead>
-            <tr>
-                <th>Repository</th>
-                <th>Tag</th>
-                <th>Digest</th>
-            </tr>
-        </thead>
-        <tbody id="registry-body">
-            <tr><td colspan="3" style="color: var(--text-secondary);">Loading...</td></tr>
-        </tbody>
-    </table>
 </div>
 
 <!-- Service Links -->
@@ -1648,50 +1625,8 @@ fetch('/admin/users')
             '<tr>' +
                 '<td>' + esc(u.username) + (u.is_admin ? ' <span style="color: var(--cyan); font-size: 0.75rem;">(admin)</span>' : '') + '</td>' +
                 '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + (u.event_name ? esc(u.event_name) : '<span style="color: var(--text-muted);">—</span>') + '</td>' +
-                '<td><span class="status-' + esc(u.build_status) + '" style="font-weight: 600; text-transform: uppercase;">' + esc(u.build_status) + '</span></td>' +
-                '<td>' + u.total_points + '</td>' +
-                '<td><button class="btn btn-sm btn-danger" onclick="rebuild(' + u.id + ')">Rebuild</button></td>' +
             '</tr>'
         ).join('');
-    });
-
-function rebuild(userId) {
-    if (!confirm('Rebuild image for this user? This will reset their progress.')) return;
-    fetch('/admin/rebuild/' + userId, { method: 'POST' })
-        .then(function() {
-            showToast('Rebuild triggered');
-            setTimeout(function() { location.reload(); }, 1200);
-        });
-}
-
-// ── Load Registry ──
-
-fetch('/admin/registry')
-    .then(r => r.json())
-    .then(data => {
-        var body = document.getElementById('registry-body');
-        var countEl = document.getElementById('registry-count');
-        if (data.error) {
-            body.innerHTML = '<tr><td colspan="3" style="color: var(--red);">' + esc(data.error) + '</td></tr>';
-            countEl.textContent = 'Registry unavailable';
-            return;
-        }
-        countEl.textContent = data.length + ' image' + (data.length !== 1 ? 's' : '') + ' in registry';
-        if (data.length === 0) {
-            body.innerHTML = '<tr><td colspan="3" style="color: var(--text-secondary);">No images in registry.</td></tr>';
-            return;
-        }
-        body.innerHTML = data.map(img =>
-            '<tr>' +
-                '<td><strong>' + esc(img.repository) + '</strong></td>' +
-                '<td>' + esc(img.tag) + '</td>' +
-                '<td style="color: var(--text-secondary); font-size: 0.8rem;">' + (img.digest ? esc(img.digest) : '\u2014') + '</td>' +
-            '</tr>'
-        ).join('');
-    })
-    .catch(function() {
-        document.getElementById('registry-body').innerHTML =
-            '<tr><td colspan="3" style="color: var(--red);">Failed to load registry data.</td></tr>';
     });
 
 // ── Load Modules (also populates quota form dropdowns) ──

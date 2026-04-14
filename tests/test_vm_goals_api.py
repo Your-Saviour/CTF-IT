@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
 
 from api.database import Base, get_db
-from api.models import Event, Team, VM, VMGoal, User, UserImage, UserModule, VMModule, PlatformSettings
+from api.models import Event, Team, VM, VMGoal, User, VMModule, PlatformSettings
 from api.main import app
 
 

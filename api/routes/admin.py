@@ -10,10 +10,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import Event, User, UserImage, UserModule
+from api.models import Event, User
 from api.routes.auth import get_current_user
-
-REGISTRY_INTERNAL = os.environ.get("REGISTRY_INTERNAL", "http://registry:5000")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -37,63 +35,15 @@ async def list_users(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     users = db.query(User).all()
-    result = []
-    for u in users:
-        image = (
-            db.query(UserImage)
-            .filter(UserImage.user_id == u.id)
-            .order_by(UserImage.created_at.desc())
-            .first()
-        )
-        total_points = sum(
-            m.points for m in db.query(UserModule).filter(
-                UserModule.user_id == u.id, UserModule.completed == True
-            ).all()
-        )
-        result.append({
+    return [
+        {
             "id": u.id,
             "username": u.username,
             "is_admin": u.is_admin,
-            "build_status": image.status if image else "none",
-            "total_points": total_points,
             "event_name": u.event.name if u.event else None,
-        })
-
-    return result
-
-
-@router.post("/rebuild/{user_id}")
-async def rebuild_user(
-    user_id: int, request: Request, db: Session = Depends(get_db)
-):
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        return JSONResponse({"error": "User not found"}, status_code=404)
-
-    # Reset modules
-    db.query(UserModule).filter(UserModule.user_id == user_id).delete()
-
-    # Create new image record
-    image = UserImage(user_id=user_id, status="queued")
-    db.add(image)
-    db.commit()
-
-    if user.event:
-        quota = json.loads(user.event.quota)
-    else:
-        quota = json.loads(os.environ.get(
-            "EVENT_QUOTA",
-            '{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}',
-        ))
-
-    from api.routes.auth import _run_build
-    asyncio.create_task(_run_build(user.id, user.username, quota))
-
-    return {"status": "rebuild_queued"}
+        }
+        for u in users
+    ]
 
 
 @router.get("/modules")
@@ -214,51 +164,6 @@ async def get_module_file(module_id: str, filename: str, request: Request, db: S
         return JSONResponse({"error": "file not found"}, status_code=404)
 
     return {"filename": filename, "content": file_path.read_text(errors="replace")}
-
-
-@router.get("/registry")
-async def list_registry_images(request: Request, db: Session = Depends(get_db)):
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            catalog_resp = await client.get(f"{REGISTRY_INTERNAL}/v2/_catalog")
-            catalog_resp.raise_for_status()
-            repos = catalog_resp.json().get("repositories", [])
-
-            images = []
-            for repo in repos:
-                tags_resp = await client.get(
-                    f"{REGISTRY_INTERNAL}/v2/{repo}/tags/list"
-                )
-                tags = tags_resp.json().get("tags", []) if tags_resp.status_code == 200 else []
-                for tag in tags:
-                    # Get manifest for size/digest info
-                    digest = None
-                    created = None
-                    try:
-                        manifest_resp = await client.get(
-                            f"{REGISTRY_INTERNAL}/v2/{repo}/manifests/{tag}",
-                            headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json"},
-                        )
-                        if manifest_resp.status_code == 200:
-                            digest = manifest_resp.headers.get("Docker-Content-Digest", "")
-                    except Exception:
-                        pass
-                    images.append({
-                        "repository": repo,
-                        "tag": tag,
-                        "full_ref": f"{repo}:{tag}",
-                        "digest": digest[:19] + "…" if digest and len(digest) > 19 else digest,
-                    })
-
-            return images
-    except httpx.ConnectError:
-        return JSONResponse({"error": "Cannot connect to registry"}, status_code=502)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.get("/events")
