@@ -557,6 +557,7 @@ function copySSH() {
 
 function copyFWPassword() {
     var pw = document.getElementById('fw-password').textContent;
+    if (pw === '—') return;
     navigator.clipboard.writeText(pw).then(function() {
         showToast('Password copied!');
     });
