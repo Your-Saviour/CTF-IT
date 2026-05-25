@@ -16,6 +16,27 @@ A CTF training platform where each user gets a uniquely generated Docker contain
 
 This guide covers deploying on a VPS with a domain. The full production stack lives in `deploy/` and uses Traefik for TLS termination and subdomain routing.
 
+### Automated (recommended)
+
+On a fresh Linux server, deploy the full stack with one command:
+
+```bash
+git clone <repo-url> CTF-IT && cd CTF-IT
+./quickstart.sh
+```
+
+The script installs Docker if needed, prompts for your domain, Let's Encrypt
+email, and server IP, generates all secrets and config files (root `.env`,
+`deploy/.env`, and `deploy/caldera/config/local.yml`), then brings up
+`deploy/docker-compose.yml`. It is idempotent — re-running skips any config file
+that already exists. Use `--force` to regenerate (existing files are backed up
+first) or `--non-interactive` to read inputs from environment variables.
+
+After it finishes, create DNS A-records for `ctf`, `caldera`, `semaphore`,
+`dockhand`, and `traefik` under your domain, pointing at the server. The manual
+steps below document what the script automates, and remain available if you
+prefer to configure the stack by hand.
+
 ### Prerequisites
 
 - VPS with Docker + Docker Compose installed
