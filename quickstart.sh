@@ -207,7 +207,36 @@ gen_deploy_env() {
   } > "$DEPLOY_ENV"
   log "Wrote $DEPLOY_ENV"
 }
-gen_caldera_config(){ log "STUB gen_caldera_config"; }
+gen_caldera_config() {
+  if [[ -f "$CALDERA_CFG" && "$FORCE" != true ]]; then
+    log "$CALDERA_CFG exists — skipping"
+    return
+  fi
+  backup_if_exists "$CALDERA_CFG"
+  cp "$CALDERA_CFG_EXAMPLE" "$CALDERA_CFG"
+
+  # Replace each placeholder occurrence with its own freshly generated secret.
+  # Hex avoids YAML-quoting edge cases for unquoted scalar values.
+  local ph secret
+  for ph in REPLACE_ME REPLACE_WITH_KEY_FILE_PASSPHRASE; do
+    while grep -q "$ph" "$CALDERA_CFG"; do
+      secret="$(openssl rand -hex 32)"
+      awk -v ph="$ph" -v val="$secret" '
+        BEGIN { done = 0 }
+        {
+          if (!done) {
+            i = index($0, ph)
+            if (i > 0) {
+              $0 = substr($0, 1, i - 1) val substr($0, i + length(ph))
+              done = 1
+            }
+          }
+          print
+        }' "$CALDERA_CFG" > "$CALDERA_CFG.tmp" && mv "$CALDERA_CFG.tmp" "$CALDERA_CFG"
+    done
+  done
+  log "Wrote $CALDERA_CFG"
+}
 launch_stack()      { log "STUB launch_stack"; }
 print_summary()     { log "STUB print_summary"; }
 
