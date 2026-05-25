@@ -1594,6 +1594,22 @@ def _run_vultr_create(vm_id: int) -> None:
             extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
             extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
 
+        # Attach this VM to the team VPC if it has a private IP assigned (firewall
+        # events). Without this, create-vm.yml omits the `vpcs` param and the VM
+        # never gets the secondary NIC that _run_configure_vpc_interface expects.
+        if vm.vpc_ip:
+            team = db.query(Team).filter(Team.id == vm.team_id).first()
+            if team and team.team_index is not None:
+                extra_vars["vpc_description"] = (
+                    f"ctf-event-{vm.event_id}-team-{team.team_index}"
+                )
+            else:
+                _log.warning(
+                    "VM %d has vpc_ip but team %s lacks team_index — "
+                    "VPC attachment skipped",
+                    vm_id, vm.team_id,
+                )
+
         # ── Step 3: Create Semaphore project + run playbook ───────────────────
         _update_provision_step(db, vm, "creating_instance")
 
@@ -1975,6 +1991,49 @@ async def create_status(vm_id: int, request: Request, db: Session = Depends(get_
 
 # ── Vultr VM Destruction ───────────────────────────────────────────────────────
 
+def _maybe_cleanup_team_vpc(db: Session, team_id: int) -> None:
+    """Delete the team's Vultr VPC once no VMs remain attached to it.
+
+    Called after a VPC-attached VM is destroyed. If no other VMs for the team
+    still carry a vpc_ip, the VPC is deleted via the Vultr REST API and
+    team.vpc_id is cleared. Best-effort and non-fatal: concurrent destroys of
+    the last two VMs may race and leave an orphan VPC, which can be removed by
+    re-running a destroy or manually in the Vultr console.
+    """
+    if not VULTR_API_KEY:
+        return
+    import httpx as _httpx
+
+    try:
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if not team or not team.vpc_id:
+            return
+
+        remaining = (
+            db.query(VM)
+            .filter(VM.team_id == team_id, VM.vpc_ip.isnot(None))
+            .count()
+        )
+        if remaining > 0:
+            return
+
+        resp = _httpx.delete(
+            f"https://api.vultr.com/v2/vpcs/{team.vpc_id}",
+            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
+            timeout=30.0,
+        )
+        # 204 = deleted, 404 = already gone — both are success for our purposes
+        if resp.status_code not in (204, 404):
+            resp.raise_for_status()
+
+        _log.info("Deleted VPC %s for team %d", team.vpc_id, team_id)
+        team.vpc_id = None
+        db.commit()
+
+    except Exception as exc:
+        _log.warning("VPC cleanup failed for team %d (non-fatal): %s", team_id, exc)
+
+
 def _run_vultr_destroy(vm_id: int) -> None:
     """Synchronous background task: destroy a Vultr VPS and clean up DNS."""
     import shutil as _shutil
@@ -2043,8 +2102,16 @@ def _run_vultr_destroy(vm_id: int) -> None:
                     raise RuntimeError(f"destroy-vm.yml failed (status={status}):\n{tail}")
                 time.sleep(10)
 
+        # Capture VPC linkage before the VM row is removed
+        team_id = vm.team_id
+        had_vpc = bool(vm.vpc_ip)
+
         db.delete(vm)
         db.commit()
+
+        # Once the last VPC-attached VM for the team is gone, tear down the VPC
+        if had_vpc and team_id:
+            _maybe_cleanup_team_vpc(db, team_id)
 
     except Exception as exc:
         from api.models import utcnow as _utcnow
