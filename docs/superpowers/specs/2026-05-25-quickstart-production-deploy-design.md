@@ -79,8 +79,8 @@ variables in `./.env` and fail interpolation.
    - `SEMAPHORE_ADMIN=admin`, `SEMAPHORE_ADMIN_PASSWORD`,
      `SEMAPHORE_ACCESS_KEY_ENCRYPTION`, `SEMAPHORE_POSTGRES_PASSWORD` — each
      `openssl rand -base64 32`.
-   - `TRAEFIK_DASHBOARD_AUTH` and `REGISTRY_AUTH` — bcrypt basic-auth strings with
-     every `$` doubled to `$$` for compose escaping (see Secret Generation).
+   - `TRAEFIK_DASHBOARD_AUTH` — bcrypt basic-auth string with every `$` doubled to
+     `$$` for compose escaping (see Secret Generation).
    - `VULTR_API_KEY` mirrored here too (Semaphore container reads it).
 
 6. **Generate `deploy/caldera/config/local.yml`** (skip if it exists)
@@ -110,7 +110,7 @@ variables in `./.env` and fail interpolation.
 | `SECRET_KEY` | `openssl rand -hex 32` |
 | Semaphore admin / postgres / encryption | `openssl rand -base64 32` |
 | Caldera `local.yml` secrets | `openssl rand -base64 32` (one per placeholder) |
-| `TRAEFIK_DASHBOARD_AUTH`, `REGISTRY_AUTH` | bcrypt via `htpasswd` |
+| `TRAEFIK_DASHBOARD_AUTH` | bcrypt via `htpasswd` |
 
 **htpasswd without a host dependency:** rather than requiring `apache2-utils`, run
 it in a throwaway container (Docker is present by this phase):
