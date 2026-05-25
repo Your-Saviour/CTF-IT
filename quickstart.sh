@@ -150,7 +150,25 @@ collect_inputs() {
   prompt_var CLOUDFLARE_API_TOKEN "Cloudflare API token (optional, blank to skip)" "" false
   prompt_var CLOUDFLARE_DOMAIN "Cloudflare domain (optional, blank to skip)" "" false
 }
-gen_root_env()      { log "STUB gen_root_env"; }
+gen_root_env() {
+  if [[ -f "$ROOT_ENV" && "$FORCE" != true ]]; then
+    log "$ROOT_ENV exists — skipping"
+    return
+  fi
+  backup_if_exists "$ROOT_ENV"
+  local secret_key quota
+  secret_key="$(openssl rand -hex 32)"
+  quota="$(grep -E '^EVENT_QUOTA=' "$REPO_ROOT/.env.example" | head -n1 | cut -d= -f2-)"
+  {
+    echo "SECRET_KEY=$secret_key"
+    echo "DATABASE_URL=sqlite:///data/ctf.db"
+    echo "EVENT_QUOTA=$quota"
+    [[ -n "$VULTR_API_KEY" ]]        && echo "VULTR_API_KEY=$VULTR_API_KEY"
+    [[ -n "$CLOUDFLARE_API_TOKEN" ]] && echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
+    [[ -n "$CLOUDFLARE_DOMAIN" ]]    && echo "CLOUDFLARE_DOMAIN=$CLOUDFLARE_DOMAIN"
+  } > "$ROOT_ENV"
+  log "Wrote $ROOT_ENV"
+}
 gen_deploy_env()    { log "STUB gen_deploy_env"; }
 gen_caldera_config(){ log "STUB gen_caldera_config"; }
 launch_stack()      { log "STUB launch_stack"; }
