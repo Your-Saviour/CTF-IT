@@ -237,8 +237,49 @@ gen_caldera_config() {
   done
   log "Wrote $CALDERA_CFG"
 }
-launch_stack()      { log "STUB launch_stack"; }
-print_summary()     { log "STUB print_summary"; }
+launch_stack() {
+  log "Launching stack: docker compose up -d --build (from deploy/)"
+  # Run from deploy/ so compose reads deploy/.env for interpolation while the
+  # API service's `env_file: ../.env` resolves to the repo-root .env.
+  ( cd "$REPO_ROOT/deploy" && $SUDO docker compose up -d --build ) \
+    || err "docker compose up failed — check the output above."
+}
+
+print_summary() {
+  cat <<EOF
+
+============================================================
+ CTF-IT deployment started.
+
+ Services (create a DNS A-record for each, pointing at this server):
+   https://ctf.$DOMAIN        — CTF dashboard
+   https://caldera.$DOMAIN    — MITRE Caldera
+   https://semaphore.$DOMAIN  — Ansible Semaphore
+   https://dockhand.$DOMAIN   — Container management
+   https://traefik.$DOMAIN    — Traefik dashboard
+EOF
+  if [[ -n "$TRAEFIK_PASSWORD" ]]; then
+    cat <<EOF
+
+ Generated credentials (also stored in deploy/.env):
+   Traefik dashboard:  ${TRAEFIK_USER:-admin} / $TRAEFIK_PASSWORD
+   Semaphore admin:    admin / $SEMAPHORE_ADMIN_PASSWORD
+EOF
+  else
+    cat <<EOF
+
+ Existing deploy/.env was reused — see that file for credentials.
+EOF
+  fi
+  cat <<EOF
+
+ Next steps (manual):
+   - Create the DNS A-records listed above.
+   - Optional: build the per-user CTF base image (see README).
+   - Optional: export the Caldera plugin from the CTF admin UI.
+============================================================
+EOF
+}
 
 main() {
   parse_args "$@"
