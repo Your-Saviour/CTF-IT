@@ -73,8 +73,34 @@ parse_args() {
 }
 
 # ── Phase stubs (replaced in later tasks) ────────────────────────────────────
-phase_preflight()   { log "STUB phase_preflight"; }
-phase_docker()      { log "STUB phase_docker"; }
+phase_preflight() {
+  log "Preflight checks"
+  [[ "$(uname -s)" == "Linux" ]] || err "This script must run on Linux (got $(uname -s))."
+  if [[ "$(id -u)" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || err "Not running as root and 'sudo' not found."
+    SUDO="sudo"
+  fi
+  require_cmd curl
+  require_cmd openssl
+  require_cmd sed
+  require_cmd awk
+  [[ -f "$REPO_ROOT/.env.example" ]] || err "Missing $REPO_ROOT/.env.example"
+  [[ -f "$REPO_ROOT/deploy/.env.example" ]] || err "Missing $REPO_ROOT/deploy/.env.example"
+  [[ -f "$CALDERA_CFG_EXAMPLE" ]] || err "Missing $CALDERA_CFG_EXAMPLE"
+}
+
+phase_docker() {
+  log "Checking Docker"
+  if command -v docker >/dev/null 2>&1 && $SUDO docker compose version >/dev/null 2>&1; then
+    log "Docker and compose plugin present — skipping install"
+    return
+  fi
+  log "Installing Docker via get.docker.com"
+  curl -fsSL https://get.docker.com | $SUDO sh || err "Docker installation failed."
+  $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+  command -v docker >/dev/null 2>&1 && $SUDO docker compose version >/dev/null 2>&1 \
+    || err "Docker still unavailable after install."
+}
 collect_inputs()    { log "STUB collect_inputs"; }
 gen_root_env()      { log "STUB gen_root_env"; }
 gen_deploy_env()    { log "STUB gen_deploy_env"; }
