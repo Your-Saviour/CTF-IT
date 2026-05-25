@@ -43,6 +43,33 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Required command not fou
 # Double every '$' so docker-compose does not interpolate bcrypt hashes.
 escape_for_compose() { printf '%s' "$1" | sed 's/\$/\$\$/g'; }
 
+# Prompt for a variable unless already set. In --non-interactive mode use the
+# default (erroring if a required value has no default).
+prompt_var() {
+  local name="$1" msg="$2" def="${3:-}" required="${4:-false}" current val
+  current="${!name:-}"
+  [[ -n "$current" ]] && return
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    if [[ -z "$def" && "$required" == true ]]; then
+      err "Required value '$name' not set (non-interactive mode)."
+    fi
+    printf -v "$name" '%s' "$def"
+    return
+  fi
+  read -rp "$msg${def:+ [$def]}: " val
+  printf -v "$name" '%s' "${val:-$def}"
+}
+
+# When --force and the file exists, copy it to a timestamped backup.
+backup_if_exists() {
+  local f="$1"
+  if [[ -f "$f" && "$FORCE" == true ]]; then
+    local bak="$f.bak.$(date +%Y%m%d%H%M%S)"
+    cp "$f" "$bak"
+    log "Backed up existing $f -> $bak"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage: ./quickstart.sh [options]
@@ -101,7 +128,28 @@ phase_docker() {
   command -v docker >/dev/null 2>&1 && $SUDO docker compose version >/dev/null 2>&1 \
     || err "Docker still unavailable after install."
 }
-collect_inputs()    { log "STUB collect_inputs"; }
+collect_inputs() {
+  local need_deploy=false need_root=false
+  { [[ -f "$DEPLOY_ENV" ]] && [[ "$FORCE" != true ]]; } || need_deploy=true
+  { [[ -f "$ROOT_ENV" ]]   && [[ "$FORCE" != true ]]; } || need_root=true
+
+  if [[ "$need_deploy" == false && "$need_root" == false ]]; then
+    log "All env files present — skipping input collection"
+    return
+  fi
+
+  log "Collecting configuration"
+  if [[ "$need_deploy" == true ]]; then
+    prompt_var DOMAIN "Base domain (e.g. example.com)" "" true
+    prompt_var ACME_EMAIL "Email for Let's Encrypt certificates" "" true
+    prompt_var SERVER_IP "Server public IP (for Caldera agent callback)" "" true
+    prompt_var TRAEFIK_USER "Traefik dashboard admin username" "admin" false
+  fi
+  # Optional — relevant to both root and deploy env files.
+  prompt_var VULTR_API_KEY "Vultr API key (optional, blank to skip)" "" false
+  prompt_var CLOUDFLARE_API_TOKEN "Cloudflare API token (optional, blank to skip)" "" false
+  prompt_var CLOUDFLARE_DOMAIN "Cloudflare domain (optional, blank to skip)" "" false
+}
 gen_root_env()      { log "STUB gen_root_env"; }
 gen_deploy_env()    { log "STUB gen_deploy_env"; }
 gen_caldera_config(){ log "STUB gen_caldera_config"; }
