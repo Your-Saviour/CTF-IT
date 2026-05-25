@@ -43,6 +43,15 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Required command not fou
 # Double every '$' so docker-compose does not interpolate bcrypt hashes.
 escape_for_compose() { printf '%s' "$1" | sed 's/\$/\$\$/g'; }
 
+# Produce a compose-escaped "user:bcrypthash" string using a throwaway httpd
+# container (avoids requiring apache2-utils on the host).
+bcrypt_htpasswd() {
+  local user="$1" pass="$2" raw
+  raw="$($SUDO docker run --rm httpd:2.4-alpine htpasswd -nbB "$user" "$pass")" \
+    || err "Failed to generate bcrypt hash via the httpd:2.4-alpine image."
+  escape_for_compose "$raw"
+}
+
 # Prompt for a variable unless already set. In --non-interactive mode use the
 # default (erroring if a required value has no default).
 prompt_var() {
@@ -169,7 +178,35 @@ gen_root_env() {
   } > "$ROOT_ENV"
   log "Wrote $ROOT_ENV"
 }
-gen_deploy_env()    { log "STUB gen_deploy_env"; }
+gen_deploy_env() {
+  if [[ -f "$DEPLOY_ENV" && "$FORCE" != true ]]; then
+    log "$DEPLOY_ENV exists — skipping"
+    return
+  fi
+  backup_if_exists "$DEPLOY_ENV"
+
+  TRAEFIK_PASSWORD="$(openssl rand -base64 18)"
+  SEMAPHORE_ADMIN_PASSWORD="$(openssl rand -base64 18)"
+  local enc pgpw traefik_auth
+  enc="$(openssl rand -base64 32)"
+  pgpw="$(openssl rand -base64 32)"
+  traefik_auth="$(bcrypt_htpasswd "${TRAEFIK_USER:-admin}" "$TRAEFIK_PASSWORD")"
+
+  {
+    echo "DOMAIN=$DOMAIN"
+    echo "ACME_EMAIL=$ACME_EMAIL"
+    echo "CALDERA_AGENT_URL=http://$SERVER_IP:8888"
+    echo "TRAEFIK_DASHBOARD_AUTH=$traefik_auth"
+    echo "SEMAPHORE_ADMIN=admin"
+    echo "SEMAPHORE_ADMIN_PASSWORD=$SEMAPHORE_ADMIN_PASSWORD"
+    echo "SEMAPHORE_ADMIN_NAME=Admin"
+    echo "SEMAPHORE_ADMIN_EMAIL=$ACME_EMAIL"
+    echo "SEMAPHORE_ACCESS_KEY_ENCRYPTION=$enc"
+    echo "SEMAPHORE_POSTGRES_PASSWORD=$pgpw"
+    [[ -n "$VULTR_API_KEY" ]] && echo "VULTR_API_KEY=$VULTR_API_KEY"
+  } > "$DEPLOY_ENV"
+  log "Wrote $DEPLOY_ENV"
+}
 gen_caldera_config(){ log "STUB gen_caldera_config"; }
 launch_stack()      { log "STUB launch_stack"; }
 print_summary()     { log "STUB print_summary"; }
