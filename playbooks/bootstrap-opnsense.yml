@@ -14,7 +14,10 @@
 - name: Bootstrap and Configure OPNsense
   hosts: all
   become: true
-  gather_facts: true
+  # An interrupted conversion can remove Python before OPNsense is installed.
+  # Keep the preflight Python-free so failures are reported by the actual
+  # bootstrap checks, not Ansible's implicit fact-gathering step.
+  gather_facts: false
 
   tasks:
     # =====================================================
@@ -22,10 +25,8 @@
     # =====================================================
 
     - name: Verify host is running FreeBSD
-      ansible.builtin.assert:
-        that:
-          - ansible_os_family == "FreeBSD"
-        fail_msg: "Expected FreeBSD but got {{ ansible_os_family }}. OPNsense bootstrap requires a FreeBSD base."
+      ansible.builtin.raw: "test \"$(uname -s)\" = FreeBSD"
+      changed_when: false
 
     - name: Ensure /conf directory exists
       ansible.builtin.file:
@@ -69,13 +70,14 @@
         dest: /tmp/opnsense-bootstrap.sh
         mode: "0755"
 
-    - name: Run OPNsense bootstrap (installs packages and reboots)
+    - name: Start OPNsense bootstrap independently of the Ansible connection
       ansible.builtin.shell:
-        cmd: "/tmp/opnsense-bootstrap.sh -r {{ opnsense_release }} -y"
-      async: 1
-      poll: 0
-      ignore_errors: true
-      ignore_unreachable: true
+        # A normal Ansible async job is tied to its connection wrapper and can
+        # be terminated while the installer reboots the host. nohup keeps the
+        # conversion alive and records its output for diagnosis.
+        cmd: >-
+          nohup /tmp/opnsense-bootstrap.sh -r {{ opnsense_release }} -y
+          >/var/log/opnsense-bootstrap.log 2>&1 &
 
     # =====================================================
     # Phase 3: Reconnect after reboot
@@ -88,36 +90,33 @@
       delegate_to: localhost
       become: false
 
-    - name: Wait for SSH to come back (OPNsense booted)
-      ansible.builtin.wait_for:
-        host: "{{ ansible_host }}"
-        port: 22
-        state: started
-        timeout: 600
-        delay: 60
-      delegate_to: localhost
-      become: false
+    - name: Allow OPNsense conversion and reboot to complete
+      ansible.builtin.pause:
+        # Package installation plus the base archive download can exceed five
+        # minutes on a small cloud VM. Do not run post-install commands while
+        # the conversion is still replacing the underlying system.
+        seconds: 900
+
+    - name: Verify OPNsense is installed
+      ansible.builtin.raw: "test -x /usr/local/sbin/configctl"
+      changed_when: false
 
     - name: Pause for OPNsense services to initialize
       ansible.builtin.pause:
         seconds: 30
-
-    - name: Re-gather facts on OPNsense host
-      ansible.builtin.setup:
-        gather_subset: min
 
     # =====================================================
     # Phase 4: Post-boot configuration
     # =====================================================
 
     - name: Reload OPNsense configuration
-      ansible.builtin.shell:
-        cmd: "configctl service reload all"
+      # OPNsense intentionally does not ship Python. `raw` executes over SSH
+      # without the Python-based Ansible module runtime.
+      ansible.builtin.raw: "configctl service reload all"
       changed_when: true
 
     - name: Restart OPNsense web UI
-      ansible.builtin.shell:
-        cmd: "configctl webgui restart"
+      ansible.builtin.raw: "configctl webgui restart"
       changed_when: true
 
     - name: Signal bootstrap complete

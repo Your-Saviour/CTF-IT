@@ -40,6 +40,8 @@ prefer to configure the stack by hand.
 
 - VPS with Docker + Docker Compose installed
 - A domain and permission to create DNS A records
+- Enough free disk and time for the first deployment to build Apache Caldera
+  from its official release source (subsequent starts reuse the local image)
 - Firewall ports open:
   - `80`, `443` — Traefik (HTTP redirect + HTTPS)
   - `7010`–`7012`, `8022`, `2222`, `8853`, `8888` — Caldera agent communication (direct, not proxied)

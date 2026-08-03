@@ -3,7 +3,9 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
+import socket
 import tempfile
 import time
 import uuid
@@ -35,6 +37,40 @@ PLAYBOOKS_DIR = _HERE / "playbooks"
 TEMPLATES_DIR = _HERE / "templates"
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _vultr_safe_hostname(value: str, fallback: str) -> str:
+    """Return a hostname that is also safe to use as a DNS record label.
+
+    Vultr rejects hostnames containing spaces and Cloudflare record labels have
+    the same practical restriction. Team names are user-controlled, so never
+    pass them through to either provider unchanged.
+    """
+    hostname = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
+    hostname = hostname[:63].rstrip("-")
+    return hostname or fallback
+
+
+def _wait_for_tcp_port(host: str, port: int, timeout_seconds: int = 600) -> None:
+    """Wait for a newly-created cloud VM to accept connections.
+
+    Vultr returns an instance IP before its operating system has completed its
+    first boot. Starting Ansible immediately turns that normal delay into an
+    avoidable provisioning failure.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=5):
+                return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(5)
+    raise RuntimeError(
+        f"Timed out waiting for {host}:{port} to accept connections"
+        + (f" ({last_error})" if last_error else "")
+    )
 
 
 # ── Teams ──────────────────────────────────────────────────────────────────────
@@ -548,6 +584,13 @@ def _run_provision(vm_id: int) -> None:
         vm = db.query(VM).filter(VM.id == vm_id).first()
         if not vm:
             return
+
+        # A cloud API can report the VM and its IP before sshd is accepting
+        # connections. Wait here so both base and module playbooks start only
+        # after the target is actually reachable.
+        if vm.ip_address:
+            _update_provision_step(db, vm, "waiting_for_ssh")
+            _wait_for_tcp_port(vm.ip_address, vm.ssh_port or 22)
 
         vm.status = "provisioning"
 
@@ -1252,7 +1295,7 @@ def _run_firewall_create(vm_id: int) -> None:
         vpc_description = f"ctf-event-{vm.event_id}-team-{team.team_index}"
 
         extra_vars: dict = {
-            "vm_hostname": vm.hostname or f"ctf-fw-{vm_id}",
+            "vm_hostname": _vultr_safe_hostname(vm.hostname or "", f"ctf-fw-{vm_id}"),
             "vm_plan": vm.vultr_plan or "vc2-2c-4gb",
             "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
             "ssh_key_name": "ctf-platform",
@@ -1318,6 +1361,9 @@ def _run_firewall_create(vm_id: int) -> None:
         db.commit()
 
         # ── Stage 2: Bootstrap OPNsense ──────────────────────────────────────
+        _update_provision_step(db, vm, "waiting_for_ssh")
+        _wait_for_tcp_port(vm.ip_address, 22)
+
         # Generate admin credentials in Python (no Ansible passlib dependency needed)
         import secrets as _secrets
         import string as _string
@@ -1329,6 +1375,13 @@ def _run_firewall_create(vm_id: int) -> None:
         password_hash = _bcrypt.hashpw(
             admin_password.encode(), _bcrypt.gensalt(rounds=10)
         ).decode()
+        # Persist the plaintext credential (encrypted at rest) before the
+        # long-running bootstrap. A later connectivity error must not leave an
+        # otherwise-configured firewall with an unrecoverable administrator
+        # password.
+        vm.admin_password = encrypt_secret(admin_password)
+        vm.updated_at = utcnow()
+        db.commit()
 
         bootstrap_dir = playbook_dir / "bootstrap"
         bootstrap_dir.mkdir(exist_ok=True)
@@ -1352,7 +1405,7 @@ def _run_firewall_create(vm_id: int) -> None:
 
         team_index = team.team_index or 1
         bootstrap_extra_vars = {
-            "opnsense_hostname": vm.hostname or f"ctf-fw-{vm_id}",
+            "opnsense_hostname": _vultr_safe_hostname(vm.hostname or "", f"ctf-fw-{vm_id}"),
             "opnsense_lan_ip": f"10.{team_index}.1.1",
             "opnsense_lan_subnet": 24,
             "opnsense_admin_password_hash": password_hash,
@@ -1393,7 +1446,6 @@ def _run_firewall_create(vm_id: int) -> None:
                 time.sleep(15)
 
         # Store credentials and mark active
-        vm.admin_password = encrypt_secret(admin_password)
         vm.vpc_ip = f"10.{team_index}.1.1"
         vm.status = "active"
         vm.provision_step = "completed"
@@ -1567,7 +1619,7 @@ def _run_vultr_create(vm_id: int) -> None:
         private_key, public_key = get_or_create_platform_keypair(db)
 
         extra_vars: dict = {
-            "vm_hostname": vm.hostname or f"ctf-vm-{vm_id}",
+            "vm_hostname": _vultr_safe_hostname(vm.hostname or "", f"ctf-vm-{vm_id}"),
             "vm_plan": vm.vultr_plan or "vc2-1c-1gb",
             "vm_os": vm.os or "Ubuntu 24.04 LTS x64",
             "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
@@ -1809,7 +1861,10 @@ def _provision_event_vms(event_id: int) -> None:
                 loaded_base_type = load_base_type(base_type_id) if base_type_id else None
 
                 for i in range(count):
-                    hostname = f"{team.name}-{vm_type_key}-{i + 1}"
+                    # Keep provider-facing hostnames independent from the
+                    # user-controlled team name: Vultr and DNS labels reject
+                    # spaces and other common team-name characters.
+                    hostname = f"ctf-e{event_id}-t{team.id}-{vm_type_key}-{i + 1}"
                     vm = VM(
                         hostname=hostname,
                         os=loaded_base_type.os if loaded_base_type else "Ubuntu 24.04 LTS x64",
@@ -1848,7 +1903,16 @@ def _provision_event_vms(event_id: int) -> None:
                                 module_type=mod.type,
                                 difficulty=mod.difficulty,
                                 points=mod.points,
+                                stage=mod.stage,
                             ))
+                            if mod.type == "goal":
+                                db.add(VMGoal(
+                                    vm_id=vm.id,
+                                    module_id=mod.id,
+                                    status="pending",
+                                    red_points=mod.red_points,
+                                    defend_points=mod.defend_points,
+                                ))
                         if available_plans and loaded_base_type is not None:
                             sized_plan = plan_for_vm(
                                 base_type=loaded_base_type,

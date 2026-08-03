@@ -70,7 +70,17 @@ class CalderaClient:
             url += "?include=chain"
         resp = await self._client.get(url)
         resp.raise_for_status()
-        return resp.json()
+        operation = resp.json()
+
+        # Caldera 5.3 returns only ``{"chain": [...]}`` from the detail
+        # endpoint, while the collection endpoint contains the operation
+        # metadata.  Merge the two so callers receive a stable shape across
+        # supported Caldera releases.
+        if isinstance(operation, dict) and not operation.get("id"):
+            for listed_operation in await self.list_operations():
+                if listed_operation.get("id") == op_id:
+                    return {**listed_operation, **operation}
+        return operation
 
     async def create_operation(
         self,

@@ -44,6 +44,7 @@ def render_playbook(modules: list[Module]) -> str:
 
 def _stage_files(modules: list[Module], output_dir: Path) -> None:
     """Copy module scripts and files into the export directory."""
+    output_dir.mkdir(parents=True, exist_ok=True)
     scripts_dir = output_dir / "scripts"
     scripts_dir.mkdir(exist_ok=True)
     files_dir = output_dir / "files"
@@ -57,10 +58,12 @@ def _stage_files(modules: list[Module], output_dir: Path) -> None:
             elif isinstance(step, CopyStep):
                 src = m.source_dir / step.src
                 staged_name = f"{m.id}__{step.src}"
+                destination = files_dir / staged_name
+                destination.parent.mkdir(parents=True, exist_ok=True)
                 if src.is_dir():
-                    shutil.copytree(src, files_dir / staged_name)
+                    shutil.copytree(src, destination)
                 else:
-                    shutil.copy2(src, files_dir / staged_name)
+                    shutil.copy2(src, destination)
 
 
 def generate_ansible_export(quota: dict, export_id: str) -> Path:

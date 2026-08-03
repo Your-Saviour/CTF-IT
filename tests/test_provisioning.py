@@ -1,12 +1,21 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy import create_engine, StaticPool
 from sqlalchemy.orm import sessionmaker
 
+from builder.ansible import _stage_files
+from builder.module_loader import CopyStep, Module
 from api.database import Base
 from api.models import Event, Team, User, VM, VMModule
-from api.routes.vm import _maybe_cleanup_team_vpc, provision_vm
+from api.routes.vm import (
+    _maybe_cleanup_team_vpc,
+    _vultr_safe_hostname,
+    _wait_for_tcp_port,
+    provision_vm,
+)
+from api.services.caldera import CalderaClient
 from api.services.semaphore import SemaphoreClient
 
 
@@ -18,6 +27,114 @@ def _database():
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)(), engine
+
+
+def test_vultr_safe_hostname_normalizes_team_name_for_provider_and_dns():
+    assert _vultr_safe_hostname("E2E Team / Blue!", "ctf-vm-1") == "e2e-team-blue"
+    assert _vultr_safe_hostname("---", "ctf-vm-1") == "ctf-vm-1"
+    assert _vultr_safe_hostname("A" * 70, "ctf-vm-1") == "a" * 63
+
+
+def test_wait_for_tcp_port_returns_when_connection_succeeds():
+    with patch("api.routes.vm.socket.create_connection") as connect:
+        _wait_for_tcp_port("192.0.2.20", 22, timeout_seconds=1)
+    connect.assert_called_once_with(("192.0.2.20", 22), timeout=5)
+
+
+def test_opnsense_bootstrap_allows_installation_and_waits_for_reboot():
+    playbook = Path("playbooks/bootstrap-opnsense.yml").read_text()
+    assert "nohup /tmp/opnsense-bootstrap.sh" in playbook
+    assert "/var/log/opnsense-bootstrap.log" in playbook
+    assert "test -x /usr/local/sbin/configctl" in playbook
+    assert "gather_facts: false" in playbook
+    assert "seconds: 900" in playbook
+    assert "ansible.builtin.raw: \"configctl service reload all\"" in playbook
+    assert "ansible.builtin.setup" not in playbook
+
+
+def test_stage_files_creates_parents_for_nested_copy_source(tmp_path):
+    source_dir = tmp_path / "module"
+    nested_source = source_dir / "src" / "package.json"
+    nested_source.parent.mkdir(parents=True)
+    nested_source.write_text('{"name":"portal"}')
+    module = Module(
+        id="portal",
+        name="Portal",
+        description="test module",
+        type="application_external",
+        difficulty="easy",
+        points=1,
+        category="test",
+        steps=[CopyStep(src="src/package.json", dest="/opt/portal/package.json")],
+        source_dir=source_dir,
+    )
+
+    _stage_files([module], tmp_path / "export")
+
+    assert (tmp_path / "export" / "files" / "portal__src" / "package.json").read_text() == '{"name":"portal"}'
+
+
+def test_base_playbook_waits_for_ubuntu_package_manager_lock():
+    template = Path("templates/base_playbook.yml.j2").read_text()
+    assert "lock_timeout: 600" in template
+
+
+def test_guestbook_vhost_uses_consistent_apache_options_syntax():
+    vhost = Path("modules/application_external/php_guestbook/guestbook.conf").read_text()
+    assert "Options -Indexes +FollowSymLinks" in vhost
+
+
+def test_nextjs_portal_configures_the_import_alias_base_directory():
+    tsconfig = Path("modules/application_external/nextjs_portal/src/tsconfig.json").read_text()
+    assert '"baseUrl": "."' in tsconfig
+    assert "@/" not in "\n".join(
+        path.read_text()
+        for path in Path("modules/application_external/nextjs_portal/src/app").rglob("*.ts*")
+    )
+    auth_route = Path(
+        "modules/application_external/nextjs_portal/src/app/api/auth/[...nextauth]/route.ts"
+    ).read_text()
+    assert "../../../../lib/auth" in auth_route
+
+
+def test_automatic_event_provisioning_creates_goal_rows_and_preserves_stages():
+    vm_route = Path("api/routes/vm.py").read_text()
+    assert "stage=mod.stage" in vm_route
+    assert "if mod.type == \"goal\":" in vm_route
+    assert "red_points=mod.red_points" in vm_route
+
+
+def test_caldera_operation_detail_merges_metadata_from_collection_response():
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        async def get(self, url):
+            if url.startswith("/api/v2/operations/op-1"):
+                return Response({"chain": [{"id": "link-1"}]})
+            return Response([{"id": "op-1", "name": "Test", "state": "running"}])
+
+    async def check():
+        caldera = CalderaClient(api_key="test")
+        original_client = caldera._client
+        caldera._client = Client()
+        await original_client.aclose()
+        return await caldera.get_operation("op-1", include_chain=True)
+
+    operation = asyncio.run(check())
+    assert operation == {
+        "id": "op-1",
+        "name": "Test",
+        "state": "running",
+        "chain": [{"id": "link-1"}],
+    }
 
 
 def _seed_vm(db, status="registered", with_module=True):

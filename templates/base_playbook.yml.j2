@@ -21,6 +21,9 @@
 {%- endfor %}
         state: present
         update_cache: true
+        # Fresh Ubuntu cloud images often run unattended-upgrades immediately
+        # after first boot. Wait for its dpkg lock instead of failing the VM.
+        lock_timeout: 600
 {%- elif op.type == "run" %}
     - name: "Run script: {{ op.script }} [{{ base_type.id }}]"
       ansible.builtin.script:

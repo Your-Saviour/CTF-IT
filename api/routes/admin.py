@@ -529,7 +529,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
 
         for team in teams:
             for i in range(count_per_team):
-                hostname = f"{team.name}-{type_key}-{i + 1}"
+                hostname = f"ctf-e{event_id}-t{team.id}-{type_key}-{i + 1}"
 
                 if role == "target":
                     try:

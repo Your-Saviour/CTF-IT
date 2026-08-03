@@ -115,7 +115,7 @@ services:
     environment:
       DOCKER_HOST: tcp://dockhand-docker-proxy:2375
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000 || exit 1"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       start_period: 15s
       interval: 30s
       timeout: 5s
@@ -184,7 +184,15 @@ services:
 
   # ─── MITRE Caldera — Adversary Emulation ───────────────────────────────────
   caldera:
-    image: ghcr.io/mitre/caldera:${CALDERA_TAG:-5.3.0}
+    # Caldera does not publish an official GHCR image. Build the supported
+    # upstream Dockerfile from the immutable commit behind release 5.3.0.
+    build:
+      context: https://github.com/apache/caldera.git#${CALDERA_REF:-b24f6e7a99cab19cbf417009bda9b9c6c81abc31}
+      dockerfile: Dockerfile
+      args:
+        TZ: UTC
+        VARIANT: full
+    image: ctf-caldera:${CALDERA_IMAGE_TAG:-5.3.0}
     container_name: ctf-caldera
     restart: unless-stopped
     healthcheck:
