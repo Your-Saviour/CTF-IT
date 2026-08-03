@@ -1,14 +1,17 @@
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
+from contextlib import suppress
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from api.database import get_db, init_db
-from api.models import Event
+from api.models import Event, User, VM
 from api.routes import admin, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, vm, vm_goals
 from api.routes.auth import get_current_user
 
@@ -40,6 +43,7 @@ async def lifespan(app: FastAPI):
                 "base_type": "VARCHAR(64)",
                 "vpc_ip": "VARCHAR(45)",
                 "admin_password": "VARCHAR(128)",
+                "ssh_host_key": "VARCHAR(512)",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
@@ -50,6 +54,8 @@ async def lifespan(app: FastAPI):
                 "semaphore_project_id": "INTEGER",
                 "semaphore_key_id": "INTEGER",
                 "vm_quota": "TEXT",
+                "started_at": "DATETIME",
+                "ends_at": "DATETIME",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))
@@ -87,6 +93,15 @@ async def lifespan(app: FastAPI):
 
         db.commit()
 
+        # Encrypt legacy OPNsense credentials in place. New credentials are
+        # encrypted before they are committed.
+        from api.services.secrets import encrypt_secret
+        for stored_vm in db.query(VM).filter(VM.admin_password.is_not(None)).all():
+            encrypted = encrypt_secret(stored_vm.admin_password)
+            if encrypted != stored_vm.admin_password:
+                stored_vm.admin_password = encrypted
+        db.commit()
+
         # Migrate existing events: open bool → status field
         for event in db.query(Event).filter(Event.status == "draft").all():
             if event.open:
@@ -103,10 +118,41 @@ async def lifespan(app: FastAPI):
             db.commit()
     finally:
         db.close()
-    yield
+    async def enforce_event_deadlines():
+        from api.database import SessionLocal
+        from api.services.event_lifecycle import expire_due_events
+        while True:
+            await asyncio.sleep(30)
+            deadline_db = SessionLocal()
+            try:
+                expire_due_events(deadline_db)
+            finally:
+                deadline_db.close()
+
+    deadline_task = asyncio.create_task(enforce_event_deadlines())
+    try:
+        yield
+    finally:
+        deadline_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await deadline_task
 
 
 app = FastAPI(title="CTF Training Platform", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def reject_cross_site_mutations(request: Request, call_next):
+    """Reject browser cross-site state changes while preserving API clients."""
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+            return JSONResponse({"error": "cross-site request rejected"}, status_code=403)
+        origin = request.headers.get("origin")
+        if origin:
+            expected_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+            if not expected_host or urlsplit(origin).netloc.lower() != expected_host.lower():
+                return JSONResponse({"error": "origin mismatch"}, status_code=403)
+    return await call_next(request)
 
 templates = Jinja2Templates(
     directory=os.path.join(os.path.dirname(__file__), "..", "frontend", "templates")
@@ -126,6 +172,8 @@ app.include_router(vm_goals.router)
 @app.get("/api/events")
 async def list_open_events(db: Session = Depends(get_db)):
     """Public endpoint: returns events open for registration."""
+    from api.services.event_lifecycle import expire_due_events
+    expire_due_events(db)
     events = (
         db.query(Event)
         .filter(Event.status == "open")
@@ -151,6 +199,7 @@ async def landing(request: Request, db: Session = Depends(get_db)):
     error = request.query_params.get("error")
     return templates.TemplateResponse(request, "landing.html", {
         "error": error,
+        "bootstrap_required": db.query(User).count() == 0,
     })
 
 

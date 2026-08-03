@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from datetime import timedelta
 from typing import Optional
 
 import httpx
@@ -116,6 +117,7 @@ async def toggle_module_disabled(module_id: str, request: Request, db: Session =
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     body = await request.json()
+
     disabled = bool(body.get("disabled", False))
 
     from pathlib import Path
@@ -157,7 +159,7 @@ async def get_module_file(module_id: str, filename: str, request: Request, db: S
     source_dir = yaml_matches[0].parent
     # Prevent path traversal — only allow files within the module's own directory
     file_path = (source_dir / filename).resolve()
-    if not str(file_path).startswith(str(source_dir.resolve())):
+    if not file_path.is_relative_to(source_dir.resolve()):
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     if not file_path.exists() or not file_path.is_file():
@@ -183,6 +185,8 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "description": e.description,
             "welcome_message": e.welcome_message,
             "time_limit_minutes": e.time_limit_minutes,
+            "started_at": e.started_at.isoformat() if e.started_at else None,
+            "ends_at": e.ends_at.isoformat() if e.ends_at else None,
             "quota": json.loads(e.quota),
             "vm_quota": json.loads(e.vm_quota) if e.vm_quota else None,
             "user_count": user_count,
@@ -209,6 +213,8 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "description": event.description,
         "welcome_message": event.welcome_message,
         "time_limit_minutes": event.time_limit_minutes,
+        "started_at": event.started_at.isoformat() if event.started_at else None,
+        "ends_at": event.ends_at.isoformat() if event.ends_at else None,
         "quota": json.loads(event.quota),
         "vm_quota": json.loads(event.vm_quota) if event.vm_quota else None,
         "user_count": user_count,
@@ -223,6 +229,15 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     body = await request.json()
+
+    time_limit = body.get("time_limit_minutes")
+    if "time_limit_minutes" in body and time_limit is not None and (
+        not isinstance(time_limit, int) or isinstance(time_limit, bool) or time_limit < 1
+    ):
+        return JSONResponse(
+            {"error": "time_limit_minutes must be a positive integer or null"},
+            status_code=422,
+        )
 
     if "quota" in body:
         from builder.quota_validation import validate_quota
@@ -273,6 +288,15 @@ async def update_event(
 
     body = await request.json()
 
+    time_limit = body.get("time_limit_minutes")
+    if "time_limit_minutes" in body and time_limit is not None and (
+        not isinstance(time_limit, int) or isinstance(time_limit, bool) or time_limit < 1
+    ):
+        return JSONResponse(
+            {"error": "time_limit_minutes must be a positive integer or null"},
+            status_code=422,
+        )
+
     if "quota" in body:
         from builder.quota_validation import validate_quota
         errors = validate_quota(body["quota"])
@@ -321,10 +345,6 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     if not event:
         return JSONResponse({"error": "Event not found"}, status_code=404)
 
-    event.status = "open"
-    event.open = True
-    db.commit()
-
     # If vm_quota is defined, kick off auto-provisioning for all teams
     if event.vm_quota:
         from api.models import Team
@@ -342,11 +362,35 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
 
         from api.routes.vm import _provision_event_vms
 
+        from api.models import utcnow
+        event.started_at = utcnow()
+        event.ends_at = (
+            event.started_at + timedelta(minutes=event.time_limit_minutes)
+            if event.time_limit_minutes else None
+        )
+        event.status = "open"
+        event.open = True
+        db.commit()
+
         asyncio.create_task(asyncio.to_thread(_provision_event_vms, event_id))
 
-        return {"status": "started", "provisioning": True, "vm_count": total_vms}
+        return {
+            "status": "started",
+            "provisioning": True,
+            "vm_count": total_vms,
+            "ends_at": event.ends_at.isoformat() if event.ends_at else None,
+        }
 
-    return {"status": "started"}
+    from api.models import utcnow
+    event.started_at = utcnow()
+    event.ends_at = (
+        event.started_at + timedelta(minutes=event.time_limit_minutes)
+        if event.time_limit_minutes else None
+    )
+    event.status = "open"
+    event.open = True
+    db.commit()
+    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None}
 
 
 @router.get("/events/{event_id}/provision-status")

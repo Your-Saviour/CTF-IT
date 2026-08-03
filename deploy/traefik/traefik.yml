@@ -24,5 +24,6 @@ certificatesResolvers:
 
 providers:
   docker:
+    endpoint: tcp://traefik-docker-proxy:2375
     exposedByDefault: false
     network: ctf-proxy

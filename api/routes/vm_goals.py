@@ -1,4 +1,6 @@
+import asyncio
 from datetime import datetime, timezone
+import shlex
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -70,14 +72,14 @@ async def check_vm_goal(
     now = datetime.now(timezone.utc)
 
     # Run verification check (goal achieved by red team)
-    verification_passed, err = await _run_remote_verification(module.verification, vm)
+    verification_passed, err = await _run_remote_verification(module.verification, vm, db)
     if err:
         return JSONResponse({"error": err}, status_code=501)
 
     # Run revert verification check (blue team reverted)
     revert_passed = False
     if module.revert_verification:
-        revert_passed, err = await _run_remote_verification(module.revert_verification, vm)
+        revert_passed, err = await _run_remote_verification(module.revert_verification, vm, db)
         if err:
             return JSONResponse({"error": err}, status_code=501)
 
@@ -97,7 +99,11 @@ async def check_vm_goal(
     return _goal_dict(goal)
 
 
-async def _run_remote_verification(verification: dict, vm: VM) -> tuple[bool, str | None]:
+async def _run_remote_verification(
+    verification: dict,
+    vm: VM,
+    db: Session | None = None,
+) -> tuple[bool, str | None]:
     """Run a verification spec against a remote VM.
 
     Returns (passed: bool, error: str | None).
@@ -131,5 +137,51 @@ async def _run_remote_verification(verification: dict, vm: VM) -> tuple[bool, st
                 return False, None
         return True, None
 
-    # All other types are not yet supported for remote VMs
+    if vtype in {"service_running", "file_exists", "file_absent"}:
+        if db is None:
+            return False, "database session required for SSH verification"
+
+        if vtype == "service_running":
+            service = verification.get("service")
+            if not isinstance(service, str) or not service:
+                return False, "service_running verification requires 'service'"
+            expected = verification.get("expected", "active")
+            if expected not in {"active", "inactive"}:
+                return False, "service_running expected must be 'active' or 'inactive'"
+            command = f"systemctl is-active --quiet -- {shlex.quote(service)}"
+            exit_status = await _run_ssh_command(vm, db, command)
+            return (exit_status == 0 if expected == "active" else exit_status != 0), None
+
+        path = verification.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            return False, f"{vtype} verification requires an absolute 'path'"
+        command = f"test -e {shlex.quote(path)}"
+        exists = await _run_ssh_command(vm, db, command) == 0
+        return (exists if vtype == "file_exists" else not exists), None
+
     return False, f"verification type '{vtype}' not supported for remote VMs"
+
+
+async def _run_ssh_command(vm: VM, db: Session, command: str) -> int:
+    """Execute a read-only verification command using the platform SSH key."""
+    def execute() -> int:
+        from api.database import SessionLocal
+        from api.services.ssh_connection import connect_vm
+
+        thread_db = SessionLocal()
+        client = None
+        try:
+            thread_vm = thread_db.query(VM).filter(VM.id == vm.id).first()
+            if not thread_vm:
+                return 255
+            client = connect_vm(thread_vm, thread_db)
+            _, stdout, _ = client.exec_command(command, timeout=10)
+            return stdout.channel.recv_exit_status()
+        except Exception:
+            return 255
+        finally:
+            if client:
+                client.close()
+            thread_db.close()
+
+    return await asyncio.to_thread(execute)

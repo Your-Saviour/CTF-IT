@@ -22,8 +22,8 @@ caldera:
       cat /etc/shadow > /tmp/.exfil_shadow && echo "GOAL_ACHIEVED: shadow file staged at /tmp/.exfil_shadow"
 
 verification:
-  type: file_hash_changed
-  path: /etc/shadow
+  type: file_exists
+  path: /tmp/.exfil_shadow
 
 revert_verification:
   type: file_absent

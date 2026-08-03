@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+.codex
+.superpowers
+.env
+.env.*
+!.env.example
+__pycache__
+*.py[cod]
+.pytest_cache
+.venv
+ansible_exports
+build_contexts
+dist
+deploy/.env
+deploy/caldera/config/local.yml

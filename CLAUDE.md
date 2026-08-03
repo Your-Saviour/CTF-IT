@@ -23,14 +23,17 @@ docker compose up -d
 
 See [TEST_PLAN.md](TEST_PLAN.md) for the integration test plan.
 
-- Run unit/integration tests: `python -m pytest tests/`
-- Always test via the API docker container (`docker compose`), not by importing Python modules directly
+- Build tests: `docker compose --profile test build tests`
+- Run unit/integration tests: `docker compose --profile test run --rm tests`
+- Always test via the disposable Docker test service, not by importing Python modules directly
 
 ### Required Environment Variables
 
 See `.env.example` for full documentation. Key variables:
 
 - `SECRET_KEY` — used for session signing
+- `DATA_ENCRYPTION_KEY` — encrypts infrastructure credentials stored in the database
+- `ADMIN_BOOTSTRAP_TOKEN` — required by the first account registration on a fresh database
 - `DATABASE_URL` — defaults to `sqlite:///ctf.db`, use postgres URI for production
 - `EVENT_QUOTA` — JSON defining module selection counts per type/difficulty, with optional `categories` and `tags` keys for additional filtering (see `.env.example`)
 - `API_PORT` — port the API is exposed on (default `8080`)
@@ -70,8 +73,8 @@ The selector (`builder/selector.py`) runs in ordered phases: (1) application mod
 
 ### Key Design Decisions
 
-- **Auto-admin bootstrap**: the first user to register on a fresh database is automatically granted `is_admin = True`. This removes the need to run `promote_admin.py` after initial deployment. Subsequent registrations are unaffected.
-- **Docker socket**: `/var/run/docker.sock` is mounted so the API can restart the Caldera container after plugin installation (`POST /admin/caldera-setup`).
+- **Admin bootstrap**: the first registration on a fresh database must supply `ADMIN_BOOTSTRAP_TOKEN`; only that account is granted `is_admin = True`.
+- **Docker access**: production services use least-privilege Docker socket proxies. The API proxy permits the container restart needed by `POST /admin/caldera-setup`; the host socket is not mounted into the API or Dockhand containers.
 
 ### Multi-Event System
 
@@ -79,7 +82,7 @@ The platform supports multiple concurrent events, each with independent settings
 
 - **Event lifecycle**: `draft` → `open` → `stopped`. Draft events are invisible to users. Open events accept registration. Stopped events are archived with frozen leaderboards (verification blocked).
 - **One event per user**: each user is bound to exactly one event via `User.event_id`. The event's quota drives module selection at registration time.
-- **Event settings**: name, quota (JSON), vm_quota (JSON, optional), description, welcome message, time limit (display-only; enforcement is manual via start/stop).
+- **Event settings**: name, quota (JSON), vm_quota (JSON, optional), description, welcome message, and an automatically enforced time limit.
 - **Admin CRUD**: `POST/GET/PUT/DELETE /admin/events/{id}`, plus `/start` and `/stop` actions. Events with assigned users cannot be deleted.
 - **Public event listing**: `GET /api/events` returns open events (no auth required) for the registration form.
 - **Scoreboard scoping**: `GET /api/scoreboard?event_id=X` returns per-event rankings. `GET /api/scoreboard/events` lists all non-draft events for the selector dropdown.
@@ -87,7 +90,7 @@ The platform supports multiple concurrent events, each with independent settings
 
 ### Ansible Export
 
-An alternative to Docker image builds — generates Ansible playbooks that apply the same modules to bare machines or VMs.
+Generates Ansible playbooks that apply modules to existing machines or VMs.
 
 - **Entry point**: `builder/ansible.py` → `generate_ansible_export(quota, export_id)` loads modules, selects via quota (reusing `select_modules`), renders `playbook.yml.j2`, and stages scripts/files into an export directory.
 - **API endpoint**: `POST /admin/ansible-export` (admin-only). Accepts `{"quota": {...}}` or `{"event_id": N}`. Returns a zip file containing `playbook.yml` + `scripts/` + `files/`.
@@ -132,7 +135,7 @@ Each achievement increments `VMGoal.achievement_count`; each defence increments 
 
 **VMGoal API** (`api/routes/vm_goals.py`):
 - `GET /admin/vms/{vm_id}/goals` — list goal states for a VM
-- `POST /admin/vms/{vm_id}/goals/{goal_id}/check` — run `verification` + `revert_verification` against VM, transition state, award points. Supports `http_response` verification type for remote VMs (uses `httpx`); other types return 501 (not yet implemented).
+- `POST /admin/vms/{vm_id}/goals/{goal_id}/check` — run `verification` + `revert_verification` against a VM and transition state. Remote checks support `http_response`, `service_running`, `file_exists`, and `file_absent`; SSH checks use the platform key and a per-VM pinned host key.
 
 **Scoring model**:
 - Blue defensive: sum of `points` for completed `preapplied` VMModules (unchanged from existing flow)
@@ -215,7 +218,7 @@ An event-level quota system for automated VM provisioning, analogous to the modu
 
 ### Team and VM Management
 
-The platform supports VM-based deployments alongside the existing per-user Docker flow. VMs are team-scoped (not per-user). Admins can provision new VPS instances directly from the admin UI ("Create on Vultr") or register existing machines manually ("Register Existing").
+The platform uses team-scoped VMs. Admins can provision new VPS instances directly from the admin UI ("Create on Vultr") or register existing machines manually ("Register Existing").
 
 - **Team**: groups of users within an event. `Team` has `name`, `event_id` FK. Admin CRUD at `GET/POST /admin/teams`, `PUT/DELETE /admin/teams/{id}`. Teams cannot be deleted while they have VMs.
 - **VM**: a registered target machine. Fields: `hostname`, `ip_address`, `os`, `status` (registered/active/stopped/failed), `ssh_port`, `ssh_user`, `notes`, `team_id`, `event_id` (denormalized from team for query convenience), timestamps. Admin CRUD at `/admin/vms` and `/admin/vms/{id}`.

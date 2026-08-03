@@ -1,6 +1,6 @@
 id: nextjs_source_maps
 name: Source Maps Exposed in Production
-description: The Next.js production build is configured with productionBrowserSourceMaps: true in next.config.js, causing the full TypeScript source code to be served as .js.map files alongside the compiled JavaScript.
+description: "The Next.js production build is configured with productionBrowserSourceMaps: true in next.config.js, causing the full TypeScript source code to be served as .js.map files alongside the compiled JavaScript."
 type: vulnerability
 difficulty: easy
 points: 100

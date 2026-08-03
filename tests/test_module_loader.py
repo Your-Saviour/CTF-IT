@@ -1,5 +1,12 @@
-import pytest
+from pathlib import Path
+
+import yaml
+
+from builder.base_loader import CopyStep, PlaybookStep, RunStep, load_all_bases
 from builder.module_loader import Module, load_all_modules
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class TestStageField:
@@ -60,3 +67,53 @@ class TestLoadGoalModule:
         goals = [m for m in modules if m.type == "goal"]
         for g in goals:
             assert g.stage is None, f"Goal {g.id} should have stage=None"
+
+
+class TestRepositoryDefinitions:
+    def test_every_yaml_definition_parses(self):
+        definitions = [
+            *sorted((REPO_ROOT / "modules").rglob("*.yaml")),
+            *sorted((REPO_ROOT / "bases").rglob("*.yaml")),
+        ]
+        assert definitions
+        for path in definitions:
+            with path.open(encoding="utf-8") as stream:
+                parsed = yaml.safe_load(stream)
+            assert isinstance(parsed, dict), f"{path} must contain a YAML mapping"
+
+    def test_module_ids_are_unique_and_dependencies_exist(self):
+        modules = load_all_modules()
+        ids = [module.id for module in modules]
+        assert len(ids) == len(set(ids)), "Module IDs must be globally unique"
+
+        known_ids = set(ids)
+        for module in modules:
+            missing = set(module.requires) - known_ids
+            assert not missing, f"{module.id} requires missing modules: {sorted(missing)}"
+            unknown_conflicts = set(module.conflicts) - known_ids
+            assert not unknown_conflicts, (
+                f"{module.id} conflicts with missing modules: {sorted(unknown_conflicts)}"
+            )
+
+    def test_module_step_sources_exist(self):
+        for module in load_all_modules():
+            for step in module.steps:
+                source = module.source_dir / (
+                    step.script if isinstance(step, RunStep) else step.src
+                )
+                assert source.exists(), f"{module.id} references missing source {source}"
+
+    def test_base_ids_are_unique_and_step_sources_exist(self):
+        bases = load_all_bases()
+        ids = [base.id for base in bases]
+        assert len(ids) == len(set(ids)), "Base IDs must be globally unique"
+        for base in bases:
+            for step in base.steps:
+                if isinstance(step, (RunStep, PlaybookStep)):
+                    relative = step.script if isinstance(step, RunStep) else step.playbook
+                elif isinstance(step, CopyStep):
+                    relative = step.src
+                else:
+                    raise AssertionError(f"Unsupported base step: {step!r}")
+                source = base.source_dir / relative
+                assert source.exists(), f"{base.id} references missing source {source}"

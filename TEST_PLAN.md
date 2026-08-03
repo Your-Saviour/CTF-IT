@@ -1,203 +1,72 @@
 # Test Plan
 
-End-to-end integration test for the CTF platform. Run this after modifying modules, verification logic, the builder, or audit.py.
+CTF-IT uses team-scoped VMs, Ansible Semaphore, Vultr, and MITRE Caldera. The former per-user Docker-image and registry workflow has been removed.
 
-## Prerequisites
+## Automated suite
 
-- Docker running locally
-- Port 5050 available (macOS AirPlay Receiver uses 5000, so the registry uses 5050)
-- `.env.test` exists in project root (gitignored) with:
-  - `SECRET_KEY`, `DATABASE_URL`, `EVENT_QUOTA`, `ROOT_PASSWORD`, `REGISTRY_HOST`
-- Base image built: `docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/`
-
-## Test Setup
+Run all automated tests through the disposable Docker test target:
 
 ```bash
-# Clean slate
-docker compose down -v 2>/dev/null
-docker rm -f ctf-e2e-test 2>/dev/null
-rm -f ctf.db
-
-# Use test env (selects all modules)
-cp .env.test .env
-
-# Rebuild and start API + registry
-docker compose build && docker compose up -d
-sleep 3
-
-# Verify both services are healthy
-docker compose ps
-curl -s http://localhost:5050/v2/_catalog
+docker compose --profile test build tests
+docker compose --profile test run --rm tests
 ```
 
-**Expected:** Both `api` and `registry` containers running. Registry returns `{"repositories":[]}`.
+The suite must cover:
 
-## Step 1: Register User and Build Image
+- every module and base YAML file parses;
+- module/base IDs are unique and referenced files exist;
+- module dependencies and conflicts reference known IDs;
+- quota validation and deterministic selection behavior;
+- attack-tree construction and Caldera score aggregation;
+- VM goal verification and pending/achieved/defended transitions.
+
+CI builds and runs this same target. Production dependencies remain separate from test-only dependencies.
+
+## Static deployment checks
+
+These checks do not start infrastructure:
 
 ```bash
-# Register — triggers background image build
-curl -s -X POST http://localhost:8080/auth/register \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=e2e_test&password=testpass123" \
-  -c /tmp/ctf-test-cookies.txt -D - -o /dev/null
-
-# Poll until ready (should take <30s)
-for i in $(seq 1 30); do
-  img_status=$(curl -s -b /tmp/ctf-test-cookies.txt \
-    http://localhost:8080/api/images/status \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
-  echo "Attempt $i: $img_status"
-  if [ "$img_status" = "ready" ] || [ "$img_status" = "failed" ]; then break; fi
-  sleep 2
-done
+bash -n quickstart.sh
+cp .env.example .env
+cp deploy/.env.example deploy/.env
+cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
+docker compose --file deploy/docker-compose.yml config --quiet
 ```
 
-**Expected:** Status reaches `ready`. If `failed`, check API logs: `docker compose logs api`.
+Do not commit the generated files. They are ignored and must be mode `0600` when they contain real credentials.
 
-## Step 2: Verify Registry Push
+## Integration boundaries
 
-```bash
-# Check the image appears in the registry catalog
-curl -s http://localhost:5050/v2/_catalog
+Automated tests should mock external systems at their client boundaries:
 
-# Verify pull-command endpoint returns registry-prefixed commands
-curl -s -b /tmp/ctf-test-cookies.txt http://localhost:8080/api/images/pull-command
-```
+- Vultr API: instance, VPC, plan, OS, and teardown responses;
+- Semaphore: project, key, repository, template, task launch, polling, and output;
+- Caldera: health, agents, adversaries, operations, results, and container restart;
+- SSH: command execution for service/file goal verification;
+- Cloudflare: DNS creation and removal.
 
-**Expected:** The catalog contains the image tag. The pull-command endpoint returns `pull_command` and `run_command` prefixed with `localhost:5050/`.
+Provisioning tests must verify the complete state machine, including failures and retries:
 
-## Step 3: Pull and Run User Container
+1. Event start creates team VPCs when a firewall role is configured.
+2. Firewall VMs are created and bootstrapped before target VMs.
+3. Targets attach to the correct team VPC and receive deterministic VPC IPs.
+4. Target modules are assigned and deployed through Semaphore.
+5. Attacker VMs skip module deployment.
+6. Failures populate `provision_error` and never report the VM as active.
+7. Destroying the final VM removes the team VPC.
 
-```bash
-# Get image tag
-IMAGE_TAG=$(curl -s -b /tmp/ctf-test-cookies.txt \
-  http://localhost:8080/api/images/status \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['image_tag'])")
+## Manual infrastructure smoke test
 
-# Pull from registry
-docker pull localhost:5050/$IMAGE_TAG
+The live smoke test is intentionally a separate release gate because it creates external resources and DNS records. Follow `deploy/testing_plan.md` on a clean Linux host only after automated and static checks pass.
 
-# Run with systemd support
-docker run -d --name ctf-e2e-test \
-  --privileged --cgroupns=private \
-  --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
-  localhost:5050/$IMAGE_TAG
+The smoke test must confirm:
 
-sleep 3
-```
-
-## Step 4: Verify Container State File
-
-```bash
-docker exec ctf-e2e-test cat /opt/ctf/state.json | python3 -m json.tool
-```
-
-**Expected:** Contains `user_id`, `snapshots.shadow_hashes` (all system users), and optionally `hash_paths`/`check_paths` lists if any selected modules use `file_hash_changed` or `file_absent` verification. No module names, verification specs, or expected values should be present.
-
-```bash
-# Confirm no manifest.json exists
-docker exec ctf-e2e-test ls /opt/ctf/
-```
-
-**Expected:** Only `state.json` and `audit.py` — no `manifest.json` or `collect.py`.
-
-## Step 5: Submit Unfixed State — All Should Fail
-
-```bash
-PAYLOAD=$(docker exec ctf-e2e-test python3 /opt/ctf/audit.py)
-curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
-  -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
-```
-
-**Expected:** `"total_points": 0`, `"completed": 1`, `"remaining": 9`. The single completed module is the 0-point application module (`vulnerable_flask_app`) which auto-completes because its service is running from boot. Unsolved module names are not revealed.
-
-## Step 6: Apply All Fixes
-
-```bash
-# world_writable_shadow (vulnerability - file_permissions)
-docker exec ctf-e2e-test bash -c "chmod 640 /etc/shadow && chown root:shadow /etc/shadow"
-
-# suid_find (vulnerability - file_permissions)
-docker exec ctf-e2e-test bash -c "chmod 755 /usr/bin/find"
-
-# writable_cron_script (vulnerability - file_permissions)
-docker exec ctf-e2e-test bash -c "chmod 750 /opt/maintenance.sh"
-
-# nopasswd_sudo (vulnerability - file_not_contains)
-docker exec ctf-e2e-test bash -c "rm /etc/sudoers.d/backdoor"
-
-# unauthorized_ssh_key (vulnerability - file_not_contains)
-docker exec ctf-e2e-test bash -c "sed -i '/rogue@backdoor/d' /root/.ssh/authorized_keys"
-
-# disable_ssh_root_login (hardening - file_contains)
-docker exec ctf-e2e-test bash -c "sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config"
-
-# change_root_password (hardening - password_changed)
-# Uses ROOT_PASSWORD from .env.test as the known default, change to anything else
-docker exec ctf-e2e-test bash -c "echo 'root:N3wTestP@ssw0rd!' | chpasswd"
-
-# setup_ssh_key_auth (hardening - file_contains)
-docker exec ctf-e2e-test bash -c "sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config"
-
-# install_fail2ban (hardening - service_running)
-docker exec ctf-e2e-test bash -c "apt-get update -qq && apt-get install -y -qq fail2ban > /dev/null 2>&1 && systemctl start fail2ban && systemctl enable fail2ban"
-
-# flask_defacement (vulnerability - http_response)
-docker exec ctf-e2e-test bash -c "sed -i 's|HACKED BY L33THAX0R||' /opt/flaskapp/app.py && systemctl restart flaskapp"
-sleep 2
-```
-
-## Step 7: Submit Fixed State — All Should Pass
-
-```bash
-PAYLOAD=$(docker exec ctf-e2e-test python3 /opt/ctf/audit.py)
-curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
-  -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
-```
-
-**Expected:** `"completed": 10`, `"remaining": 0`, `"newly_completed": 9` (the app module was already completed in Step 5). All 10 modules appear in `results` with `"passed": true` and correct points. Total should equal sum of all module points.
-
-| Module | Type | Points | Verification Type |
-|--------|------|--------|-------------------|
-| `suid_find` | vulnerability | 100 | `file_permissions` |
-| `world_writable_shadow` | vulnerability | 100 | `file_permissions` |
-| `writable_cron_script` | vulnerability | 200 | `file_permissions` |
-| `nopasswd_sudo` | vulnerability | 200 | `file_not_contains` |
-| `unauthorized_ssh_key` | vulnerability | 200 | `file_not_contains` |
-| `flask_defacement` | vulnerability | 200 | `http_response` |
-| `disable_ssh_root_login` | hardening | 100 | `file_contains` |
-| `change_root_password` | hardening | 100 | `password_changed` |
-| `install_fail2ban` | hardening | 200 | `service_running` |
-| `setup_ssh_key_auth` | hardening | 200 | `file_contains` |
-| `vulnerable_flask_app` | application_external | 0 | `process_running` |
-| **Total** | | **1500** | |
-
-> **Note:** `vulnerable_flask_app` is a 0-point infrastructure module that auto-completes. Which easy vulnerability is selected (suid_find or world_writable_shadow) is random — total points are the same either way.
-
-## Step 8: Verify Idempotency — No Double Points
-
-```bash
-PAYLOAD=$(docker exec ctf-e2e-test python3 /opt/ctf/audit.py)
-curl -s -b /tmp/ctf-test-cookies.txt -X POST http://localhost:8080/api/verify \
-  -H "Content-Type: application/json" -d "$PAYLOAD" | python3 -m json.tool
-```
-
-**Expected:** All modules still `"passed": true` but `"points_awarded": 0` (already claimed). `"total_points"` unchanged. `"newly_completed": 0`.
-
-## Cleanup
-
-```bash
-docker rm -f ctf-e2e-test
-docker rmi localhost:5050/$IMAGE_TAG 2>/dev/null
-docker compose down -v
-rm -f ctf.db
-# Restore production .env if needed
-```
-
-## Adding New Modules
-
-When adding a new module, update this test plan:
-1. Add the fix command to Step 6
-2. Add a row to the expected results table in Step 7
-3. Update the total points
-4. If using a new verification type, ensure `audit.py` collects the relevant system state (add paths/commands to scan lists if needed)
+- quickstart creates owner-readable configuration without placeholders;
+- all production services become healthy;
+- TLS and authentication work for every routed administration service;
+- a test event provisions firewall, target, and attacker VMs;
+- Ansible deployment and Caldera agent check-in complete;
+- all three committed goals can transition to achieved and defended;
+- teardown deletes VMs, DNS records, and VPCs;
+- a second quickstart run is idempotent.

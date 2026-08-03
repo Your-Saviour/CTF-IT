@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import Event, Team, VM, VMModule, VMGoal
 from api.routes.admin import require_admin
+from api.services.secrets import decrypt_secret, encrypt_secret
 
 _log = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "status": vm.status,
         "ssh_port": vm.ssh_port,
         "ssh_user": vm.ssh_user,
+        "ssh_host_key": vm.ssh_host_key,
         "notes": vm.notes,
         "team_id": vm.team_id,
         "team_name": vm.team.name if vm.team else None,
@@ -208,7 +210,7 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "vm_type": vm.vm_type,
         "base_type": vm.base_type,
         "vpc_ip": vm.vpc_ip,
-        "admin_password": vm.admin_password,
+        "admin_password": decrypt_secret(vm.admin_password),
     }
 
 
@@ -444,26 +446,9 @@ async def test_connection(vm_id: int, request: Request, db: Session = Depends(ge
     if not vm.ip_address:
         return JSONResponse({"error": "No IP address set on this VM"}, status_code=422)
 
-    from api.services.ssh_keys import get_or_create_platform_keypair
-    private_key_pem, _ = get_or_create_platform_keypair(db)
-
     try:
-        import io as _io
-        import paramiko
-
-        pkey = paramiko.Ed25519Key.from_private_key(_io.StringIO(private_key_pem))
-
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            hostname=vm.ip_address,
-            port=vm.ssh_port or 22,
-            username=vm.ssh_user or "root",
-            pkey=pkey,
-            timeout=10,
-            banner_timeout=10,
-            auth_timeout=10,
-        )
+        from api.services.ssh_connection import connect_vm
+        client = connect_vm(vm, db)
         _, stdout, stderr = client.exec_command("echo ok && hostname && id")
         out = stdout.read().decode().strip()
         err = stderr.read().decode().strip()
@@ -1408,7 +1393,7 @@ def _run_firewall_create(vm_id: int) -> None:
                 time.sleep(15)
 
         # Store credentials and mark active
-        vm.admin_password = admin_password
+        vm.admin_password = encrypt_secret(admin_password)
         vm.vpc_ip = f"10.{team_index}.1.1"
         vm.status = "active"
         vm.provision_step = "completed"

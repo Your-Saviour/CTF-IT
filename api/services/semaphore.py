@@ -121,7 +121,7 @@ class SemaphoreClient:
         inventory_ini = (
             f"[targets]\n"
             f"{ip} ansible_user={ssh_user}{port_arg} "
-            f"ansible_ssh_common_args='-o StrictHostKeyChecking=no'\n"
+            f"ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'\n"
         )
         resp = self._client.post(
             f"/api/project/{project_id}/inventory",

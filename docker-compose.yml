@@ -1,15 +1,27 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      target: runtime
     ports:
       - "${API_PORT:-8080}:8000"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - api_data:/app/data
     env_file: .env
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
+      - COOKIE_SECURE=false
     restart: unless-stopped
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    env_file: .env
+    environment:
+      - DATABASE_URL=sqlite://
+      - COOKIE_SECURE=false
 
 volumes:
   api_data:

@@ -35,6 +35,8 @@ class Event(Base):
     description: Mapped[str] = mapped_column(Text, nullable=True)
     welcome_message: Mapped[str] = mapped_column(Text, nullable=True)
     time_limit_minutes: Mapped[int] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # Semaphore project created once per event, reused for all VM provisions
@@ -72,6 +74,7 @@ class VM(Base):
     status: Mapped[str] = mapped_column(String(16), default="registered")
     ssh_port: Mapped[int] = mapped_column(Integer, nullable=True, default=22)
     ssh_user: Mapped[str] = mapped_column(String(64), nullable=True, default="root")
+    ssh_host_key: Mapped[str] = mapped_column(String(512), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)

@@ -172,6 +172,16 @@
                 <div class="flash">Username already taken.</div>
             {% elif error == "invalid_event" %}
                 <div class="flash">Selected event is not available for registration.</div>
+            {% elif error == "invalid_bootstrap_token" %}
+                <div class="flash">The initial administrator bootstrap token is invalid.</div>
+            {% elif error == "bootstrap_not_configured" %}
+                <div class="flash">Administrator bootstrap is not configured on the server.</div>
+            {% elif error == "rate_limited" %}
+                <div class="flash">Too many login attempts. Try again in a few minutes.</div>
+            {% elif error == "invalid_username" %}
+                <div class="flash">Usernames must be between 3 and 64 characters.</div>
+            {% elif error == "invalid_password" %}
+                <div class="flash">Passwords must be between 12 and 72 UTF-8 bytes.</div>
             {% endif %}
             <form id="auth-form" method="POST" action="/auth/login">
                 <div class="form-group">
@@ -190,6 +200,12 @@
                     <div id="event-description" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.5rem; display: none;"></div>
                     <div id="no-events-msg" style="color: var(--red); font-size: 0.8rem; margin-top: 0.5rem; display: none;">No events are currently open for registration.</div>
                 </div>
+                {% if bootstrap_required %}
+                <div class="form-group" id="bootstrap-group" style="display: none;">
+                    <label for="admin_bootstrap_token">Initial admin token</label>
+                    <input type="password" name="admin_bootstrap_token" id="admin_bootstrap_token" autocomplete="off">
+                </div>
+                {% endif %}
                 <button type="submit" class="btn btn-primary" id="submit-btn">Login</button>
             </form>
             <p class="toggle-text">
@@ -216,6 +232,8 @@ function toggleMode(e) {
     document.getElementById('toggle-text').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
     document.getElementById('toggle-link').textContent = isLogin ? 'Register' : 'Login';
     document.getElementById('event-group').style.display = isLogin ? 'none' : 'block';
+    var bootstrapGroup = document.getElementById('bootstrap-group');
+    if (bootstrapGroup) bootstrapGroup.style.display = isLogin ? 'none' : 'block';
     // Disable submit if registering with no events
     if (!isLogin && eventsData.length === 0) {
         document.getElementById('submit-btn').disabled = true;
@@ -264,7 +282,7 @@ document.getElementById('event_id').addEventListener('change', function() {
     }
 });
 
-{% if error == "username_taken" or error == "invalid_event" %}toggleMode({preventDefault:function(){}});{% endif %}
+{% if error in ["username_taken", "invalid_event", "invalid_bootstrap_token", "bootstrap_not_configured", "invalid_username", "invalid_password"] %}toggleMode({preventDefault:function(){}});{% endif %}
 
 // Typing animation
 (function() {

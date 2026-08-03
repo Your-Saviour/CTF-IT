@@ -1,10 +1,10 @@
 # CTF-IT
 
-A CTF training platform where each user gets a uniquely generated Docker container with randomised vulnerabilities and hardening tasks. Users fix issues inside their container and submit verification to the platform for scoring. Supports red team emulation via MITRE Caldera, automated VM provisioning via Vultr, and Ansible export for bare-metal deployments.
+A VM-based red-team/blue-team training platform. Administrators create events and teams, provision Vultr VMs, apply randomised vulnerability and hardening modules through Ansible Semaphore, and run adversary operations through MITRE Caldera.
 
 ## Features
 
-- **Docker image generation** — each participant gets a container with a randomised set of modules selected from the event quota
+- **Team VM environments** — each event provisions role-based target, attacker, and firewall VMs from an event quota
 - **Multi-event support** — independent leaderboards, quotas, and settings per event
 - **Blue team scoring** — vulnerabilities, hardening tasks, and payloads; points awarded when fixed
 - **Red team emulation** — MITRE Caldera integration with attack trees, adversary operations, and goal objectives
@@ -14,7 +14,7 @@ A CTF training platform where each user gets a uniquely generated Docker contain
 
 ## Quick Start
 
-This guide covers deploying on a VPS with a domain. The full production stack lives in `deploy/` and uses Traefik for TLS termination and subdomain routing.
+This guide covers deploying on a Linux VPS with a domain. The production stack lives in `deploy/` and uses Traefik for TLS termination and subdomain routing.
 
 ### Automated (recommended)
 
@@ -25,12 +25,11 @@ git clone <repo-url> CTF-IT && cd CTF-IT
 ./quickstart.sh
 ```
 
-The script installs Docker if needed, prompts for your domain, Let's Encrypt
-email, and server IP, generates all secrets and config files (root `.env`,
-`deploy/.env`, and `deploy/caldera/config/local.yml`), then brings up
-`deploy/docker-compose.yml`. It is idempotent — re-running skips any config file
-that already exists. Use `--force` to regenerate (existing files are backed up
-first) or `--non-interactive` to read inputs from environment variables.
+The script installs Docker if needed, collects deployment settings, creates the
+root `.env`, `deploy/.env`, and Caldera configuration with restricted file
+permissions, then starts `deploy/docker-compose.yml`. Re-running preserves
+existing configuration. Use `--force` to back up and regenerate configuration,
+or `--non-interactive` to read inputs from environment variables.
 
 After it finishes, create DNS A-records for `ctf`, `caldera`, `semaphore`,
 `dockhand`, and `traefik` under your domain, pointing at the server. The manual
@@ -40,32 +39,28 @@ prefer to configure the stack by hand.
 ### Prerequisites
 
 - VPS with Docker + Docker Compose installed
-- Domain with DNS A record pointing to the server's public IP
+- A domain and permission to create DNS A records
 - Firewall ports open:
   - `80`, `443` — Traefik (HTTP redirect + HTTPS)
   - `7010`–`7012`, `8022`, `2222`, `8853`, `8888` — Caldera agent communication (direct, not proxied)
 
-### 1. Clone the repository
+### Manual deployment
 
-```bash
-git clone <repo-url> ctf-it
-cd ctf-it
-```
-
-### 2. Configure `deploy/.env`
+If you do not use `quickstart.sh`, create the three required configuration files:
 
 ```bash
 cp deploy/.env.example deploy/.env
+cp .env.example .env
+cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
 ```
 
-Edit `deploy/.env`:
+Replace all example credentials and `REPLACE_ME` values. The important deployment variables are:
 
 | Variable | Description | How to generate |
 |---|---|---|
 | `DOMAIN` | Base domain, e.g. `example.com` | Your domain |
 | `ACME_EMAIL` | Let's Encrypt notification email | Your email |
 | `TRAEFIK_DASHBOARD_AUTH` | Basic auth for Traefik dashboard | `echo "$(htpasswd -nB admin)" \| sed 's/\$/\$\$/g'` |
-| `REGISTRY_AUTH` | Basic auth for Docker registry | Same as above |
 | `SEMAPHORE_ADMIN_PASSWORD` | Semaphore admin password | `openssl rand -base64 32` |
 | `SEMAPHORE_POSTGRES_PASSWORD` | Semaphore database password | `openssl rand -base64 32` |
 | `SEMAPHORE_ACCESS_KEY_ENCRYPTION` | Semaphore secrets encryption key | `openssl rand -base64 32` |
@@ -80,63 +75,18 @@ CLOUDFLARE_API_TOKEN=your-token   # Auto-creates DNS A records on VM creation
 CLOUDFLARE_DOMAIN=example.com
 ```
 
-### 3. Configure root `.env`
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+The root `.env` configures the API:
 
 | Variable | Description | How to generate |
 |---|---|---|
 | `SECRET_KEY` | Session signing + deterministic flag generation | `openssl rand -base64 32` |
+| `DATA_ENCRYPTION_KEY` | Encrypts stored infrastructure credentials | `openssl rand -base64 32` |
 | `EVENT_QUOTA` | Default module quota for the first event | See [Events & Scoring](#events--scoring) |
-| `ROOT_PASSWORD` | Default root password baked into base images | Choose a value; `password_changed` modules check against this |
-
-### 4. Set base image password
+Set all generated files to owner-only access, then start the stack:
 
 ```bash
-echo "ROOT_PASSWORD=changeme123" > base/.env
-```
-
-This sets the default root password baked into user containers. The `password_changed` hardening module checks that participants change it from this value. Choose any password — participants will need to change it as part of the challenge.
-
-### 5. Configure Caldera
-
-```bash
-cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
-```
-
-Edit `deploy/caldera/config/local.yml` and replace **every** `REPLACE_ME` value:
-
-- `api_key_blue`, `api_key_red`, `encryption_key`, `crypt_salt` — generate each with `openssl rand -base64 32`
-- `users.blue.blue`, `users.red.admin`, `users.red.red` — set passwords
-- `app.contact.tunnel.ssh.user_password`, `app.contact.ftp.pword` — set passwords
-
-### 6. Build the base image
-
-```bash
-docker build --build-arg "$(cat base/.env)" -t ctf-base:latest base/
-```
-
-**Cross-architecture builds** (e.g. AMD64 server, Apple Silicon users):
-
-```bash
-# One-time QEMU registration
-docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-# Build for target architecture
-docker build --platform linux/arm64 --build-arg "$(cat base/.env)" -t ctf-base:latest base/
-```
-
-Also set `DOCKER_PLATFORM=linux/arm64` in root `.env`.
-
-### 7. Start the stack
-
-```bash
-cd deploy
-docker compose up -d
+chmod 600 .env deploy/.env deploy/caldera/config/local.yml
+docker compose --file deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
 
 Services become available at (replace `example.com` with your `DOMAIN`):
@@ -146,25 +96,12 @@ Services become available at (replace `example.com` with your `DOMAIN`):
 | CTF dashboard | `https://ctf.example.com` | User registration, dashboard, scoreboard |
 | MITRE Caldera | `https://caldera.example.com` | Red team C2 server |
 | Ansible Semaphore | `https://semaphore.example.com` | Playbook execution UI |
-| Docker registry | `https://registry.example.com` | Built image distribution |
 | Dockhand | `https://dockhand.example.com` | Container management UI |
 | Traefik dashboard | `https://traefik.example.com` | Reverse proxy dashboard |
 
-### 8. Create the admin account
+### Create the admin account
 
-Navigate to `https://ctf.example.com` and register. **The first user to register automatically becomes admin.** Register before sharing the URL with participants.
-
-### 9. Configure Docker registry login (user machines)
-
-The registry is behind TLS and basic auth. Every machine that pulls images (including the server itself during development) must log in:
-
-```bash
-docker login registry.example.com
-# Username: admin (or whatever you set in REGISTRY_AUTH)
-# Password: the password you set
-```
-
-No `insecure-registries` config needed — Traefik provides valid TLS certificates via Let's Encrypt.
+Navigate to `https://ctf.example.com` and register using the generated `ADMIN_BOOTSTRAP_TOKEN`. The token is required for the first account, which becomes the administrator; later registrations cannot use it to gain privileges. Complete this bootstrap before sharing the public URL.
 
 ## Events & Scoring
 
@@ -184,7 +121,7 @@ Manage events from the admin panel: create → configure → start → stop.
 
 Required fields: name, quota JSON.
 
-Optional: description (shown on registration page), welcome message (shown on user dashboard after registration), time limit in minutes (display only — enforcement is manual via stop).
+Optional: description, welcome message, and a time limit in minutes. Starting a timed event records its deadline; the application automatically transitions it to `stopped` when the deadline passes.
 
 ### Quota JSON
 
@@ -356,7 +293,7 @@ POST /admin/vms/{vm_id}/goals/{goal_id}/check
 
 CTF-IT runs `verification` (did red team achieve the goal?) and `revert_verification` (did blue team revert it?) against the VM, transitions the state, and awards points accordingly.
 
-Currently supports `http_response` verification type for remote VMs. Other verification types return `501 Not Implemented`.
+Remote goal checks support HTTP responses, systemd service state, and file existence/absence. SSH-based checks use the platform key and pin the VM's first observed host key, rejecting later changes.
 
 ### Red vs blue scoreboard
 
@@ -368,7 +305,7 @@ Returns per-team `blue_defensive` (completed preapplied module points), `blue_re
 
 ## VM Provisioning
 
-CTF-IT can provision and manage VMs for team-based events. VMs are team-scoped. Modules are assigned to VMs the same way they are to Docker containers.
+CTF-IT provisions and manages team-scoped VMs. Modules are selected from the event quota and applied through Ansible Semaphore.
 
 ### Teams
 
@@ -463,7 +400,7 @@ cd ctf-playbook
 ansible-playbook -i inventory playbook.yml --become
 ```
 
-Target machines should be Ubuntu 22.04 with the same base packages as the `ctf-base` Docker image.
+Target machines should use one of the definitions under `bases/`; Ubuntu 24.04 is the currently supplied server base.
 
 ### Output structure
 
@@ -493,9 +430,6 @@ CTF-IT/
   api/                          # FastAPI application
     routes/                     # Route handlers
       auth.py                   # Registration, login, logout
-      images.py                 # Image build status polling
-      verify.py                 # Submission and scoring
-      scoreboard.py             # Per-event blue team scoreboard
       admin.py                  # Admin panel and event management
       ansible_export.py         # Ansible playbook export
       caldera_export.py         # Caldera plugin export
@@ -506,17 +440,15 @@ CTF-IT/
       vm_goals.py               # VMGoal state machine API
     services/
       semaphore.py              # Ansible Semaphore REST client
+      ssh_keys.py               # Platform SSH key management
     models.py                   # Database models
     main.py                     # App entry point
-  base/                         # Base Docker image (Ubuntu 22.04 + systemd)
-  builder/                      # Image build orchestration
-    main.py                     # Build entry point
+  bases/                        # VM base-type definitions and setup assets
+  builder/                      # Module selection and export orchestration
     selector.py                 # Module selection (quota, conflicts, deps)
-    renderer.py                 # Dockerfile + manifest generation
     ansible.py                  # Ansible playbook export
     caldera.py                  # Caldera plugin generation
     attack_tree.py              # Attack tree DAG construction and DFS path extraction
-    registry.py                 # Image tagging and registry push
     module_loader.py            # YAML module parsing
     plan_sizing.py              # Vultr plan sizing from module resource requirements
     vm_quota_validation.py      # vm_quota JSON schema validation
@@ -529,8 +461,8 @@ CTF-IT/
     application_internal/       # Internal application modules
     goals/                      # Goal modules (red team objectives)
   templates/
-    Dockerfile.j2               # Jinja2 template for user images
     playbook.yml.j2             # Jinja2 template for Ansible playbook export
+    base_playbook.yml.j2        # VM base configuration playbook
   frontend/
     templates/                  # Jinja2 HTML templates
   playbooks/                    # Ansible playbooks for Vultr VM lifecycle
@@ -539,7 +471,7 @@ CTF-IT/
     collections/
       requirements.yml          # vultr.cloud + community.general (auto-installed by Semaphore)
   deploy/                       # Production deployment stack
-    docker-compose.yml          # Traefik + Dockhand + API + Registry + Caldera + Semaphore
+    docker-compose.yml          # Traefik + Dockhand + API + Caldera + Semaphore
     .env.example                # Deployment environment variables
     caldera/
       config/
@@ -548,25 +480,20 @@ CTF-IT/
         ctf-exploit/            # Caldera plugin directory (populated by caldera-setup)
     traefik/
       traefik.yml               # Traefik static configuration
-  audit.py                      # In-container audit script (broad system snapshot)
-  docker-compose.yml            # Development/testing stack only (no Traefik, no TLS)
+  docker-compose.yml            # Development API and disposable test service
   requirements.txt              # Python dependencies
+  requirements-dev.txt          # Test-only Python dependencies
   MODULE_GUIDE.md               # Module authoring reference
   TEST_PLAN.md                  # End-to-end integration test plan
 ```
 
 ## Testing
 
-> **Note:** Tests run against the root `docker-compose.yml` (the development stack, no Traefik). **Do not** run tests against `deploy/docker-compose.yml`.
-
-See [TEST_PLAN.md](TEST_PLAN.md) for the full end-to-end integration test.
-
-To run the automated e2e test:
+Run the complete automated suite in the disposable Docker test target:
 
 ```bash
-docker compose down -v && tests/e2e_test.sh
+docker compose --profile test build tests
+docker compose --profile test run --rm tests
 ```
 
-`.env.test` is checked into the repo with a quota that selects all 10 modules (9 scored + 1 app). The e2e script copies it to `.env` automatically.
-
-`ROOT_PASSWORD` in `base/.env` is `changeme123` — this is the known default the `password_changed` verification module checks against.
+This validates module/base definitions, selection, attack-tree behavior, goal state transitions, scoring, and quota validation. See [TEST_PLAN.md](TEST_PLAN.md) for integration boundaries and the manual infrastructure checklist. CI runs the same test image on every push and pull request.

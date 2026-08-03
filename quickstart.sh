@@ -8,6 +8,7 @@
 # Usage: ./quickstart.sh [--non-interactive] [--force] [--help]
 #
 set -euo pipefail
+umask 077
 
 # ── Globals ──────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,12 +34,14 @@ CLOUDFLARE_DOMAIN="${CLOUDFLARE_DOMAIN:-}"
 # Generated plaintext (printed in summary)
 TRAEFIK_PASSWORD=""
 SEMAPHORE_ADMIN_PASSWORD=""
+ADMIN_BOOTSTRAP_TOKEN=""
 
 # ── Logging helpers ──────────────────────────────────────────────────────────
 log()  { printf '==> %s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 err()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Required command not found: $1"; }
+read_env_value() { awk -F= -v key="$2" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$1"; }
 
 # Double every '$' so docker-compose does not interpolate bcrypt hashes.
 escape_for_compose() { printf '%s' "$1" | sed 's/\$/\$\$/g'; }
@@ -108,7 +111,7 @@ parse_args() {
   done
 }
 
-# ── Phase stubs (replaced in later tasks) ────────────────────────────────────
+# ── Deployment phases ────────────────────────────────────────────────────────
 phase_preflight() {
   log "Preflight checks"
   [[ "$(uname -s)" == "Linux" ]] || err "This script must run on Linux (got $(uname -s))."
@@ -116,7 +119,6 @@ phase_preflight() {
     command -v sudo >/dev/null 2>&1 || err "Not running as root and 'sudo' not found."
     SUDO="sudo"
   fi
-  require_cmd curl
   require_cmd openssl
   require_cmd sed
   require_cmd awk
@@ -131,8 +133,12 @@ phase_docker() {
     log "Docker and compose plugin present — skipping install"
     return
   fi
-  log "Installing Docker via get.docker.com"
-  curl -fsSL https://get.docker.com | $SUDO sh || err "Docker installation failed."
+  command -v apt-get >/dev/null 2>&1 \
+    || err "Automatic Docker installation currently supports apt-based Linux distributions only. Install Docker Engine and Compose, then rerun."
+  log "Installing Docker from the configured operating-system package repositories"
+  $SUDO apt-get update || err "Package index update failed."
+  $SUDO apt-get install -y docker.io docker-compose-v2 \
+    || err "Docker installation failed. Install Docker Engine and the Compose v2 plugin, then rerun."
   $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
   command -v docker >/dev/null 2>&1 && $SUDO docker compose version >/dev/null 2>&1 \
     || err "Docker still unavailable after install."
@@ -141,6 +147,12 @@ collect_inputs() {
   local need_deploy=false need_root=false
   { [[ -f "$DEPLOY_ENV" ]] && [[ "$FORCE" != true ]]; } || need_deploy=true
   { [[ -f "$ROOT_ENV" ]]   && [[ "$FORCE" != true ]]; } || need_root=true
+
+  if [[ -f "$DEPLOY_ENV" ]]; then
+    [[ -n "$DOMAIN" ]] || DOMAIN="$(read_env_value "$DEPLOY_ENV" DOMAIN)"
+    [[ -n "$ACME_EMAIL" ]] || ACME_EMAIL="$(read_env_value "$DEPLOY_ENV" ACME_EMAIL)"
+    [[ -n "$TRAEFIK_USER" ]] || TRAEFIK_USER="admin"
+  fi
 
   if [[ "$need_deploy" == false && "$need_root" == false ]]; then
     log "All env files present — skipping input collection"
@@ -161,21 +173,36 @@ collect_inputs() {
 }
 gen_root_env() {
   if [[ -f "$ROOT_ENV" && "$FORCE" != true ]]; then
+    if ! grep -q '^ADMIN_BOOTSTRAP_TOKEN=' "$ROOT_ENV"; then
+      ADMIN_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
+      echo "ADMIN_BOOTSTRAP_TOKEN=$ADMIN_BOOTSTRAP_TOKEN" >> "$ROOT_ENV"
+      log "Added missing ADMIN_BOOTSTRAP_TOKEN to $ROOT_ENV"
+    fi
+    if ! grep -q '^DATA_ENCRYPTION_KEY=' "$ROOT_ENV"; then
+      echo "DATA_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
+      log "Added missing DATA_ENCRYPTION_KEY to $ROOT_ENV"
+    fi
+    chmod 600 "$ROOT_ENV"
     log "$ROOT_ENV exists — skipping"
     return
   fi
   backup_if_exists "$ROOT_ENV"
-  local secret_key quota
+  local secret_key data_encryption_key quota
   secret_key="$(openssl rand -hex 32)"
+  data_encryption_key="$(openssl rand -hex 32)"
+  ADMIN_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
   quota="$(grep -E '^EVENT_QUOTA=' "$REPO_ROOT/.env.example" | head -n1 | cut -d= -f2-)"
   {
     echo "SECRET_KEY=$secret_key"
+    echo "ADMIN_BOOTSTRAP_TOKEN=$ADMIN_BOOTSTRAP_TOKEN"
+    echo "DATA_ENCRYPTION_KEY=$data_encryption_key"
     echo "DATABASE_URL=sqlite:///data/ctf.db"
     echo "EVENT_QUOTA=$quota"
     [[ -n "$VULTR_API_KEY" ]]        && echo "VULTR_API_KEY=$VULTR_API_KEY"
     [[ -n "$CLOUDFLARE_API_TOKEN" ]] && echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
     [[ -n "$CLOUDFLARE_DOMAIN" ]]    && echo "CLOUDFLARE_DOMAIN=$CLOUDFLARE_DOMAIN"
   } > "$ROOT_ENV"
+  chmod 600 "$ROOT_ENV"
   log "Wrote $ROOT_ENV"
 }
 gen_deploy_env() {
@@ -205,6 +232,7 @@ gen_deploy_env() {
     echo "SEMAPHORE_POSTGRES_PASSWORD=$pgpw"
     [[ -n "$VULTR_API_KEY" ]] && echo "VULTR_API_KEY=$VULTR_API_KEY"
   } > "$DEPLOY_ENV"
+  chmod 600 "$DEPLOY_ENV"
   log "Wrote $DEPLOY_ENV"
 }
 gen_caldera_config() {
@@ -235,6 +263,7 @@ gen_caldera_config() {
         }' "$CALDERA_CFG" > "$CALDERA_CFG.tmp" && mv "$CALDERA_CFG.tmp" "$CALDERA_CFG"
     done
   done
+  chmod 600 "$CALDERA_CFG"
   log "Wrote $CALDERA_CFG"
 }
 launch_stack() {
@@ -271,11 +300,17 @@ EOF
  Existing deploy/.env was reused — see that file for credentials.
 EOF
   fi
+  if [[ -n "$ADMIN_BOOTSTRAP_TOKEN" ]]; then
+    cat <<EOF
+
+ Initial administrator token (also stored in .env):
+   $ADMIN_BOOTSTRAP_TOKEN
+EOF
+  fi
   cat <<EOF
 
  Next steps (manual):
    - Create the DNS A-records listed above.
-   - Optional: build the per-user CTF base image (see README).
    - Optional: export the Caldera plugin from the CTF admin UI.
 ============================================================
 EOF
@@ -289,6 +324,7 @@ main() {
   gen_root_env
   gen_deploy_env
   gen_caldera_config
+  chmod 600 "$ROOT_ENV" "$DEPLOY_ENV" "$CALDERA_CFG"
   launch_stack
   print_summary
 }

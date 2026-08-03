@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: bash -n quickstart.sh
+
+      - name: Build test image
+        run: docker build --target test --tag ctf-it-test .
+
+      - name: Run test suite
+        env:
+          SECRET_KEY: ci-only-secret-key
+          DATA_ENCRYPTION_KEY: ci-only-data-key
+          DATABASE_URL: sqlite://
+          COOKIE_SECURE: "false"
+        run: docker run --rm --env SECRET_KEY --env DATA_ENCRYPTION_KEY --env DATABASE_URL --env COOKIE_SECURE ctf-it-test
+
+      - name: Validate production Compose
+        run: |
+          cp .env.example .env
+          cp deploy/.env.example deploy/.env
+          cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
+          docker compose --file deploy/docker-compose.yml config --quiet

@@ -1,6 +1,7 @@
 """Tests for vm_goals API: GET /admin/vms/{vm_id}/goals and
 POST /admin/vms/{vm_id}/goals/{goal_id}/check."""
 
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from api.database import Base, get_db
 from api.models import Event, Team, VM, VMGoal, User, VMModule, PlatformSettings
 from api.main import app
+from api.routes.vm_goals import _run_remote_verification
 
 
 # ── Shared in-memory SQLite (StaticPool keeps one connection) ─────────────────
@@ -344,4 +346,42 @@ def test_check_goal_reexploit_from_defended(client, seeded_data):
     updated = db.query(VMGoal).filter(VMGoal.id == goal_id).first()
     assert updated.status == "achieved"
     assert updated.achievement_count == 2
+    db.close()
+
+
+@pytest.mark.parametrize(
+    ("verification", "exit_status", "expected"),
+    [
+        ({"type": "service_running", "service": "sysmon-helper", "expected": "active"}, 0, True),
+        ({"type": "service_running", "service": "sysmon-helper", "expected": "inactive"}, 3, True),
+        ({"type": "file_exists", "path": "/tmp/.exfil_shadow"}, 0, True),
+        ({"type": "file_absent", "path": "/tmp/.exfil_shadow"}, 1, True),
+        ({"type": "file_exists", "path": "/tmp/.exfil_shadow"}, 1, False),
+    ],
+)
+def test_ssh_verification_types(seeded_data, verification, exit_status, expected):
+    vm = seeded_data["vm"]
+    db = _Session()
+    with patch(
+        "api.routes.vm_goals._run_ssh_command",
+        new=AsyncMock(return_value=exit_status),
+    ):
+        passed, error = asyncio.run(_run_remote_verification(verification, vm, db))
+    db.close()
+    assert error is None
+    assert passed is expected
+
+
+def test_ssh_verification_rejects_unsafe_or_incomplete_specs(seeded_data):
+    vm = seeded_data["vm"]
+    db = _Session()
+    cases = [
+        {"type": "file_exists", "path": "relative/path"},
+        {"type": "service_running", "service": ""},
+        {"type": "service_running", "service": "sshd", "expected": "maybe"},
+    ]
+    for verification in cases:
+        passed, error = asyncio.run(_run_remote_verification(verification, vm, db))
+        assert passed is False
+        assert error
     db.close()
