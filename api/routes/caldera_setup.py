@@ -90,6 +90,20 @@ async def _wait_for_caldera(api_key: str, timeout: int = CALDERA_STARTUP_TIMEOUT
     raise TimeoutError(f"Caldera did not become healthy within {timeout}s")
 
 
+async def _wait_for_event_agent(caldera: CalderaClient, event_id: int, timeout: int = 90) -> bool:
+    """Wait for an event-scoped agent to reconnect after Caldera restarts."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    group = f"event-{event_id}"
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            if any(agent.get("group") == group for agent in await caldera.list_agents()):
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+    return False
+
+
 @router.post("/caldera-setup")
 async def caldera_setup(request: Request, db: Session = Depends(get_db)):
     """
@@ -208,12 +222,15 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             operation_error = None
             try:
                 op_group = f"event-{_event_id}" if _event_id else "red"
-                operation_result = await caldera.create_operation(
-                    name="CTF Red Team Emulation",
-                    adversary_id=ctf_adversary["adversary_id"],
-                    planner_id=planner_id,
-                    group=op_group,
-                )
+                if _event_id and not await _wait_for_event_agent(caldera, _event_id):
+                    operation_error = f"No Caldera agent reconnected to {op_group} after restart"
+                else:
+                    operation_result = await caldera.create_operation(
+                        name="CTF Red Team Emulation",
+                        adversary_id=ctf_adversary["adversary_id"],
+                        planner_id=planner_id,
+                        group=op_group,
+                    )
             except Exception as e:
                 operation_error = str(e)
 

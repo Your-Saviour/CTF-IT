@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db, init_db
 from api.models import Event, User, VM
-from api.routes import admin, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, vm, vm_goals
+from api.routes import admin, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, vm, vm_goals
 from api.routes.auth import get_current_user
 
 
@@ -177,6 +177,7 @@ app.include_router(caldera_export.router)
 app.include_router(caldera_setup.router)
 app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
+app.include_router(event_dashboard.router)
 app.include_router(vm.router)
 app.include_router(vm_goals.router)
 
@@ -318,5 +319,18 @@ async def event_plan_page(event_id: int, request: Request, db: Session = Depends
     if not event:
         return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse(request, "event_plan.html", {
+        "user": user, "event_id": event_id, "event_name": event.name
+    })
+
+
+@app.get("/admin/events/{event_id}/dashboard", response_class=HTMLResponse)
+async def event_dashboard_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_dashboard.html", {
         "user": user, "event_id": event_id, "event_name": event.name
     })

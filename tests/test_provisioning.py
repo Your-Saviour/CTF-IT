@@ -137,6 +137,35 @@ def test_caldera_operation_detail_merges_metadata_from_collection_response():
     }
 
 
+def test_caldera_operations_auto_close_when_the_campaign_finishes():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "op-1", "state": "running"}
+
+    class Client:
+        def __init__(self):
+            self.payload = None
+
+        async def post(self, _url, json):
+            self.payload = json
+            return Response()
+
+    async def check():
+        caldera = CalderaClient(api_key="test")
+        original_client = caldera._client
+        fake_client = Client()
+        caldera._client = fake_client
+        await original_client.aclose()
+        await caldera.create_operation("Campaign", "adversary", "planner", "event-1")
+        return fake_client.payload
+
+    payload = asyncio.run(check())
+    assert payload["auto_close"] is True
+
+
 def _seed_vm(db, status="registered", with_module=True):
     event = Event(name="Provisioning", quota="{}", status="open")
     db.add(event)

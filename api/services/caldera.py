@@ -89,7 +89,7 @@ class CalderaClient:
         planner_id: str,
         group: str,
         source_id: str = _DEFAULT_SOURCE_ID,
-        auto_close: bool = False,
+        auto_close: bool = True,
     ) -> dict:
         payload = {
             "name": name,

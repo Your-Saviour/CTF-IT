@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Command Centre — {{ event_name }}{% endblock %}
+
+{% block extra_style %}
+.container { max-width: 1450px; }
+.dash-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:1.25rem; }
+.dash-header h1 { margin:0; }
+.eyebrow { color:var(--cyan); font-size:.68rem; letter-spacing:.16em; text-transform:uppercase; }
+.header-meta { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
+.back-link,.drill-link { color:var(--text-secondary); text-decoration:none; }
+.back-link:hover,.drill-link:hover { color:var(--cyan); }
+.pill { display:inline-flex; align-items:center; gap:.4rem; padding:.32rem .65rem; border:1px solid var(--border); border-radius:999px; background:var(--bg-surface); font-size:.72rem; text-transform:uppercase; }
+.pill.open,.health-healthy { color:var(--green); }
+.pill.draft,.pill.stopped,.health-pending { color:var(--text-secondary); }
+.pill.closed,.health-failed { color:var(--red); }
+.health-degraded { color:var(--amber); }
+#refresh-state.stale { color:var(--amber); border-color:var(--amber-dim); }
+.summary-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.8rem; margin-bottom:1.25rem; }
+.summary-card { background:var(--bg-surface); border:1px solid var(--border); padding:1rem; border-radius:6px; min-width:0; }
+.summary-label { color:var(--text-muted); font-size:.67rem; text-transform:uppercase; letter-spacing:.08em; }
+.summary-value { font-family:'Rajdhani',sans-serif; font-size:1.8rem; font-weight:700; line-height:1.2; margin-top:.3rem; }
+.summary-detail { color:var(--text-secondary); font-size:.7rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.score-red { color:var(--red); } .score-blue { color:var(--cyan); }
+.section-grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr); gap:1.25rem; }
+.section-title { display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-bottom:1rem; }
+.section-title h2 { margin:0; font-size:1.05rem; }
+.table-wrap { overflow-x:auto; }
+.compact-table { font-size:.78rem; }
+.compact-table th,.compact-table td { padding:.65rem .55rem; }
+.progress-track { height:7px; min-width:90px; background:var(--bg-deep); border-radius:99px; overflow:hidden; margin-top:.3rem; }
+.progress-fill { height:100%; background:linear-gradient(90deg,var(--cyan),var(--green)); }
+.alert-list { display:grid; gap:.6rem; }
+.alert { border:1px solid var(--border); border-left:3px solid var(--amber); background:rgba(255,179,0,.06); padding:.7rem .8rem; font-size:.76rem; }
+.alert.critical { border-left-color:var(--red); background:rgba(255,23,68,.06); }
+.alert strong { display:block; color:var(--text-primary); }
+.alert-detail { color:var(--text-muted); margin-top:.18rem; word-break:break-word; }
+.all-clear { color:var(--green); border:1px solid rgba(0,230,118,.25); background:rgba(0,230,118,.05); padding:.8rem; }
+.vm-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; }
+.vm-card { display:block; color:inherit; text-decoration:none; background:var(--bg-deep); border:1px solid var(--border); border-top:3px solid var(--text-muted); border-radius:5px; padding:.8rem; }
+.vm-card:hover { border-color:var(--cyan); }
+.vm-card.healthy { border-top-color:var(--green); } .vm-card.degraded { border-top-color:var(--amber); } .vm-card.failed { border-top-color:var(--red); }
+.vm-head { display:flex; justify-content:space-between; gap:.5rem; }
+.vm-name { font-weight:700; overflow:hidden; text-overflow:ellipsis; }
+.vm-meta { color:var(--text-muted); font-size:.68rem; margin-top:.3rem; }
+.activity-list { list-style:none; display:grid; gap:.15rem; }
+.activity-item { display:grid; grid-template-columns:72px 1fr; gap:.65rem; border-bottom:1px solid var(--border); padding:.55rem 0; font-size:.74rem; }
+.activity-time { color:var(--text-muted); }
+.empty { color:var(--text-muted); text-align:center; padding:1.2rem; }
+@media (max-width:1100px) { .summary-grid { grid-template-columns:repeat(3,1fr); } .section-grid { grid-template-columns:1fr; } }
+@media (max-width:760px) { .summary-grid { grid-template-columns:repeat(2,1fr); } .vm-grid { grid-template-columns:1fr; } .dash-header { display:block; } .header-meta { margin-top:.8rem; } }
+{% endblock %}
+
+{% block content %}
+<div class="dash-header">
+    <div>
+        <div class="eyebrow">Live event command centre</div>
+        <h1 id="event-name">{{ event_name }}</h1>
+        <a class="back-link" href="/admin">← Back to administration</a>
+    </div>
+    <div class="header-meta">
+        <span class="pill" id="event-status">Loading</span>
+        <span class="pill" id="countdown">--:--:--</span>
+        <span class="pill" id="refresh-state">Connecting…</span>
+    </div>
+</div>
+
+<div class="summary-grid" id="summary-grid"></div>
+
+<div class="section-grid">
+    <div>
+        <section class="card">
+            <div class="section-title"><h2>Team leaderboard</h2><span class="summary-detail">Sorted by blue total</span></div>
+            <div class="table-wrap"><table class="compact-table"><thead><tr><th>#</th><th>Team</th><th>Completion</th><th>Defensive</th><th>Reactive</th><th>Blue total</th><th>Red</th></tr></thead><tbody id="teams-body"></tbody></table></div>
+        </section>
+        <section class="card">
+            <div class="section-title"><h2>VM health</h2><span class="summary-detail" id="vm-health-summary"></span></div>
+            <div class="vm-grid" id="vm-grid"></div>
+        </section>
+    </div>
+    <div>
+        <section class="card">
+            <div class="section-title"><h2>Operational alerts</h2><span class="summary-detail" id="alert-count"></span></div>
+            <div class="alert-list" id="alerts"></div>
+        </section>
+        <section class="card">
+            <div class="section-title"><h2>Recent activity</h2></div>
+            <ul class="activity-list" id="activity"></ul>
+        </section>
+    </div>
+</div>
+
+<section class="card">
+    <div class="section-title"><h2>Module bottlenecks</h2><span class="summary-detail">Lowest completion first · preapplied only</span></div>
+    <div class="table-wrap"><table class="compact-table"><thead><tr><th>Module</th><th>Completed</th><th>Rate</th></tr></thead><tbody id="modules-body"></tbody></table></div>
+</section>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+(function () {
+    'use strict';
+    var EVENT_ID = {{ event_id }};
+    var currentData = null;
+    var polling = false;
+    var lastSuccess = null;
+    var pollTimer = null;
+
+    function esc(value) {
+        var div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+    function number(value) { return Number(value || 0).toLocaleString(); }
+    function percent(value) { return Number(value || 0).toFixed(Number(value || 0) % 1 ? 1 : 0) + '%'; }
+    function emptyRow(cols, text) { return '<tr><td colspan="' + cols + '" class="empty">' + esc(text) + '</td></tr>'; }
+    function progress(value) { return '<div class="progress-track"><div class="progress-fill" style="width:' + Math.max(0, Math.min(100, Number(value || 0))) + '%"></div></div>'; }
+
+    function renderSummary(s) {
+        var cards = [
+            ['Participants', s.participants, s.teams + ' teams'],
+            ['Virtual machines', s.vms, 'event infrastructure'],
+            ['Module completion', percent(s.completion_percentage), s.completed_modules + ' / ' + s.assigned_modules + ' assigned'],
+            ['Blue defensive', number(s.blue_defensive), 'preapplied modules', 'score-blue'],
+            ['Blue reactive', number(s.blue_reactive), 'goal defences', 'score-blue'],
+            ['Red offensive', number(s.red_offensive), 'goal achievements', 'score-red']
+        ];
+        document.getElementById('summary-grid').innerHTML = cards.map(function(c) {
+            return '<div class="summary-card"><div class="summary-label">' + esc(c[0]) + '</div><div class="summary-value ' + (c[3] || '') + '">' + esc(c[1]) + '</div><div class="summary-detail">' + esc(c[2]) + '</div></div>';
+        }).join('');
+    }
+
+    function renderTeams(teams) {
+        document.getElementById('teams-body').innerHTML = teams.length ? teams.map(function(t, index) {
+            return '<tr><td>' + (index + 1) + '</td><td><strong>' + esc(t.team_name) + '</strong><div class="summary-detail">' + t.vm_count + ' VMs</div></td>' +
+                '<td>' + percent(t.completion_percentage) + progress(t.completion_percentage) + '</td><td>' + number(t.blue_defensive) + '</td><td>' + number(t.blue_reactive) + '</td><td class="score-blue"><strong>' + number(t.blue_total) + '</strong></td><td class="score-red">' + number(t.red_offensive) + '</td></tr>';
+        }).join('') : emptyRow(7, 'No teams in this event');
+    }
+
+    function renderAlerts(alerts) {
+        document.getElementById('alert-count').textContent = alerts.length ? alerts.length + ' active' : '';
+        document.getElementById('alerts').innerHTML = alerts.length ? alerts.map(function(a) {
+            var link = a.vm_id ? '<a class="drill-link" href="/admin/vm/' + encodeURIComponent(a.vm_id) + '">Open VM →</a>' : '';
+            return '<div class="alert ' + esc(a.severity) + '"><strong>' + esc(a.message) + '</strong>' +
+                (a.team_name ? '<div class="alert-detail">' + esc(a.team_name) + '</div>' : '') +
+                (a.detail ? '<div class="alert-detail">' + esc(a.detail) + '</div>' : '') + link + '</div>';
+        }).join('') : '<div class="all-clear">All systems nominal.</div>';
+    }
+
+    function renderVMs(vms) {
+        var counts = {healthy:0,degraded:0,failed:0,pending:0};
+        vms.forEach(function(vm) { counts[vm.health] = (counts[vm.health] || 0) + 1; });
+        document.getElementById('vm-health-summary').textContent = counts.healthy + ' healthy · ' + counts.degraded + ' degraded · ' + counts.failed + ' failed · ' + counts.pending + ' pending';
+        document.getElementById('vm-grid').innerHTML = vms.length ? vms.map(function(vm) {
+            var agent = vm.caldera_agent;
+            var agentText = !agent.available ? 'agent: unknown' : agent.alive ? 'agent: alive' : agent.present ? 'agent: not alive' : 'agent: missing';
+            return '<a class="vm-card ' + esc(vm.health) + '" href="/admin/vm/' + encodeURIComponent(vm.id) + '"><div class="vm-head"><span class="vm-name">' + esc(vm.hostname || 'VM ' + vm.id) + '</span><span class="health-' + esc(vm.health) + '">' + esc(vm.health.toUpperCase()) + '</span></div>' +
+                '<div class="vm-meta">' + esc(vm.team_name) + ' · ' + esc(vm.ip_address || 'no IP') + '</div><div class="vm-meta">' + esc(vm.status || 'registered') + (vm.provision_step ? ' / ' + esc(vm.provision_step) : '') + ' · ' + esc(agentText) + '</div>' +
+                '<div class="vm-meta">Modules ' + vm.module_progress.completed + '/' + vm.module_progress.assigned + ' (' + percent(vm.module_progress.percentage) + ')</div>' + progress(vm.module_progress.percentage) + '</a>';
+        }).join('') : '<div class="empty">No VMs in this event</div>';
+    }
+
+    function renderModules(modules) {
+        document.getElementById('modules-body').innerHTML = modules.length ? modules.map(function(m) {
+            return '<tr><td><strong>' + esc(m.module_name) + '</strong><div class="summary-detail">' + esc(m.module_id) + '</div></td><td>' + m.completed + ' / ' + m.assigned + '</td><td>' + percent(m.completion_percentage) + progress(m.completion_percentage) + '</td></tr>';
+        }).join('') : emptyRow(3, 'No preapplied modules assigned');
+    }
+
+    function renderActivity(items) {
+        var labels = {module_completed:'completed', goal_achieved:'achieved', goal_defended:'defended'};
+        document.getElementById('activity').innerHTML = items.length ? items.map(function(item) {
+            var time = new Date(item.timestamp);
+            return '<li class="activity-item"><span class="activity-time">' + esc(time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})) + '</span><span><strong>' + esc(item.team_name) + '</strong> ' + esc(labels[item.type] || item.type) + ' <span class="score-blue">' + esc(item.module_name) + '</span> on ' + esc(item.hostname || 'VM ' + item.vm_id) + '</span></li>';
+        }).join('') : '<li class="empty">No recent activity</li>';
+    }
+
+    function render(data) {
+        currentData = data;
+        document.getElementById('event-name').textContent = data.event.name;
+        var status = document.getElementById('event-status');
+        status.textContent = data.event.status;
+        status.className = 'pill ' + data.event.status;
+        renderSummary(data.summary); renderTeams(data.teams); renderAlerts(data.alerts);
+        renderVMs(data.vms); renderModules(data.modules); renderActivity(data.activity);
+        updateClock();
+    }
+
+    function updateClock() {
+        var countdown = document.getElementById('countdown');
+        if (!currentData || !currentData.event.ends_at) { countdown.textContent = 'No time limit'; }
+        else {
+            var seconds = Math.max(0, Math.floor((new Date(currentData.event.ends_at).getTime() - Date.now()) / 1000));
+            var h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+            countdown.textContent = [h,m,s].map(function(v){ return String(v).padStart(2,'0'); }).join(':');
+        }
+        if (lastSuccess) {
+            var age = Math.max(0, Math.floor((Date.now() - lastSuccess.getTime()) / 1000));
+            var el = document.getElementById('refresh-state');
+            if (el.classList.contains('stale')) el.textContent = 'Stale · ' + age + 's old';
+            else el.textContent = age < 2 ? 'Live · just now' : 'Live · ' + age + 's ago';
+        }
+    }
+
+    async function poll() {
+        if (polling) return;
+        polling = true;
+        try {
+            var response = await fetch('/admin/events/' + EVENT_ID + '/dashboard-data', {headers:{'Accept':'application/json'}});
+            if (!response.ok) throw new Error('Dashboard request failed (' + response.status + ')');
+            var data = await response.json();
+            lastSuccess = new Date(data.refreshed_at);
+            document.getElementById('refresh-state').classList.remove('stale');
+            render(data);
+        } catch (error) {
+            var state = document.getElementById('refresh-state');
+            state.classList.add('stale');
+            if (!lastSuccess) state.textContent = 'Unable to load';
+        } finally { polling = false; }
+    }
+
+    poll();
+    pollTimer = window.setInterval(poll, 10000);
+    window.setInterval(updateClock, 1000);
+    window.addEventListener('beforeunload', function(){ window.clearInterval(pollTimer); });
+})();
+</script>
+{% endblock %}

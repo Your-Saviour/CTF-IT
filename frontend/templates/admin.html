@@ -1440,6 +1440,7 @@ function loadEvents() {
             body.innerHTML = data.map(function(e) {
                 var actions = '<div class="event-actions">';
                 actions += '<button class="btn-outline" onclick="editEvent(' + e.id + ')">Edit</button>';
+                actions += '<a href="/admin/events/' + e.id + '/dashboard" class="btn-outline">Dashboard</a>';
                 actions += '<a href="/admin/events/' + e.id + '/plan" class="btn-outline">Plan</a>';
                 actions += '<button class="btn-outline" onclick="setupCaldera(' + e.id + ')"'
                     + (calderaSetupInProgress === e.id ? ' disabled' : '')
