@@ -263,6 +263,67 @@
     50% { opacity: 0.5; }
 }
 .service-link:hover { border-color: var(--cyan) !important; box-shadow: 0 0 8px rgba(0, 229, 255, 0.2); }
+
+/* Keep dense administration data usable on phones instead of letting tables
+   escape their cards and push controls off-screen. */
+.table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+.table-scroll > table { margin-bottom: 0; }
+
+@media (max-width: 640px) {
+    .card { padding: 1rem; }
+    .event-actions { flex-wrap: wrap; }
+
+    .responsive-table,
+    .responsive-table tbody,
+    .responsive-table tr,
+    .responsive-table td { display: block; width: 100%; }
+    .responsive-table thead { display: none; }
+    .responsive-table tbody tr {
+        padding: 0.75rem 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .responsive-table td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.3rem 0;
+        border: 0;
+        text-align: right;
+    }
+    .responsive-table td::before {
+        content: attr(data-label);
+        flex: 0 0 auto;
+        color: var(--text-secondary);
+        font-family: 'Rajdhani', sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-align: left;
+        text-transform: uppercase;
+    }
+    .responsive-table td:first-child {
+        display: block;
+        padding-bottom: 0.55rem;
+        color: var(--text-primary);
+        font-size: 1rem;
+        text-align: left;
+    }
+    .responsive-table td:first-child::before { display: none; }
+    .responsive-table td:last-child { display: block; padding-top: 0.65rem; }
+    .responsive-table td:last-child::before { display: none; }
+    .responsive-table .event-actions { justify-content: flex-start; }
+
+    #event-form-panel form { padding: 1rem !important; }
+    .quota-grid .grid-header, .quota-grid .grid-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .quota-grid .grid-header > :first-child, .quota-grid .grid-row .type-label { grid-column: 1 / -1; }
+    .vm-type-header { display: none; }
+    .vm-type-row { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0.75rem; border: 1px solid var(--border); border-radius: 4px; }
+}
 {% endblock %}
 
 {% block content %}
@@ -345,7 +406,8 @@
         </form>
     </div>
 
-    <table>
+    <div class="table-scroll">
+    <table class="responsive-table">
         <thead>
             <tr>
                 <th>Name</th>
@@ -359,6 +421,7 @@
             <tr><td colspan="5" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+    </div>
 
     <!-- Provisioning Dashboard (shown during event VM provisioning) -->
     <div id="provision-dashboard">
@@ -393,18 +456,47 @@
 
 <!-- Users -->
 <div class="card">
-    <h3>Users</h3>
-    <table>
+    <div style="display:flex; justify-content:space-between; gap:1rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem;">
+        <h3 style="margin:0;">Users</h3>
+        <button class="btn btn-sm btn-primary" onclick="showInvitationForm()">+ Create invitation</button>
+    </div>
+    <div id="invitation-form" style="display:none; background:var(--bg-deep); border:1px solid var(--border); padding:1rem; margin-bottom:1rem; border-radius:4px;">
+        <div style="display:flex; gap:.75rem; align-items:flex-end; flex-wrap:wrap;">
+            <div class="form-group" style="margin:0; flex:1; min-width:160px;"><label for="invite-event">Event</label><select id="invite-event" style="width:100%;"></select></div>
+            <div class="form-group" style="margin:0; flex:1; min-width:160px;"><label for="invite-username">Intended username (optional)</label><input id="invite-username" maxlength="64"></div>
+            <div class="form-group" style="margin:0; min-width:160px;"><label for="invite-role">Role</label><select id="invite-role"><option value="participant">Participant</option><option value="administrator">Administrator</option></select></div>
+            <button class="btn btn-sm btn-primary" onclick="createInvitation()">Create link</button>
+            <button class="btn-outline" onclick="hideInvitationForm()">Cancel</button>
+        </div>
+    </div>
+    <div style="display:flex; gap:.75rem; flex-wrap:wrap; margin-bottom:1rem;">
+        <input id="user-search" aria-label="Search users" placeholder="Search username" oninput="scheduleUserLoad()" style="max-width:240px;">
+        <select id="user-role-filter" aria-label="Filter by role" onchange="loadUsers()"><option value="">All roles</option><option value="participant">Participants</option><option value="administrator">Administrators</option></select>
+        <select id="user-active-filter" aria-label="Filter by status" onchange="loadUsers()"><option value="">All statuses</option><option value="true">Active</option><option value="false">Inactive</option></select>
+    </div>
+    <div id="account-link-panel" style="display:none; background:var(--bg-deep); border:1px solid var(--cyan-dim); padding:1rem; margin-bottom:1rem; border-radius:4px;">
+        <label for="account-link" id="account-link-label">Secure link</label>
+        <div style="display:flex; gap:.5rem; margin-top:.4rem;"><input id="account-link" readonly style="flex:1;"><button class="btn btn-sm btn-primary" onclick="copyAccountLink()">Copy</button></div>
+        <div id="account-link-expiry" style="color:var(--text-secondary); font-size:.75rem; margin-top:.4rem;"></div>
+    </div>
+    <div class="table-scroll">
+    <table class="responsive-table">
         <thead>
             <tr>
                 <th>Username</th>
+                <th>Role</th>
                 <th>Event</th>
+                <th>Status</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody id="users-body">
             <tr><td colspan="5" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+    </div>
+    <h4 style="margin:1.5rem 0 .5rem; color:var(--text-secondary);">Recent access changes</h4>
+    <div id="user-audit" style="font-size:.8rem; color:var(--text-secondary);">Loading…</div>
 </div>
 
 <!-- Teams & VMs -->
@@ -532,7 +624,8 @@
 
     <!-- Teams sub-table -->
     <h4 style="color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">Teams</h4>
-    <table style="margin-bottom: 1.5rem;">
+    <div class="table-scroll">
+    <table class="responsive-table" style="margin-bottom: 1.5rem;">
         <thead>
             <tr>
                 <th>Name</th>
@@ -545,6 +638,7 @@
             <tr><td colspan="4" style="color: var(--text-secondary);">Loading...</td></tr>
         </tbody>
     </table>
+    </div>
 
     <!-- VMs table -->
     <h4 style="color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem;">VMs</h4>
@@ -1364,11 +1458,11 @@ function loadEvents() {
                 var created = e.created_at ? new Date(e.created_at).toLocaleDateString() : '—';
 
                 return '<tr>' +
-                    '<td><strong>' + esc(e.name) + '</strong></td>' +
-                    '<td><span class="status-badge ' + esc(e.status) + '">' + esc(e.status) + '</span></td>' +
-                    '<td>' + e.user_count + '</td>' +
-                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + created + '</td>' +
-                    '<td>' + actions + '</td>' +
+                    '<td data-label="Event"><strong>' + esc(e.name) + '</strong></td>' +
+                    '<td data-label="Status"><span class="status-badge ' + esc(e.status) + '">' + esc(e.status) + '</span></td>' +
+                    '<td data-label="Users">' + e.user_count + '</td>' +
+                    '<td data-label="Created" style="color: var(--text-secondary); font-size: 0.85rem;">' + created + '</td>' +
+                    '<td data-label="Actions">' + actions + '</td>' +
                 '</tr>';
             }).join('');
         });
@@ -1431,6 +1525,11 @@ function loadVultrData() {
         sel.innerHTML = data.plans.map(function(p) {
             return '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>';
         }).join('');
+        // Smallest plans are not compatible with every OS image. Prefer the
+        // lowest generally usable option rather than silently submitting 512MB.
+        if (Array.from(sel.options).some(function(option) { return option.value === 'vc2-1c-1gb'; })) {
+            sel.value = 'vc2-1c-1gb';
+        }
     }).catch(function() {
         document.getElementById('vf-vplan').innerHTML = '<option value="">Failed to load plans</option>';
     });
@@ -1497,10 +1596,10 @@ function loadTeams() {
             }
             body.innerHTML = data.map(function(t) {
                 return '<tr>' +
-                    '<td><strong>' + esc(t.name) + '</strong></td>' +
-                    '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(t.event_name || '—') + '</td>' +
-                    '<td>' + t.vm_count + '</td>' +
-                    '<td><button class="btn btn-sm btn-danger" onclick="deleteTeam(' + t.id + ')">Delete</button></td>' +
+                    '<td data-label="Team"><strong>' + esc(t.name) + '</strong></td>' +
+                    '<td data-label="Event" style="color: var(--text-secondary); font-size: 0.85rem;">' + esc(t.event_name || '—') + '</td>' +
+                    '<td data-label="VMs">' + t.vm_count + '</td>' +
+                    '<td data-label="Actions"><button class="btn btn-sm btn-danger" onclick="deleteTeam(' + t.id + ')">Delete</button></td>' +
                 '</tr>';
             }).join('');
         });
@@ -1613,21 +1712,126 @@ fetch('/admin/events')
         eventsForSelect = data;
         loadTeams();
         loadVMs();
+        loadUsers();
     });
 
-// ── Load Users ──
+// ── User & access management ──
 
-fetch('/admin/users')
-    .then(r => r.json())
-    .then(data => {
+var userLoadTimer;
+function scheduleUserLoad() {
+    clearTimeout(userLoadTimer);
+    userLoadTimer = setTimeout(loadUsers, 180);
+}
+
+function eventOptions(selected) {
+    return '<option value="">Unassigned</option>' + eventsForSelect.map(function(e) {
+        return '<option value="' + e.id + '"' + (e.id === selected ? ' selected' : '') + '>' + esc(e.name) + '</option>';
+    }).join('');
+}
+
+function loadUsers() {
+    var params = new URLSearchParams();
+    var q = document.getElementById('user-search').value.trim();
+    var role = document.getElementById('user-role-filter').value;
+    var active = document.getElementById('user-active-filter').value;
+    if (q) params.set('q', q);
+    if (role) params.set('role', role);
+    if (active) params.set('active', active);
+    fetch('/admin/users?' + params.toString()).then(function(r) { return r.json(); }).then(function(data) {
         var body = document.getElementById('users-body');
-        body.innerHTML = data.map(u =>
-            '<tr>' +
-                '<td>' + esc(u.username) + (u.is_admin ? ' <span style="color: var(--cyan); font-size: 0.75rem;">(admin)</span>' : '') + '</td>' +
-                '<td style="color: var(--text-secondary); font-size: 0.85rem;">' + (u.event_name ? esc(u.event_name) : '<span style="color: var(--text-muted);">—</span>') + '</td>' +
-            '</tr>'
-        ).join('');
+        if (!data.length) { body.innerHTML = '<tr><td colspan="5">No users match this filter.</td></tr>'; return; }
+        body.innerHTML = data.map(function(u) {
+            var disabled = u.id === {{ user.id }} ? ' disabled title="You cannot change your own role or status"' : '';
+            var roleSelect = '<select aria-label="Role for ' + esc(u.username) + '" onchange="updateUser(' + u.id + ', this.value, undefined)"' + disabled + '><option value="participant"' + (!u.is_admin ? ' selected' : '') + '>Participant</option><option value="administrator"' + (u.is_admin ? ' selected' : '') + '>Administrator</option></select>';
+            var eventSelect = '<select aria-label="Event for ' + esc(u.username) + '" onchange="updateUser(' + u.id + ', undefined, this.value)">' + eventOptions(u.event_id) + '</select>';
+            var activation = '<button class="btn-outline ' + (u.active ? 'danger' : 'success') + '" onclick="setActivation(' + u.id + ',' + (!u.active) + ')"' + disabled + '>' + (u.active ? 'Deactivate' : 'Reactivate') + '</button>';
+            return '<tr><td data-label="Username"><strong>' + esc(u.username) + '</strong></td>' +
+                '<td data-label="Role">' + roleSelect + '</td><td data-label="Event">' + eventSelect + '</td>' +
+                '<td data-label="Status"><span style="color:' + (u.active ? 'var(--green)' : 'var(--red)') + '">' + (u.active ? 'Active' : 'Inactive') + '</span></td>' +
+                '<td data-label="Actions" class="event-actions">' + activation + '<button class="btn-outline" onclick="createResetLink(' + u.id + ')">Reset link</button><button class="btn-outline" onclick="loadAudit(' + u.id + ')">History</button></td></tr>';
+        }).join('');
     });
+}
+
+function updateUser(id, role, eventId) {
+    var payload = {};
+    if (role !== undefined) payload.role = role;
+    if (eventId !== undefined) payload.event_id = eventId ? Number(eventId) : null;
+    fetch('/admin/users/' + id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+        .then(handleUserMutation);
+}
+
+function setActivation(id, active) {
+    fetch('/admin/users/' + id + '/activation', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:active})})
+        .then(handleUserMutation);
+}
+
+function handleUserMutation(r) {
+    if (r.ok) { showToast('User access updated'); loadUsers(); loadAudit(); }
+    else r.json().then(function(d) { showToast(d.error || 'Unable to update user', 3500); loadUsers(); });
+}
+
+function createInvitation() {
+    if (!eventsForSelect.length) { showToast('Create an event first'); return; }
+    var eventId = document.getElementById('invite-event').value;
+    var intended = document.getElementById('invite-username').value.trim();
+    var role = document.getElementById('invite-role').value;
+    fetch('/admin/invitations', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event_id:Number(eventId), intended_username:intended || null, role:role})})
+        .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error); return d; }); })
+        .then(function(d) { showAccountLink('Invitation link', d); hideInvitationForm(); loadAudit(); })
+        .catch(function(e) { showToast(e.message || 'Unable to create invitation', 3500); });
+}
+
+function showInvitationForm() {
+    if (!eventsForSelect.length) { showToast('Create an event first'); return; }
+    document.getElementById('invite-event').innerHTML = eventsForSelect.map(function(e) {
+        return '<option value="' + e.id + '">' + esc(e.name) + '</option>';
+    }).join('');
+    document.getElementById('invitation-form').style.display = 'block';
+}
+
+function hideInvitationForm() {
+    document.getElementById('invitation-form').style.display = 'none';
+    document.getElementById('invite-username').value = '';
+    document.getElementById('invite-role').value = 'participant';
+}
+
+function createResetLink(id) {
+    fetch('/admin/users/' + id + '/reset-link', {method:'POST'})
+        .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error); return d; }); })
+        .then(function(d) { showAccountLink('Password-reset link', d); loadAudit(id); })
+        .catch(function(e) { showToast(e.message || 'Unable to create reset link', 3500); });
+}
+
+function showAccountLink(label, data) {
+    document.getElementById('account-link-label').textContent = label;
+    document.getElementById('account-link').value = data.link;
+    document.getElementById('account-link-expiry').textContent = 'Expires ' + new Date(data.expires_at).toLocaleString();
+    document.getElementById('account-link-panel').style.display = 'block';
+}
+
+function copyAccountLink() {
+    var field = document.getElementById('account-link');
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(field.value).then(function() { showToast('Link copied'); });
+    } else {
+        field.select();
+        document.execCommand('copy');
+        showToast('Link copied');
+    }
+}
+
+function loadAudit(userId) {
+    fetch('/admin/audit?limit=12' + (userId ? '&user_id=' + userId : '')).then(function(r) { return r.json(); }).then(function(data) {
+        var el = document.getElementById('user-audit');
+        el.innerHTML = data.length ? data.map(function(a) {
+            return '<div style="padding:.35rem 0; border-bottom:1px solid var(--border);"><span style="color:var(--text-primary)">' + esc(a.actor) + '</span> ' + esc(a.action.replaceAll('_', ' ')) + (a.target ? ' for <span style="color:var(--cyan)">' + esc(a.target) + '</span>' : '') + ' · ' + new Date(a.created_at).toLocaleString() + '</div>';
+        }).join('') : 'No user-management changes recorded yet.';
+    });
+}
+
+loadUsers();
+loadAudit();
 
 // ── Load Modules (also populates quota form dropdowns) ──
 

@@ -421,6 +421,16 @@ function loadVM() {
             if (data.status === 'creating' && !createPollTimer) {
                 showCreateCard();
                 startCreatePoll();
+            } else if (data.status === 'failed' && data.vultr_plan) {
+                // Keep the cloud-creation result visible after polling stops.
+                // Previously loadVM() replaced the failed state with neutral steps.
+                showCreateCard();
+                renderCreateSteps(data.provision_step, data.status);
+                if (data.provision_error) {
+                    var createError = document.getElementById('create-error-box');
+                    createError.textContent = data.provision_error;
+                    createError.style.display = 'block';
+                }
             } else if (data.status === 'provisioning' && !provisionPollTimer) {
                 showProvisionCard();
                 startProvisionPoll();
@@ -745,15 +755,18 @@ function pollCreateStatus() {
 
 function renderCreateSteps(currentStep, vmStatus) {
     var container = document.getElementById('create-steps');
-    var isFailed = (vmStatus === 'failed' && currentStep === 'failed');
+    var isFailed = (vmStatus === 'failed');
     var currentIdx = -1;
     for (var i = 0; i < CREATE_STEPS.length; i++) {
         if (CREATE_STEPS[i].key === currentStep) { currentIdx = i; break; }
     }
+    // The backend records terminal failures as "failed".  Creation has already
+    // reached the API-call phase by then, so retain a meaningful failed step.
+    if (isFailed && currentIdx === -1) currentIdx = 2;
     container.innerHTML = CREATE_STEPS.map(function(step, idx) {
         var cls = 'provision-step';
         var icon = '○';
-        if (isFailed && idx <= currentIdx) {
+        if (isFailed && idx === currentIdx) {
             cls += ' failed'; icon = '✗';
         } else if (idx < currentIdx || currentStep === 'completed') {
             cls += ' done'; icon = '✓';

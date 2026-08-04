@@ -95,7 +95,7 @@ Services become available at (replace `example.com` with your `DOMAIN`):
 
 | Service | URL | Description |
 |---|---|---|
-| CTF dashboard | `https://ctf.example.com` | User registration, dashboard, scoreboard |
+| CTF dashboard | `https://ctf.example.com` | Invite-based onboarding, dashboard, scoreboard |
 | MITRE Caldera | `https://caldera.example.com` | Red team C2 server |
 | Ansible Semaphore | `https://semaphore.example.com` | Playbook execution UI |
 | Dockhand | `https://dockhand.example.com` | Container management UI |
@@ -103,18 +103,20 @@ Services become available at (replace `example.com` with your `DOMAIN`):
 
 ### Create the admin account
 
-Navigate to `https://ctf.example.com` and register using the generated `ADMIN_BOOTSTRAP_TOKEN`. The token is required for the first account, which becomes the administrator; later registrations cannot use it to gain privileges. Complete this bootstrap before sharing the public URL.
+Navigate to `https://ctf.example.com` and register using the generated `ADMIN_BOOTSTRAP_TOKEN`. The token is required for the first account, which becomes the administrator. After bootstrap, public registration is disabled: create event-bound invitation links from the Users panel and send them through your normal organizer communication channel.
+
+The Users panel is also where administrators assign events, promote or demote accounts, deactivate or reactivate access, and create one-hour password-reset links. Invitation links expire after seven days. Both link types are single-use, and access changes invalidate the affected user's active sessions.
 
 ## Events & Scoring
 
-Events are the central organising unit. Each event has its own module quota, leaderboard, and settings. Users register into exactly one event.
+Events are the central organising unit. Each event has its own module quota, leaderboard, and settings. Invitation links assign new participants to an event; administrators can reassign them later.
 
 ### Event lifecycle
 
 | Status | Meaning |
 |---|---|
 | `draft` | Invisible to users; safe to configure |
-| `open` | Accepts user registration |
+| `open` | Active for participants and scoring |
 | `stopped` | Archived; leaderboard frozen; verification blocked |
 
 Manage events from the admin panel: create → configure → start → stop.

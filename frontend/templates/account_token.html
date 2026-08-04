@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{% if mode == "invitation" %}Accept invitation{% else %}Reset password{% endif %} - CTF Platform{% endblock %}
+{% block extra_style %}
+.token-card { max-width: 430px; margin: 5rem auto; }
+.token-card .btn { width: 100%; }
+.token-note { color: var(--text-secondary); margin-bottom: 1.25rem; }
+{% endblock %}
+{% block content %}
+<div class="card token-card">
+    {% if mode == "invitation" %}
+    <h2>Accept invitation</h2>
+    {% else %}
+    <h2>Reset password</h2>
+    {% endif %}
+
+    {% if not valid or error == "invalid_or_expired" %}
+    <div class="flash">This link is invalid or has expired.</div>
+    <p class="token-note">Ask an administrator to create a new link.</p>
+    {% else %}
+        {% if error == "invalid_username" %}<div class="flash">Usernames must be between 3 and 64 characters.</div>{% endif %}
+        {% if error == "invalid_password" %}<div class="flash">Passwords must be between 12 and 72 UTF-8 bytes.</div>{% endif %}
+        {% if mode == "invitation" %}
+        <p class="token-note">Create your account for <strong>{{ event.name }}</strong>.</p>
+        <form method="POST" action="/auth/invitations/{{ token }}">
+            <div class="form-group"><label for="username">Username</label><input id="username" name="username" minlength="3" maxlength="64" value="{{ intended_username or '' }}" {% if intended_username %}readonly{% endif %} required autocomplete="username"></div>
+            <div class="form-group"><label for="password">Password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="new-password"></div>
+            <button class="btn btn-primary" type="submit">Create account</button>
+        </form>
+        {% else %}
+        <p class="token-note">Choose a new password. Using this link will sign out all existing sessions.</p>
+        <form method="POST" action="/auth/password-resets/{{ token }}">
+            <div class="form-group"><label for="password">New password</label><input id="password" name="password" type="password" minlength="12" required autocomplete="new-password"></div>
+            <button class="btn btn-primary" type="submit">Reset password</button>
+        </form>
+        {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

@@ -165,6 +165,24 @@
     </div>
     <div class="landing-form-panel">
         <div class="landing-card">
+            {% if user %}
+            <h2>Welcome, {{ user.username }}</h2>
+            {% if event %}
+            <div class="card" style="padding: 1.25rem; margin: 0;">
+                <div style="color: var(--text-secondary); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.4rem;">Your event</div>
+                <h3 style="color: var(--cyan); margin-bottom: 0.65rem;">{{ event.name }}</h3>
+                {% if event.welcome_message %}
+                <p style="margin-bottom: 0.75rem;">{{ event.welcome_message }}</p>
+                {% elif event.description %}
+                <p style="margin-bottom: 0.75rem; color: var(--text-secondary);">{{ event.description }}</p>
+                {% endif %}
+                <span class="status-badge {{ event.status }}">{{ event.status }}</span>
+            </div>
+            {% else %}
+            <p style="color: var(--text-secondary);">Your account is active. An administrator will assign you to an event.</p>
+            {% endif %}
+            <p class="toggle-text">Use the Logout control above when you are finished.</p>
+            {% else %}
             <h2 id="form-title">Login</h2>
             {% if error == "invalid_credentials" %}
                 <div class="flash">Invalid username or password.</div>
@@ -182,6 +200,10 @@
                 <div class="flash">Usernames must be between 3 and 64 characters.</div>
             {% elif error == "invalid_password" %}
                 <div class="flash">Passwords must be between 12 and 72 UTF-8 bytes.</div>
+            {% elif error == "invitation_required" %}
+                <div class="flash">Registration requires an invitation from an administrator.</div>
+            {% elif request.query_params.get("reset") == "success" %}
+                <div style="color: var(--green); margin-bottom: 1rem;">Password updated. You can now log in.</div>
             {% endif %}
             <form id="auth-form" method="POST" action="/auth/login">
                 <div class="form-group">
@@ -208,10 +230,13 @@
                 {% endif %}
                 <button type="submit" class="btn btn-primary" id="submit-btn">Login</button>
             </form>
-            <p class="toggle-text">
+            {% if bootstrap_required %}<p class="toggle-text">
                 <span id="toggle-text">Don't have an account?</span>
-                <a href="#" id="toggle-link" onclick="toggleMode(event)">Register</a>
-            </p>
+                <a href="#" id="toggle-link" onclick="toggleMode(event)">Create initial administrator</a>
+            </p>{% else %}
+            <p class="toggle-text">Need an account or password reset? Ask an administrator for a secure link.</p>
+            {% endif %}
+            {% endif %}
         </div>
     </div>
 </div>
@@ -220,6 +245,7 @@
 
 {% block extra_script %}
 <script>
+{% if not user %}
 let isLogin = true;
 var eventsData = [];
 
@@ -282,7 +308,7 @@ document.getElementById('event_id').addEventListener('change', function() {
     }
 });
 
-{% if error in ["username_taken", "invalid_event", "invalid_bootstrap_token", "bootstrap_not_configured", "invalid_username", "invalid_password"] %}toggleMode({preventDefault:function(){}});{% endif %}
+{% if bootstrap_required and error in ["username_taken", "invalid_event", "invalid_bootstrap_token", "bootstrap_not_configured", "invalid_username", "invalid_password"] %}toggleMode({preventDefault:function(){}});{% endif %}
 
 // Typing animation
 (function() {
@@ -304,5 +330,6 @@ document.getElementById('event_id').addEventListener('change', function() {
     }
     setTimeout(type, 600);
 })();
+{% endif %}
 </script>
 {% endblock %}

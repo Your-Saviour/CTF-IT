@@ -18,9 +18,47 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    session_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=True)
+    deactivated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    password_changed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=True)
 
     event: Mapped["Event"] = relationship(back_populates="users")
+
+
+class AccountToken(Base):
+    """A single-use invitation or password-reset token.
+
+    Only a SHA-256 digest is persisted. Raw tokens exist just long enough to be
+    returned to the administrator that created them.
+    """
+
+    __tablename__ = "account_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(24), nullable=False)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=True)
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    intended_username: Mapped[str] = mapped_column(String(64), nullable=True)
+    intended_is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+
+class AdminAudit(Base):
+    __tablename__ = "admin_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(48), nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 class Event(Base):

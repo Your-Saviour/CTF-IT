@@ -1114,7 +1114,7 @@ async def vultr_plans(request: Request, db: Session = Depends(get_db)):
                     "monthly_cost": p["monthly_cost"],
                     "label": (
                         f"{p['id']} — {p['vcpu_count']} vCPU, "
-                        f"{p['ram'] // 1024}GB RAM, {p['disk']}GB disk "
+                        f"{p['ram'] / 1024:g}GB RAM, {p['disk']}GB disk "
                         f"(${p['monthly_cost']}/mo)"
                     ),
                 }
@@ -1736,7 +1736,23 @@ def _run_vultr_create(vm_id: int) -> None:
         try:
             vm.status = "failed"
             vm.provision_step = "failed"
-            vm.provision_error = str(exc)
+            # Semaphore output can contain provider response headers and account
+            # metadata. Keep the admin UI actionable without reflecting that raw
+            # output back to the browser.
+            detail = str(exc)
+            minimum_memory = _re.search(
+                r"requires a plan with at least\s+(\d+)\s+MB memory", detail,
+                _re.IGNORECASE,
+            )
+            if minimum_memory:
+                vm.provision_error = (
+                    "Vultr rejected this OS and plan combination. Choose a plan with at least "
+                    f"{minimum_memory.group(1)} MB of memory and try again."
+                )
+            else:
+                vm.provision_error = (
+                    "Vultr rejected the instance request. Review the Semaphore task logs for details."
+                )
             vm.updated_at = _utcnow()
             db.commit()
         except Exception:

@@ -69,6 +69,18 @@ async def lifespan(app: FastAPI):
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE teams ADD COLUMN {col} {typ}"))
 
+        if inspector.has_table("users"):
+            existing = {col["name"] for col in inspector.get_columns("users")}
+            for col, typ in {
+                "active": "BOOLEAN NOT NULL DEFAULT 1",
+                "session_version": "INTEGER NOT NULL DEFAULT 1",
+                "updated_at": "DATETIME",
+                "deactivated_at": "DATETIME",
+                "password_changed_at": "DATETIME",
+            }.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE users ADD COLUMN {col} {typ}"))
+
         if inspector.has_table("vm_modules"):
             existing = {col["name"] for col in inspector.get_columns("vm_modules")}
             if "stage" not in existing:
@@ -171,7 +183,9 @@ app.include_router(vm_goals.router)
 
 @app.get("/api/events")
 async def list_open_events(db: Session = Depends(get_db)):
-    """Public endpoint: returns events open for registration."""
+    """Only expose an event for the one-time administrator bootstrap flow."""
+    if db.query(User).count() > 0:
+        return []
     from api.services.event_lifecycle import expire_due_events
     expire_due_events(db)
     events = (
@@ -198,8 +212,34 @@ async def landing(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse("/admin", status_code=303)
     error = request.query_params.get("error")
     return templates.TemplateResponse(request, "landing.html", {
+        "user": user,
+        "event": user.event if user else None,
         "error": error,
         "bootstrap_required": db.query(User).count() == 0,
+    })
+
+
+@app.get("/invite/{token}", response_class=HTMLResponse)
+async def invitation_page(token: str, request: Request, db: Session = Depends(get_db)):
+    from api.routes.auth import _valid_token
+    record = _valid_token(db, token, "invitation")
+    event = db.query(Event).filter(Event.id == record.event_id).first() if record else None
+    return templates.TemplateResponse(request, "account_token.html", {
+        "user": None, "mode": "invitation", "token": token,
+        "valid": record is not None, "event": event,
+        "intended_username": record.intended_username if record else None,
+        "error": request.query_params.get("error"),
+    })
+
+
+@app.get("/reset/{token}", response_class=HTMLResponse)
+async def password_reset_page(token: str, request: Request, db: Session = Depends(get_db)):
+    from api.routes.auth import _valid_token
+    return templates.TemplateResponse(request, "account_token.html", {
+        "user": None, "mode": "reset", "token": token,
+        "valid": _valid_token(db, token, "password_reset") is not None,
+        "event": None, "intended_username": None,
+        "error": request.query_params.get("error"),
     })
 
 

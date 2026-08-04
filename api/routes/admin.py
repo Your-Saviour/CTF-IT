@@ -1,8 +1,10 @@
 import asyncio
 import json
 import os
+import secrets
 from datetime import timedelta
 from typing import Optional
+from urllib.parse import urljoin
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -11,8 +13,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import Event, User
-from api.routes.auth import get_current_user
+from api.models import AccountToken, AdminAudit, Event, User, utcnow
+from api.routes.auth import _token_digest, get_current_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -22,6 +24,21 @@ class PlanPreviewRequest(BaseModel):
     vm_quota: Optional[dict] = None
 
 
+class UserUpdateRequest(BaseModel):
+    role: Optional[str] = None
+    event_id: Optional[int] = None
+
+
+class ActivationRequest(BaseModel):
+    active: bool
+
+
+class InvitationRequest(BaseModel):
+    event_id: int
+    intended_username: Optional[str] = None
+    role: str = "participant"
+
+
 def require_admin(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
@@ -29,22 +46,208 @@ def require_admin(request: Request, db: Session = Depends(get_db)):
     return user
 
 
+def _audit(db: Session, actor: User, action: str, target: User | None = None, **metadata):
+    db.add(AdminAudit(
+        actor_id=actor.id,
+        target_user_id=target.id if target else None,
+        action=action,
+        metadata_json=json.dumps(metadata, sort_keys=True) if metadata else None,
+    ))
+
+
+def _active_admin_count(db: Session) -> int:
+    return db.query(User).filter(User.is_admin.is_(True), User.active.is_(True)).count()
+
+
+def _user_payload(user: User, audit_summary=None):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_admin": user.is_admin,
+        "role": "administrator" if user.is_admin else "participant",
+        "active": user.active,
+        "event_id": user.event_id,
+        "event_name": user.event.name if user.event else None,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "deactivated_at": user.deactivated_at.isoformat() if user.deactivated_at else None,
+        "audit_summary": audit_summary,
+    }
+
+
 @router.get("/users")
-async def list_users(request: Request, db: Session = Depends(get_db)):
+async def list_users(
+    request: Request,
+    q: Optional[str] = None,
+    role: Optional[str] = None,
+    active: Optional[bool] = None,
+    event_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
-    users = db.query(User).all()
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "is_admin": u.is_admin,
-            "event_name": u.event.name if u.event else None,
-        }
-        for u in users
-    ]
+    query = db.query(User)
+    if q:
+        query = query.filter(User.username.ilike(f"%{q.strip()}%"))
+    if role == "administrator":
+        query = query.filter(User.is_admin.is_(True))
+    elif role == "participant":
+        query = query.filter(User.is_admin.is_(False))
+    if active is not None:
+        query = query.filter(User.active.is_(active))
+    if event_id is not None:
+        query = query.filter(User.event_id == event_id)
+    users = query.order_by(User.username).all()
+    result = []
+    for user in users:
+        latest = db.query(AdminAudit).filter(
+            AdminAudit.target_user_id == user.id
+        ).order_by(AdminAudit.created_at.desc()).first()
+        summary = ({
+            "action": latest.action,
+            "created_at": latest.created_at.isoformat(),
+        } if latest else None)
+        result.append(_user_payload(user, summary))
+    return result
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: int, body: UserUpdateRequest, request: Request, db: Session = Depends(get_db)
+):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        return JSONResponse({"error": "user not found"}, status_code=404)
+    if body.role not in {None, "participant", "administrator"}:
+        return JSONResponse({"error": "invalid role"}, status_code=422)
+    event_was_supplied = "event_id" in body.model_fields_set
+    if event_was_supplied and body.event_id is not None and not db.query(Event).filter(Event.id == body.event_id).first():
+        return JSONResponse({"error": "event not found"}, status_code=404)
+
+    new_admin = target.is_admin if body.role is None else body.role == "administrator"
+    if target.id == admin.id and target.is_admin and not new_admin:
+        return JSONResponse({"error": "administrators cannot demote themselves"}, status_code=409)
+    if target.is_admin and not new_admin and target.active and _active_admin_count(db) <= 1:
+        return JSONResponse({"error": "the final active administrator cannot be demoted"}, status_code=409)
+
+    old_role = "administrator" if target.is_admin else "participant"
+    old_event_id = target.event_id
+    new_event_id = body.event_id if event_was_supplied else target.event_id
+    changed = new_admin != target.is_admin or new_event_id != target.event_id
+    target.is_admin = new_admin
+    target.event_id = new_event_id
+    if changed:
+        target.session_version += 1
+        target.updated_at = utcnow()
+        _audit(
+            db, admin, "user_access_updated", target,
+            old_role=old_role, new_role=body.role or old_role,
+            old_event_id=old_event_id, new_event_id=new_event_id,
+        )
+        db.commit()
+    return _user_payload(target)
+
+
+@router.patch("/users/{user_id}/activation")
+async def set_user_activation(
+    user_id: int, body: ActivationRequest, request: Request, db: Session = Depends(get_db)
+):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        return JSONResponse({"error": "user not found"}, status_code=404)
+    if not body.active and target.id == admin.id:
+        return JSONResponse({"error": "administrators cannot deactivate themselves"}, status_code=409)
+    if not body.active and target.is_admin and target.active and _active_admin_count(db) <= 1:
+        return JSONResponse({"error": "the final active administrator cannot be deactivated"}, status_code=409)
+    if target.active != body.active:
+        target.active = body.active
+        target.deactivated_at = None if body.active else utcnow()
+        target.updated_at = utcnow()
+        target.session_version += 1
+        _audit(db, admin, "user_reactivated" if body.active else "user_deactivated", target)
+        db.commit()
+    return _user_payload(target)
+
+
+@router.post("/invitations")
+async def create_invitation(
+    body: InvitationRequest, request: Request, db: Session = Depends(get_db)
+):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == body.event_id).first()
+    if not event:
+        return JSONResponse({"error": "event not found"}, status_code=404)
+    if body.role not in {"participant", "administrator"}:
+        return JSONResponse({"error": "invalid role"}, status_code=422)
+    intended = body.intended_username.strip() if body.intended_username else None
+    if intended and not 3 <= len(intended) <= 64:
+        return JSONResponse({"error": "invalid intended username"}, status_code=422)
+    raw = secrets.token_urlsafe(32)
+    expires = utcnow() + timedelta(days=7)
+    db.add(AccountToken(
+        token_hash=_token_digest(raw), purpose="invitation", event_id=event.id,
+        created_by_id=admin.id, intended_username=intended,
+        intended_is_admin=body.role == "administrator", expires_at=expires,
+    ))
+    _audit(db, admin, "invitation_created", event_id=event.id, role=body.role,
+           intended_username=intended, expires_at=expires.isoformat())
+    db.commit()
+    link = urljoin(str(request.base_url), "invite/" + raw)
+    return {"link": link, "expires_at": expires.isoformat()}
+
+
+@router.post("/users/{user_id}/reset-link")
+async def create_reset_link(user_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        return JSONResponse({"error": "user not found"}, status_code=404)
+    raw = secrets.token_urlsafe(32)
+    expires = utcnow() + timedelta(hours=1)
+    db.add(AccountToken(
+        token_hash=_token_digest(raw), purpose="password_reset", event_id=target.event_id,
+        target_user_id=target.id,
+        created_by_id=admin.id, expires_at=expires,
+    ))
+    _audit(db, admin, "password_reset_created", target, expires_at=expires.isoformat())
+    db.commit()
+    return {"link": urljoin(str(request.base_url), "reset/" + raw), "expires_at": expires.isoformat()}
+
+
+@router.get("/audit")
+async def list_audit(
+    request: Request, user_id: Optional[int] = None, limit: int = 30,
+    db: Session = Depends(get_db),
+):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    query = db.query(AdminAudit)
+    if user_id is not None:
+        query = query.filter(AdminAudit.target_user_id == user_id)
+    entries = query.order_by(AdminAudit.created_at.desc()).limit(min(max(limit, 1), 100)).all()
+    user_ids = {i for entry in entries for i in (entry.actor_id, entry.target_user_id) if i}
+    usernames = {u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    return [{
+        "id": entry.id,
+        "actor": usernames.get(entry.actor_id, "system"),
+        "target": usernames.get(entry.target_user_id),
+        "action": entry.action,
+        "metadata": json.loads(entry.metadata_json) if entry.metadata_json else {},
+        "created_at": entry.created_at.isoformat(),
+    } for entry in entries]
 
 
 @router.get("/modules")
