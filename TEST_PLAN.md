@@ -18,7 +18,8 @@ The suite must cover:
 - module dependencies and conflicts reference known IDs;
 - quota validation and deterministic selection behavior;
 - attack-tree construction and Caldera score aggregation;
-- VM goal verification and pending/achieved/defended transitions.
+- VM goal verification and pending/achieved/defended transitions;
+- Caldera operation cleanup on event stop/delete and orphaned operation detection.
 
 CI builds and runs this same target. Production dependencies remain separate from test-only dependencies.
 
@@ -69,4 +70,5 @@ The smoke test must confirm:
 - Ansible deployment and Caldera agent check-in complete;
 - all three committed goals can transition to achieved and defended;
 - teardown deletes VMs, DNS records, and VPCs;
+- stopping/deleting an event cleans up associated Caldera operations;
 - a second quickstart run is idempotent.
