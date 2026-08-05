@@ -78,6 +78,11 @@ def _build_abilities(modules: list[Module]) -> list[dict]:
         # Recon ability
         recon = cal.get("recon", {})
         if recon.get("command"):
+            recon_payloads = recon.get("payloads", [])
+            prefixed_recon_payloads = [f"{m.id}__{p}" for p in recon_payloads]
+            command = recon["command"].strip()
+            for orig, prefixed in zip(recon_payloads, prefixed_recon_payloads):
+                command = command.replace(f"{{{{ payload.{orig} }}}}", f"{{{{ payload.{prefixed} }}}}")
             abilities.append({
                 "id": _ability_uuid(m.id, "recon"),
                 "module_id": m.id,
@@ -86,15 +91,20 @@ def _build_abilities(modules: list[Module]) -> list[dict]:
                 "tactic": tactic,
                 "technique_attack_id": technique["attack_id"],
                 "technique_name": technique["name"],
-                "command": recon["command"].strip(),
+                "command": command,
                 "cleanup": recon.get("cleanup", "").strip(),
-                "payloads": cal.get("payloads", []),
+                "payloads": prefixed_recon_payloads,
                 "phase": "recon",
             })
 
         # Exploit ability
         exploit = cal.get("exploit", {})
         if exploit.get("command"):
+            exploit_payloads = exploit.get("payloads", [])
+            prefixed_exploit_payloads = [f"{m.id}__{p}" for p in exploit_payloads]
+            command = exploit["command"].strip()
+            for orig, prefixed in zip(exploit_payloads, prefixed_exploit_payloads):
+                command = command.replace(f"{{{{ payload.{orig} }}}}", f"{{{{ payload.{prefixed} }}}}")
             abilities.append({
                 "id": _ability_uuid(m.id, "exploit"),
                 "module_id": m.id,
@@ -103,9 +113,9 @@ def _build_abilities(modules: list[Module]) -> list[dict]:
                 "tactic": tactic,
                 "technique_attack_id": technique["attack_id"],
                 "technique_name": technique["name"],
-                "command": exploit["command"].strip(),
+                "command": command,
                 "cleanup": exploit.get("cleanup", "").strip(),
-                "payloads": cal.get("payloads", []),
+                "payloads": prefixed_exploit_payloads,
                 "phase": "exploit",
             })
 
@@ -341,8 +351,11 @@ def generate_caldera_export_multi_path(
 
     # Copy payload files
     for m in modules:
-        if m.caldera and m.caldera.get("payloads"):
-            for payload in m.caldera["payloads"]:
+        if not m.caldera:
+            continue
+        for section in ["recon", "exploit"]:
+            section_data = m.caldera.get(section, {})
+            for payload in section_data.get("payloads", []):
                 src = m.source_dir / payload
                 if src.exists():
                     shutil.copy2(src, payloads_dir / f"{m.id}__{payload}")
@@ -398,8 +411,11 @@ def generate_caldera_export(quota: dict, export_id: str) -> Path:
 
     # Copy payload files if any modules reference them
     for m in selected:
-        if m.caldera and m.caldera.get("payloads"):
-            for payload in m.caldera["payloads"]:
+        if not m.caldera:
+            continue
+        for section in ["recon", "exploit"]:
+            section_data = m.caldera.get(section, {})
+            for payload in section_data.get("payloads", []):
                 src = m.source_dir / payload
                 if src.exists():
                     shutil.copy2(src, payloads_dir / f"{m.id}__{payload}")

