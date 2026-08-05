@@ -15,8 +15,8 @@
 {{ cleanup | indent(10, first=True) }}
 {%- endif %}
 {%- if payloads %}
-  payloads:
+        payloads:
 {%- for payload in payloads %}
-  - {{ payload }}
+        - {{ payload }}
 {%- endfor %}
 {%- endif %}
