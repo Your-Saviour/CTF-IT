@@ -2,39 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## UAT Environment
-
-A UAT instance is available for integration testing and validation.
-
-**SSH access:**
-- Host: `root@testubuntu.ye-et.com`
-- Key (ED25519):
-```
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACDW9sUTX2H+ESQdiPzjfdMksmF5XbHcMFP6PsDKeBwgqQAAAJhHUixcR1Is
-XAAAAAtzc2gtZWQyNTUxOQAAACDW9sUTX2H+ESQdiPzjfdMksmF5XbHcMFP6PsDKeBwgqQ
-AAAEAaPeqcrvt2xUcLz6jaljBgMO8syvRSsADmC/vBr5LXxtb2xRNfYf4RJB2I/ON90ySy
-YXldsdwwU/o+wMp4HCCpAAAAEXJvb3RAMGJhMzUzNmYxMDJiAQIDBA==
------END OPENSSH PRIVATE KEY-----
-```
-
-**Service URLs:**
-- CTF API: `https://ctf.ye-et.com`
-- Caldera: `http://139.84.204.242:8888` (direct, not reverse-proxied)
-- Caldera API key (red): `fe1544faa34fbd13c21a6fd20a265f1d7cf95a86ce6b3758af9508738de13aa3`
-
-**Admin account:**
-- Username: `e2e-admin`
-- Password: `TestAdmin123!`
-
-**Deployment:**
-- Code root: `/opt/ctf-it`
-- Docker compose: `/opt/ctf-it/deploy/docker-compose.yml`
-- API container: `ctf-api`
-- Caldera container: `ctf-caldera`
-- To redeploy API: `cd /opt/ctf-it/deploy && docker compose build api && docker compose up -d api`
-
 ## Project Overview
 
 CTF training platform for VM-based red team / blue team exercises. Admins create events, define teams, and provision Vultr VMs with randomized vulnerability and hardening modules via Ansible. The platform handles module selection, VM provisioning, Caldera red team emulation, goal tracking, and scoring.
