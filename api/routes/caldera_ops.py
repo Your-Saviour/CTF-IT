@@ -580,8 +580,7 @@ async def cleanup_orphaned_operations(request: Request, db: Session = Depends(ge
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
-    existing_event_ids = {e.id for e in db.query(Event.id).all()}
-    existing_event_ids = {row[0] for row in existing_event_ids}
+    existing_event_ids = {row[0] for row in db.query(Event.id).all()}
 
     orphaned = []
     deleted = 0
