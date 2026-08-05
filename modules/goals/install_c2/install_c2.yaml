@@ -19,7 +19,7 @@ caldera:
   exploit:
     description: "Install a persistent beacon via systemd service"
     command: |
-      sudo bash #{payload}
+      sudo bash ./install_c2.sh
     payloads:
       - install_c2.sh
 

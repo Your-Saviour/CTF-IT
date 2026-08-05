@@ -102,9 +102,13 @@ def _build_abilities(modules: list[Module]) -> list[dict]:
         if exploit.get("command"):
             exploit_payloads = exploit.get("payloads", [])
             prefixed_exploit_payloads = [f"{m.id}__{p}" for p in exploit_payloads]
+            exploit_uploads = exploit.get("uploads", [])
+            prefixed_exploit_uploads = [f"{m.id}__{u}" for u in exploit_uploads]
             command = exploit["command"].strip()
             for orig, prefixed in zip(exploit_payloads, prefixed_exploit_payloads):
                 command = command.replace(f"{{{{ payload.{orig} }}}}", f"{{{{ payload.{prefixed} }}}}")
+                command = command.replace(f"./{orig}", f"./{prefixed}")
+                command = command.replace(f" {orig}", f" {prefixed}")
             abilities.append({
                 "id": _ability_uuid(m.id, "exploit"),
                 "module_id": m.id,
@@ -116,6 +120,7 @@ def _build_abilities(modules: list[Module]) -> list[dict]:
                 "command": command,
                 "cleanup": exploit.get("cleanup", "").strip(),
                 "payloads": prefixed_exploit_payloads,
+                "uploads": prefixed_exploit_uploads,
                 "phase": "exploit",
             })
 
