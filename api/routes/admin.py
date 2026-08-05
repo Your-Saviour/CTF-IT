@@ -835,6 +835,27 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     }
 
 
+async def _cleanup_caldera_operations_for_event(event_id: int) -> dict:
+    """Delete all Caldera operations belonging to an event group. Returns summary."""
+    from api.services.caldera import CalderaClient
+    group = f"event-{event_id}"
+    deleted = 0
+    errors = []
+    try:
+        async with CalderaClient() as caldera:
+            operations = await caldera.list_operations()
+            for op in operations:
+                if op.get("group") == group:
+                    try:
+                        await caldera.delete_operation(op["id"])
+                        deleted += 1
+                    except Exception as e:
+                        errors.append(f"Failed to delete operation {op.get('id')}: {e}")
+    except Exception as e:
+        errors.append(f"Caldera unavailable: {e}")
+    return {"deleted": deleted, "errors": errors}
+
+
 @router.post("/events/{event_id}/stop")
 async def stop_event(event_id: int, request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
@@ -848,7 +869,13 @@ async def stop_event(event_id: int, request: Request, db: Session = Depends(get_
     event.status = "stopped"
     event.open = False
     db.commit()
-    return {"status": "stopped"}
+
+    caldera_cleanup = await _cleanup_caldera_operations_for_event(event_id)
+
+    return {
+        "status": "stopped",
+        "caldera_operations_cleaned": caldera_cleanup["deleted"],
+    }
 
 
 @router.get("/base-types")
@@ -888,6 +915,12 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
             status_code=409,
         )
 
+    caldera_cleanup = await _cleanup_caldera_operations_for_event(event_id)
+
     db.delete(event)
     db.commit()
-    return {"status": "deleted"}
+
+    return {
+        "status": "deleted",
+        "caldera_operations_cleaned": caldera_cleanup["deleted"],
+    }

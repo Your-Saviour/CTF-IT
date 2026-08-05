@@ -569,3 +569,53 @@ async def caldera_scoreboard(
         "teams": teams_result,
         "totals": totals,
     }
+
+
+# ── Orphaned Operations Cleanup ────────────────────────────────────────────────
+
+@router.post("/operations/cleanup-orphaned")
+async def cleanup_orphaned_operations(request: Request, db: Session = Depends(get_db)):
+    """Find and delete Caldera operations whose event no longer exists in the database."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    existing_event_ids = {e.id for e in db.query(Event.id).all()}
+    existing_event_ids = {row[0] for row in existing_event_ids}
+
+    orphaned = []
+    deleted = 0
+    errors = []
+
+    try:
+        async with _make_client() as caldera:
+            operations = await caldera.list_operations()
+            for op in operations:
+                group = op.get("group", "")
+                if not group.startswith("event-"):
+                    continue
+                try:
+                    event_id = int(group.split("-", 1)[1])
+                except (ValueError, IndexError):
+                    continue
+                if event_id not in existing_event_ids:
+                    orphaned.append({
+                        "id": op.get("id"),
+                        "name": op.get("name"),
+                        "group": group,
+                        "state": op.get("state"),
+                    })
+                    try:
+                        await caldera.delete_operation(op["id"])
+                        deleted += 1
+                    except Exception as e:
+                        errors.append(f"Failed to delete {op.get('id')}: {e}")
+    except Exception as e:
+        errors.append(f"Caldera unavailable: {e}")
+
+    return {
+        "orphaned_found": len(orphaned),
+        "deleted": deleted,
+        "orphaned_operations": orphaned,
+        "errors": errors,
+    }

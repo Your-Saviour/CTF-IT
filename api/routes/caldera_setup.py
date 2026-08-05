@@ -90,14 +90,28 @@ async def _wait_for_caldera(api_key: str, timeout: int = CALDERA_STARTUP_TIMEOUT
     raise TimeoutError(f"Caldera did not become healthy within {timeout}s")
 
 
-async def _wait_for_event_agent(caldera: CalderaClient, event_id: int, timeout: int = 90) -> bool:
-    """Wait for an event-scoped agent to reconnect after Caldera restarts."""
-    deadline = asyncio.get_event_loop().time() + timeout
+async def _wait_for_event_agent(caldera: CalderaClient, event_id: int, db: Session, timeout: int = 90) -> bool:
+    """Wait for an agent belonging to an active VM in this event to reconnect after Caldera restarts."""
+    active_vms = db.query(VM).filter(
+        VM.event_id == event_id,
+        VM.status == "active"
+    ).all()
+    if not active_vms:
+        return False
+    vm_ips = {vm.ip_address for vm in active_vms if vm.ip_address}
+    if not vm_ips:
+        return False
     group = f"event-{event_id}"
+    deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
         try:
-            if any(agent.get("group") == group for agent in await caldera.list_agents()):
-                return True
+            agents = await caldera.list_agents()
+            for agent in agents:
+                if agent.get("group") != group:
+                    continue
+                agent_ips = agent.get("host_ip_addrs", []) or []
+                if any(ip in vm_ips for ip in agent_ips):
+                    return True
         except Exception:
             pass
         await asyncio.sleep(5)
@@ -222,7 +236,7 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             operation_error = None
             try:
                 op_group = f"event-{_event_id}" if _event_id else "red"
-                if _event_id and not await _wait_for_event_agent(caldera, _event_id):
+                if _event_id and not await _wait_for_event_agent(caldera, _event_id, db):
                     operation_error = f"No Caldera agent reconnected to {op_group} after restart"
                 else:
                     operation_result = await caldera.create_operation(
