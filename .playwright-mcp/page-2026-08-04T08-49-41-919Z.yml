@@ -1,0 +1,22 @@
+- generic [ref=e1]:
+  - navigation [ref=e2]:
+    - link ">_ CTF Platform |" [ref=e3] [cursor=pointer]:
+      - /url: /
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: ">_ CTFPlatform"
+      - generic [ref=e8]: Your sandbox. Your rules.|
+    - generic [ref=e11]:
+      - heading "Login" [level=2] [ref=e30]
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: Username
+          - textbox "Username" [ref=e16]: ctf-it-admin
+        - generic [ref=e17]:
+          - generic [ref=e18]: Password
+          - textbox "Password" [ref=e19]: LumenCTF2026-Quartz-River
+        - button "Login" [ref=e31] [cursor=pointer]
+      - paragraph [ref=e21]:
+        - text: Don't have an account?
+        - link "Register" [active] [ref=e32] [cursor=pointer]:
+          - /url: "#"

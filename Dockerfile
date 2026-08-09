@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 
 COPY . .
 
+ENV PYTHONPATH=/app:/app/ai_agent:$PYTHONPATH
+
 CMD ["python", "-m", "pytest", "tests/"]
 
 FROM base AS runtime

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db, init_db
 from api.models import Event, User, VM
-from api.routes import admin, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, vm, vm_goals
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, vm, vm_goals
 from api.routes.auth import get_current_user
 
 
@@ -172,6 +172,7 @@ templates = Jinja2Templates(
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(ai_agent.router)
 app.include_router(ansible_export.router)
 app.include_router(caldera_export.router)
 app.include_router(caldera_setup.router)
@@ -334,3 +335,19 @@ async def event_dashboard_page(event_id: int, request: Request, db: Session = De
     return templates.TemplateResponse(request, "event_dashboard.html", {
         "user": user, "event_id": event_id, "event_name": event.name
     })
+
+
+@app.get("/admin/ai-agent", response_class=HTMLResponse)
+async def ai_agent_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "ai_agent.html", {"user": user})
+
+
+@app.get("/admin/ai-agent/session/{session_id}", response_class=HTMLResponse)
+async def ai_agent_session_page(session_id: str, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "ai_agent_session.html", {"user": user, "session_id": session_id})

@@ -1,0 +1,12 @@
+FROM python:3.12.13-slim-trixie@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf AS agent
+
+WORKDIR /app
+
+COPY requirements-agent.txt .
+RUN pip install --no-cache-dir -r requirements-agent.txt
+
+COPY ai_agent/ ./ai_agent/
+
+EXPOSE 8000
+
+CMD ["uvicorn", "ai_agent.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -90,7 +90,10 @@ async def list_users(
 
     query = db.query(User)
     if q:
-        query = query.filter(User.username.ilike(f"%{q.strip()}%"))
+        # Sanitize search query and limit length to prevent injection
+        sanitized = (q.strip() or "")[:64]
+        if sanitized:
+            query = query.filter(User.username.ilike(f"%{sanitized}%"))
     if role == "administrator":
         query = query.filter(User.is_admin.is_(True))
     elif role == "participant":
@@ -353,6 +356,7 @@ async def get_module_file(module_id: str, filename: str, request: Request, db: S
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     from pathlib import Path
+    import re
 
     modules_dir = Path(__file__).resolve().parent.parent.parent / "modules"
     yaml_matches = list(modules_dir.rglob(f"{module_id}.yaml"))
@@ -360,15 +364,21 @@ async def get_module_file(module_id: str, filename: str, request: Request, db: S
         return JSONResponse({"error": "module not found"}, status_code=404)
 
     source_dir = yaml_matches[0].parent
-    # Prevent path traversal — only allow files within the module's own directory
-    file_path = (source_dir / filename).resolve()
+    # Prevent path traversal and injection — validate filename format
+    # Allow only alphanumeric, underscore, hyphen, dot, and slash (for subdirectories)
+    filename_clean = re.sub(r'[^a-zA-Z0-9/_\-\.]', '', filename)
+    if filename_clean != filename:
+        return JSONResponse({"error": "invalid filename"}, status_code=422)
+
+    # Resolve and verify the file path is within source_dir
+    file_path = (source_dir / filename_clean).resolve()
     if not file_path.is_relative_to(source_dir.resolve()):
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     if not file_path.exists() or not file_path.is_file():
         return JSONResponse({"error": "file not found"}, status_code=404)
 
-    return {"filename": filename, "content": file_path.read_text(errors="replace")}
+    return {"filename": filename_clean, "content": file_path.read_text(errors="replace")}
 
 
 @router.get("/events")
@@ -687,17 +697,21 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                     "https://api.vultr.com/v2/plans?type=vc2&per_page=500",
                     headers={"Authorization": f"Bearer {vultr_key}"},
                 )
-            for p in resp.json().get("plans", []):
-                if p["id"].startswith("vc2-"):
-                    available_plans.append({
-                        "id": p["id"],
-                        "ram": p["ram"],
-                        "vcpu_count": p["vcpu_count"],
-                        "monthly_cost": p["monthly_cost"],
-                    })
-                    plan_costs[p["id"]] = p["monthly_cost"]
-        except Exception:
-            pass
+            try:
+                plans_data = resp.json()
+                for p in plans_data.get("plans", []):
+                    if p.get("id", "").startswith("vc2-"):
+                        available_plans.append({
+                            "id": p["id"],
+                            "ram": p["ram"],
+                            "vcpu_count": p["vcpu_count"],
+                            "monthly_cost": p["monthly_cost"],
+                        })
+                        plan_costs[p["id"]] = p["monthly_cost"]
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                _log.warning("Failed to parse Vultr plans response: %s", e)
+        except Exception as e:
+            _log.warning("Failed to fetch Vultr plans: %s", e)
 
     _TEAM_COLORS = [
         "#e040fb", "#00bcd4", "#69f0ae", "#ff6d00", "#2979ff",

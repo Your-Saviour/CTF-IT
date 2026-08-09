@@ -1,0 +1,94 @@
+- generic [active] [ref=f13e1]:
+  - navigation [ref=f13e2]:
+    - link ">_ CTF Platform |" [ref=f13e3] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f13e4]:
+      - link "Admin" [ref=f13e5] [cursor=pointer]:
+        - /url: /admin
+      - button "Logout" [ref=f13e7] [cursor=pointer]
+  - generic [ref=f13e8]:
+    - heading "Admin Panel" [level=1] [ref=f13e9]
+    - generic [ref=f13e10]:
+      - generic [ref=f13e11]:
+        - heading "Events" [level=3] [ref=f13e12]
+        - button "+ New Event" [ref=f13e13] [cursor=pointer]
+      - table [ref=f13e15]:
+        - rowgroup [ref=f13e16]:
+          - row [ref=f13e17]:
+            - columnheader "Name" [ref=f13e18]
+            - columnheader "Status" [ref=f13e19]
+            - columnheader "Users" [ref=f13e20]
+            - columnheader "Created" [ref=f13e21]
+            - columnheader "Actions" [ref=f13e22]
+        - rowgroup [ref=f13e23]:
+          - row [ref=f13e24]:
+            - cell "Loading..." [ref=f13e25]
+    - generic [ref=f13e26]:
+      - heading "Users" [level=3] [ref=f13e27]
+      - table [ref=f13e29]:
+        - rowgroup [ref=f13e30]:
+          - row [ref=f13e31]:
+            - columnheader "Username" [ref=f13e32]
+            - columnheader "Event" [ref=f13e33]
+        - rowgroup [ref=f13e34]:
+          - row [ref=f13e35]:
+            - cell "Loading..." [ref=f13e36]
+    - generic [ref=f13e37]:
+      - generic [ref=f13e38]:
+        - heading "Teams & VMs" [level=3] [ref=f13e39]
+        - generic [ref=f13e40]:
+          - link "⬡ Network Topology" [ref=f13e41] [cursor=pointer]:
+            - /url: /admin/topology
+          - button "+ New Team" [ref=f13e42] [cursor=pointer]
+          - button "+ Register VM" [ref=f13e43] [cursor=pointer]
+      - heading "Teams" [level=4] [ref=f13e44]
+      - table [ref=f13e46]:
+        - rowgroup [ref=f13e47]:
+          - row [ref=f13e48]:
+            - columnheader "Name" [ref=f13e49]
+            - columnheader "Event" [ref=f13e50]
+            - columnheader "VMs" [ref=f13e51]
+            - columnheader "Actions" [ref=f13e52]
+        - rowgroup [ref=f13e53]:
+          - row [ref=f13e54]:
+            - cell "Loading..." [ref=f13e55]
+      - heading "VMs" [level=4] [ref=f13e56]
+      - table [ref=f13e58]:
+        - rowgroup [ref=f13e67]:
+          - row [ref=f13e68]:
+            - columnheader "Hostname" [ref=f13e69]
+            - columnheader "IP" [ref=f13e70]
+            - columnheader "Team" [ref=f13e71]
+            - columnheader "Event" [ref=f13e72]
+            - columnheader "Status" [ref=f13e73]
+            - columnheader "Modules" [ref=f13e74]
+            - columnheader "Actions" [ref=f13e75]
+        - rowgroup [ref=f13e76]:
+          - row [ref=f13e77]:
+            - cell "Loading..." [ref=f13e78]
+    - generic [ref=f13e79]:
+      - heading "Module Library" [level=3] [ref=f13e80]
+      - generic [ref=f13e81]:
+        - textbox "Search by name, ID, description..." [ref=f13e82]
+        - combobox [ref=f13e83]:
+          - option "All Types" [selected]
+        - combobox [ref=f13e84]:
+          - option "All Difficulties" [selected]
+          - option "Easy"
+          - option "Medium"
+          - option "Hard"
+        - combobox [ref=f13e85]:
+          - option "All Categories" [selected]
+      - table [ref=f13e87]:
+        - rowgroup [ref=f13e96]:
+          - row [ref=f13e97]:
+            - columnheader "ID" [ref=f13e98]
+            - columnheader "Name" [ref=f13e99]
+            - columnheader "Type" [ref=f13e100]
+            - columnheader "Difficulty" [ref=f13e101]
+            - columnheader "Pts" [ref=f13e102]
+            - columnheader "Category" [ref=f13e103]
+            - columnheader "Tags" [ref=f13e104]
+        - rowgroup [ref=f13e105]:
+          - row [ref=f13e106]:
+            - cell "Loading..." [ref=f13e107]

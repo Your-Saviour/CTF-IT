@@ -20,3 +20,9 @@
         - {{ payload }}
 {%- endfor %}
 {%- endif %}
+{%- if uploads %}
+        uploads:
+{%- for upload in uploads %}
+        - {{ upload }}
+{%- endfor %}
+{%- endif %}

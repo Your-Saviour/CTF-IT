@@ -17,6 +17,9 @@ uvicorn api.main:app --reload
 
 # Run with Docker Compose (production)
 docker compose up -d
+
+# Run with AI agent enabled
+docker compose --profile ai-agent up -d
 ```
 
 ### Testing
@@ -40,6 +43,8 @@ See `.env.example` for full documentation. Key variables:
 - `SEMAPHORE_URL` / `SEMAPHORE_ADMIN` / `SEMAPHORE_ADMIN_PASSWORD` — Ansible Semaphore connection (internal service; defaults work with docker-compose stack)
 - `VULTR_API_KEY` / `VULTR_DEFAULT_REGION` — Vultr cloud provisioning (optional; enables VM create/destroy from admin UI)
 - `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_DOMAIN` — Cloudflare DNS (optional; auto-creates DNS A records for provisioned VMs)
+- `AGENT_API_KEY` — shared key for CTF API ↔ AI agent communication (required for agent service)
+- `AI_API_BASE` / `AI_API_KEY` / `AI_MODEL` — OpenAI-compatible API for AI agent (required for agent service)
 
 ## Architecture
 
@@ -49,12 +54,13 @@ Admin creates an event with a module quota and VM quota → admin creates teams 
 
 ### Key Components
 
-- **`api/`** — FastAPI app serving HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `admin`, `ansible_export`, `caldera_export`, `caldera_setup`, `caldera_ops`, `caldera_tree`, `vm` (Team/VM CRUD, topology data), `vm_goals` (VMGoal state machine API).
+- **`api/`** — FastAPI app serving HTML templates (Jinja2) and JSON API endpoints. Routes split into `auth`, `admin`, `ai_agent` (proxy to agent service), `ansible_export`, `caldera_export`, `caldera_setup`, `caldera_ops`, `caldera_tree`, `vm` (Team/VM CRUD, topology data), `vm_goals` (VMGoal state machine API).
+- **`ai_agent/`** — AI red team agent service (separate FastAPI app). EGATS planner with UCB node selection, TDI difficulty scoring, promise backpropagation. Communicates with main API via HTTP. See "AI Red Team Agent" section for details.
 - **`builder/`** — Module orchestration. `ansible.py` generates Ansible playbooks from selected modules for VM provisioning. `caldera.py` generates MITRE Caldera plugin exports (abilities + adversaries) from selected modules; supports both flat (single adversary) and multi-path (per-path adversaries with skip logic) modes. `attack_tree.py` builds directed acyclic graphs (attack trees) from a VM's assigned modules, ordered by ATT&CK kill chain phase, and extracts distinct attack paths via DFS. `vm_quota_validation.py` validates the vm_quota JSON schema. `plan_sizing.py` picks the cheapest Vultr plan that meets module resource requirements.
 - **`modules/`** — Self-contained YAML definitions + optional shell scripts for vulnerabilities (`vulns/`), hardening tasks (`hardening/`), payloads (`payloads/`), external applications (`application_external/`), internal applications (`application_internal/`), and red team objectives (`goals/`). Adding a new module = adding a YAML + optional .sh file, no code changes needed.
 - **`templates/playbook.yml.j2`** — Jinja2 template for Ansible playbook export. Generates tasks using `ansible.builtin.script` and `ansible.builtin.copy` to apply the same modules on bare machines.
 - **`bases/`** — Base VM type definitions for Vultr provisioning. Each subdirectory contains a `<id>.yaml` with `id`, `name`, `description`, `os`, `default_plan`, `packages`, `steps`, `disabled`, and `icon`. The `icon` field controls the badge shown on topology graph VM nodes — either a keyword string (`ubuntu`, `linux`, `debian`, `kali`, `windows`, `attacker`, `router`, `server`) or a dict `{svg_path: "M...", viewbox: "0 0 24 24"}` for a custom inline SVG path. Loaded by `builder/base_loader.py`; exposed at `GET /admin/base-types`.
-- **`frontend/templates/`** — Jinja2 HTML templates. Dark theme admin panel, VM detail pages, network topology, Caldera dashboard.
+- **`frontend/templates/`** — Jinja2 HTML templates. Dark theme admin panel, VM detail pages, network topology, Caldera dashboard, AI agent session pages.
 - **`playbooks/`** — Ansible playbooks for Vultr VM lifecycle management. `create-vm.yml` provisions a Vultr VPS and optionally creates a Cloudflare DNS A record; `destroy-vm.yml` removes the instance and DNS record. `collections/requirements.yml` lists the `vultr.cloud` and `community.general` collections — Semaphore installs these automatically before running either playbook.
 
 ### Module System
@@ -112,6 +118,88 @@ An optional red team emulation layer using MITRE Caldera. Generates a Caldera pl
 - **Visual attack graph**: Interactive DAG visualization using elkjs (layout) + D3.js (rendering) via CDN. Nodes are color-coded by status (green=exploited, red=defended, gray=skipped, cyan=running). Rendered on the VM detail page and Caldera operation detail page via `attack_tree_partial.html`. Nodes are partitioned by kill chain phase to ensure correct column placement.
 - **Kill chain phases**: infrastructure(-1) → initial-access(0) → execution(1) → persistence(2) → privilege-escalation(3) → credential-access(4) → collection(5) → impact(6) → command-and-control(7) → **goal(8)**. Modules can override via `phase_override` in their caldera YAML.
 - **Caldera env vars** (internal container-to-container, set in docker-compose): `CALDERA_PLUGIN_DIR` (bind mount path, default `/caldera-plugin/ctf-exploit`), `CALDERA_CONFIG_PATH` (default `/caldera-config/local.yml`), `CALDERA_INTERNAL_URL` (default `http://ctf-caldera:8888`), `CALDERA_CONTAINER_NAME` (default `ctf-caldera`), `CALDERA_STARTUP_TIMEOUT` (seconds, default `120`).
+
+### AI Red Team Agent
+
+A PentestGPT-inspired autonomous red team agent that attacks VMs via Caldera operations with human-in-the-loop approval. Runs as a separate FastAPI service (`ai_agent/`) communicating with the main CTF API via HTTP.
+
+**Architecture:**
+- Separate container (`ai-agent` in docker-compose, profile: `ai-agent`) with its own SQLite database
+- Main API proxies requests via `api/routes/ai_agent.py` (admin auth enforced at proxy layer)
+- Agent service requires API key auth (`AGENT_API_KEY`) on all endpoints
+- Consumes attack trees from `GET /admin/caldera/attack-tree/{vm_id}` at session creation
+
+**Key components (`ai_agent/`):**
+- `config.py` — Environment-based configuration (AI API, Caldera, CTF API, SSH, behavior)
+- `db/models.py` — SQLAlchemy models: `AgentSession`, `AgentAction`, `AgentLog`, `StateEntity`
+- `planner/egats.py` — EGATS planner (PentestGPT v2-inspired): UCB node selection, TDI difficulty scoring, promise backpropagation, branch pruning
+- `planner/attack_tree.py` — Attack tree data structures with UCB scoring
+- `planner/tda.py` — Task Difficulty Assessment (4 weighted dimensions: horizon, evidence, context, historical success)
+- `memory/context.py` — Context assembly from attack tree path + state summaries; load estimation based on tree complexity
+- `memory/state_store.py` — Persistent state for hosts, services, credentials, action results
+- `tools/caldera.py` — Caldera integration: create operations, execute abilities (input sanitized with regex)
+- `tools/ssh.py` — SSH command execution (disabled until key configured)
+- `services/session_manager.py` — Session lifecycle, approval flow, step execution, result recording
+- `services/auto_step.py` — Background auto-stepping for autonomous operation (optional)
+- `llm/client.py` — OpenAI-compatible API client with structured JSON responses
+- `routes/sessions.py` — Agent API endpoints with API key auth
+
+**Planner algorithm (EGATS):**
+1. Select next node via UCB score: `exploitation + exploration - difficulty_penalty`
+2. Compute TDI (Task Difficulty Index) from node depth, evidence, context load, historical success
+3. Choose mode: BFS (TDI > 0.6), DFS (TDI < 0.3), or hybrid
+4. Prune branches with TDI > 0.8 after 3+ failed attempts
+5. Query LLM with context (attack path, mode guidance, sibling summaries, progress)
+6. LLM proposes action as JSON; system assesses risk level
+7. Admin approves/rejects (or auto-approves if disabled)
+8. Execute via Caldera; record result on target node; backpropagate promise scores
+
+**Session flow:**
+1. Admin creates session for event/VM at `/admin/ai-agent`
+2. Agent fetches attack tree from CTF API (if VM specified)
+3. Admin starts session → planner loads tree into memory
+4. Admin clicks "Step" (or auto-step runs) → planner proposes action
+5. With approval: admin reviews description/reasoning/risk → approves or rejects
+6. Action executes via Caldera → result recorded → next step planned
+7. Repeat until budget exhausted or admin stops
+
+**API endpoints (proxied through main API):**
+- `POST /admin/ai-agent/sessions` — create session (`{event_id, vm_id?, target_ip?, approval_required?}`)
+- `GET /admin/ai-agent/sessions` — list sessions
+- `GET /admin/ai-agent/sessions/{id}` — session detail (status, actions, attack tree state)
+- `POST /admin/ai-agent/sessions/{id}/start` — start session
+- `POST /admin/ai-agent/sessions/{id}/stop` — stop session
+- `POST /admin/ai-agent/sessions/{id}/step` — plan next action
+- `POST /admin/ai-agent/sessions/{id}/approve/{action_id}` — approve and execute
+- `POST /admin/ai-agent/sessions/{id}/reject/{action_id}` — reject action
+- `GET /admin/ai-agent/sessions/{id}/logs` — agent logs
+
+**Admin UI:**
+- `/admin/ai-agent` — session list + create form (event/VM selection, approval toggle)
+- `/admin/ai-agent/session/{id}` — session detail: status panel, pending approvals with approve/reject buttons, attack tree visualization, recent actions, agent logs
+- Live polling: session state every 5s, logs every 8s
+- XSS protection: all LLM-generated content escaped via `esc()` function
+
+**Environment variables:**
+- `AI_API_BASE` — OpenAI-compatible API endpoint
+- `AI_API_KEY` — AI provider API key
+- `AI_MODEL` — model ID (default: `gpt-4o`)
+- `AGENT_API_KEY` — shared key for CTF API ↔ agent communication
+- `CTF_API_KEY` — agent's key for calling CTF API (required for VM targeting)
+- `AGENT_MAX_STEPS` — step budget per session (default: 100)
+- `AGENT_APPROVAL_REQUIRED` — require human approval (default: `true`)
+- `AGENT_AUTO_STEP` — enable background auto-stepping (default: `false`)
+- `AGENT_AUTO_STEP_INTERVAL` — seconds between auto-steps (default: 30)
+
+**Security:**
+- Agent service requires API key auth on all endpoints
+- Main API enforces admin auth before proxying
+- All LLM-generated inputs sanitized before Caldera API calls
+- XSS protection in templates (textContent-based escaping)
+- Agent container uses minimal dependencies (`requirements-agent.txt`)
+- Agent does not share main API secrets (explicit env vars only)
+
+**Run:** `docker compose --profile ai-agent up -d`
 
 ### Vulnerability Stages & Goal Objectives
 
@@ -242,3 +330,44 @@ An interactive D3.js force-directed graph at `/admin/topology` that visualizes t
 ### Database Models (api/models.py)
 
 Seven models: `User` (with `event_id` FK to Event), `Event` (name, quota JSON, `vm_quota` JSON, status, description, welcome_message, time_limit_minutes, `semaphore_project_id`, `semaphore_key_id`), `Team` (name, event_id), `VM` (connection info, status, team_id, event_id, `vm_type` — traces which vm_quota entry created this VM; provisioning state: `provision_step`, `provision_error`, `semaphore_project_id`, `semaphore_task_id`, `agent_status`; Vultr cloud fields: `vultr_id`, `vultr_plan`, `vultr_region`; Cloudflare: `cloudflare_record_id`; Caldera: `attack_tree_json` — cached serialized attack tree with generation timestamp), `VMModule` (completion tracking per module per VM; `stage` column: `"preapplied"`, `"caldera"`, or `null` for non-vuln types), `VMGoal` (tracks cyclical red team goal state per VM: `status` pending/achieved/defended, `achievement_count`, `defend_count`, `red_points`, `defend_points`, `achieved_at`, `defended_at`), `PlatformSettings` (key-value store for platform-wide config). A default "open" event is created at startup if none exists.
+
+### Agent Database Models (ai_agent/db/models.py)
+
+Four models in a separate SQLite database: `AgentSession` (session lifecycle, CTF event/VM references, attack tree JSON, approval settings), `AgentAction` (proposed actions with type, risk level, description, reasoning, target_node_id for result tracking, execution state), `AgentLog` (reasoning/activity logs with component, level, metadata), `StateEntity` (persistent state: hosts, services, credentials, action results).
+
+## Production Deployment
+
+Full production stack lives in `deploy/`: Traefik reverse proxy + Dockhand container UI + CTF API + MITRE Caldera + Ansible Semaphore.
+
+### Deployment Steps
+
+1. Copy project to server at `/opt/ctf-it`
+2. Configure root `.env` (see `.env.example`) — SECRET_KEY, ADMIN_BOOTSTRAP_TOKEN, DATA_ENCRYPTION_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_DOMAIN
+3. Configure `deploy/.env` (see `deploy/.env.example`) — DOMAIN, ACME_EMAIL, Semaphore credentials, CALDERA_AGENT_URL
+4. Create `deploy/caldera/config/local.yml` from `local.yml.example` with generated secrets
+5. Create Cloudflare DNS A records for subdomains: `ctf`, `caldera`, `semaphore`, `dockhand`, `traefik` → server IP
+6. Run `docker compose up -d` from `deploy/`
+
+### CRITICAL: Let's Encrypt Rate Limits
+
+**Let's Encrypt hard limit: 5 certificates per week per exact domain.** This is per-domain, NOT per-account. Changing ACME_EMAIL or deleting acme.json does NOT reset this limit.
+
+If you hit `too many certificates (5) already issued for this exact set of identifiers`:
+- **DO NOT** try changing ACME accounts, deleting acme.json, or waiting for authorization failure rate limits
+- **MUST** use different subdomains (e.g., `ctf1.ye-et.com` instead of `ctf.ye-et.com`)
+- To switch subdomains: update all `Host(\`...\`)` labels in `deploy/docker-compose.yml`, create new DNS records, delete `deploy_ctf-letsencrypt` volume acme.json, restart Traefik
+
+Subdomain patterns in `deploy/docker-compose.yml`:
+- `ctf.${DOMAIN}` → CTF API
+- `caldera.${DOMAIN}` → Caldera
+- `semaphore.${DOMAIN}` → Semaphore
+- `dockhand.${DOMAIN}` → Dockhand
+- `traefik.${DOMAIN}` → Traefik dashboard
+
+### Service URLs (once deployed)
+
+- `https://ctf1.ye-et.com` — CTF API & Admin Panel
+- `https://caldera1.ye-et.com` — MITRE Caldera C2
+- `https://semaphore1.ye-et.com` — Ansible Semaphore
+- `https://dockhand1.ye-et.com` — Container Management
+- `https://traefik1.ye-et.com` — Traefik Dashboard

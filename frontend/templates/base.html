@@ -480,6 +480,268 @@
             body::after { display: none; }
         }
 
+        /* ── AI Agent UI Improvements ── */
+        .connection-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: background-color 0.3s ease;
+        }
+
+        .status-dot.status-active {
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+        }
+
+        .status-dot.status-creating {
+            background: var(--amber);
+            animation: status-pulse 1s infinite;
+        }
+
+        .status-dot.status-stopped {
+            background: var(--gray);
+        }
+
+        .status-text {
+            color: var(--text-secondary);
+        }
+
+        .progress-bar-container {
+            height: 4px;
+            background: var(--bg-elevated);
+            border-radius: 2px;
+            margin: 1rem 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--cyan), var(--cyan-glow));
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+        }
+
+        .health-overview {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .health-score {
+            text-align: center;
+        }
+
+        .health-score-value {
+            display: block;
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--text-primary);
+            transition: color 0.3s ease;
+        }
+
+        .health-score.status-active {
+            color: var(--green);
+        }
+
+        .health-score.status-warning {
+            color: var(--amber);
+        }
+
+        .health-score.status-failed {
+            color: var(--red);
+        }
+
+        .health-status {
+            margin-top: 0.5rem;
+        }
+
+        .health-issues {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+        }
+
+        .health-issues h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .health-issues ul {
+            margin: 0;
+            padding-left: 1.5rem;
+            list-style: none;
+        }
+
+        .health-issues li {
+            margin: 0.25rem 0;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+
+        .error-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.25rem 0.5rem;
+            background: var(--red);
+            color: white;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 0.5rem;
+        }
+
+        .error-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .error-item {
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            border-left: 3px solid var(--muted);
+        }
+
+        .error-item.text-danger {
+            border-left-color: var(--red);
+        }
+
+        .error-item.text-warning {
+            border-left-color: var(--amber);
+        }
+
+        .error-item.text-info {
+            border-left-color: var(--cyan);
+        }
+
+        .error-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .error-severity {
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
+
+        .error-type {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .error-message {
+            margin-bottom: 0.5rem;
+            word-break: break-word;
+        }
+
+        .error-context {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            word-break: break-word;
+        }
+
+        .error-meta {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-top: 0.25rem;
+        }
+
+        .action-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            margin-bottom: 0.25rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+        }
+
+        .action-item.text-danger {
+            border-left: 3px solid var(--red);
+        }
+
+        .action-item.text-warning {
+            border-left: 3px solid var(--amber);
+        }
+
+        .action-item:hover {
+            background: var(--bg-elevated-hover);
+        }
+
+        .action-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .log-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            padding: 0.5rem;
+            margin-bottom: 0.25rem;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .log-entry.text-danger {
+            border-left: 3px solid var(--red);
+        }
+
+        .log-entry.text-warning {
+            border-left: 3px solid var(--amber);
+        }
+
+        .log-list::-webkit-scrollbar,
+        .action-list::-webkit-scrollbar,
+        .error-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .log-list::-webkit-scrollbar-track,
+        .action-list::-webkit-scrollbar-track,
+        .error-list::-webkit-scrollbar-track {
+            background: var(--bg-elevated);
+        }
+
+        .log-list::-webkit-scrollbar-thumb,
+        .action-list::-webkit-scrollbar-thumb,
+        .error-list::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        .log-list::-webkit-scrollbar-thumb:hover,
+        .action-list::-webkit-scrollbar-thumb:hover,
+        .error-list::-webkit-scrollbar-thumb:hover {
+            background: var(--muted);
+        }
+
         {% block extra_style %}{% endblock %}
     </style>
 </head>

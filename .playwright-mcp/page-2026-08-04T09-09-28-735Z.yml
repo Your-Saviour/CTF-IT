@@ -1,0 +1,94 @@
+- generic [active] [ref=f10e1]:
+  - navigation [ref=f10e2]:
+    - link ">_ CTF Platform |" [ref=f10e3] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f10e4]:
+      - link "Admin" [ref=f10e5] [cursor=pointer]:
+        - /url: /admin
+      - button "Logout" [ref=f10e7] [cursor=pointer]
+  - generic [ref=f10e8]:
+    - generic [ref=f10e9]:
+      - link "← Admin" [ref=f10e10] [cursor=pointer]:
+        - /url: /admin
+      - heading "Loading..." [level=1] [ref=f10e11]
+    - generic [ref=f10e12]:
+      - generic [ref=f10e13]:
+        - heading "Connection Info" [level=3] [ref=f10e14]
+        - generic [ref=f10e15]:
+          - generic [ref=f10e16]:
+            - generic [ref=f10e17]: Hostname
+            - generic [ref=f10e18]: —
+          - generic [ref=f10e19]:
+            - generic [ref=f10e20]: IP Address
+            - generic [ref=f10e21]: —
+          - generic [ref=f10e22]:
+            - generic [ref=f10e23]: OS
+            - generic [ref=f10e24]: —
+          - generic [ref=f10e25]:
+            - generic [ref=f10e26]: SSH Port
+            - generic [ref=f10e27]: —
+        - generic [ref=f10e28]:
+          - generic [ref=f10e29]: Agent
+          - generic [ref=f10e30]: —
+        - generic [ref=f10e31]:
+          - generic [ref=f10e32]: SSH Command
+          - generic "Click to copy" [ref=f10e33] [cursor=pointer]: — COPY
+        - button "Test Connection" [ref=f10e35] [cursor=pointer]
+        - generic [ref=f10e36]:
+          - generic [ref=f10e37]: "Created: —"
+          - generic [ref=f10e38]: "Updated: —"
+      - generic [ref=f10e39]:
+        - heading "Assignment" [level=3] [ref=f10e40]
+        - generic [ref=f10e41]:
+          - generic [ref=f10e42]: Event
+          - generic [ref=f10e43]: —
+        - generic [ref=f10e44]:
+          - generic [ref=f10e45]: Team
+          - generic [ref=f10e46]: —
+        - generic [ref=f10e47]:
+          - generic [ref=f10e48]: Status
+          - combobox [ref=f10e50]:
+            - option "registered" [selected]
+            - option "provisioning"
+            - option "active"
+            - option "stopped"
+            - option "failed"
+        - generic [ref=f10e51]:
+          - generic [ref=f10e52]: Notes
+          - generic [ref=f10e53]:
+            - textbox "Add notes about this VM..." [ref=f10e54]
+            - button "Save Notes" [ref=f10e55] [cursor=pointer]
+    - generic [ref=f10e56]:
+      - heading "Assigned Modules" [level=3] [ref=f10e57]
+      - generic [ref=f10e58]:
+        - button "Auto-assign from Quota" [ref=f10e59] [cursor=pointer]
+        - button "+ Add Module" [ref=f10e60] [cursor=pointer]
+      - table [ref=f10e61]:
+        - rowgroup [ref=f10e62]:
+          - row [ref=f10e63]:
+            - columnheader "ID" [ref=f10e64]
+            - columnheader "Name" [ref=f10e65]
+            - columnheader "Type" [ref=f10e66]
+            - columnheader "Difficulty" [ref=f10e67]
+            - columnheader "Points" [ref=f10e68]
+            - columnheader "Status" [ref=f10e69]
+            - columnheader [ref=f10e70]
+        - rowgroup [ref=f10e71]:
+          - row [ref=f10e72]:
+            - cell "No modules assigned." [ref=f10e73]
+    - generic [ref=f10e74]:
+      - heading "Red Team Status Run Attack" [level=3] [ref=f10e75]:
+        - generic [ref=f10e76]: Red Team Status
+        - button "Run Attack" [ref=f10e77] [cursor=pointer]
+      - generic [ref=f10e78]: Loading...
+    - generic [ref=f10e79]:
+      - heading "Attack Graph" [level=3] [ref=f10e80]
+      - generic [ref=f10e81]: Loading attack tree...
+    - generic [ref=f10e82]:
+      - heading "Actions" [level=3] [ref=f10e83]
+      - generic [ref=f10e84]:
+        - button "Provision VM" [ref=f10e85] [cursor=pointer]
+        - button "Deploy Agent" [ref=f10e86] [cursor=pointer]
+        - button "Export Ansible Playbook" [ref=f10e87] [cursor=pointer]
+        - button "Delete VM" [ref=f10e88] [cursor=pointer]
+      - button "Show SSH Public Key" [ref=f10e89]

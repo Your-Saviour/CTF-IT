@@ -193,7 +193,7 @@ async def list_vms(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/vms/{vm_id}")
-async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db), include_password: bool = False):
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
@@ -219,7 +219,7 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
             "completed_at": m.completed_at.isoformat() if m.completed_at else None,
         })
 
-    return {
+    result = {
         "id": vm.id,
         "hostname": vm.hostname,
         "ip_address": vm.ip_address,
@@ -246,8 +246,13 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db)):
         "vm_type": vm.vm_type,
         "base_type": vm.base_type,
         "vpc_ip": vm.vpc_ip,
-        "admin_password": decrypt_secret(vm.admin_password),
     }
+
+    # Only include password when explicitly requested
+    if include_password and vm.admin_password:
+        result["admin_password"] = decrypt_secret(vm.admin_password)
+
+    return result
 
 
 @router.post("/vms")
@@ -1342,7 +1347,8 @@ def _run_firewall_create(vm_id: int) -> None:
         _ansi = _re.compile(r'\x1b\[[0-9;]*[mGKHF]')
         cleaned = " ".join(_ansi.sub('', line).strip() for line in output_lines)
 
-        match = _re.search(r'VULTR_RESULT=(\{.*?\})', cleaned)
+        # Use non-greedy match with character class to avoid catastrophic backtracking
+        match = _re.search(r'VULTR_RESULT=(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})', cleaned)
         if not match:
             raise RuntimeError("Could not extract firewall VM IP from playbook output")
         try:
@@ -1367,18 +1373,17 @@ def _run_firewall_create(vm_id: int) -> None:
         # Generate admin credentials in Python (no Ansible passlib dependency needed)
         import secrets as _secrets
         import string as _string
-        admin_password = ''.join(
-            _secrets.choice(_string.ascii_letters + _string.digits)
-            for _ in range(20)
-        )
+
+        # Use cryptographically secure random generation for admin password
+        alphabet = _string.ascii_letters + _string.digits
+        admin_password = ''.join(_secrets.choice(alphabet) for _ in range(20))
+
         # OPNsense expects bcrypt $2y$ format; Python bcrypt produces $2b$ which OPNsense accepts
         password_hash = _bcrypt.hashpw(
             admin_password.encode(), _bcrypt.gensalt(rounds=10)
         ).decode()
-        # Persist the plaintext credential (encrypted at rest) before the
-        # long-running bootstrap. A later connectivity error must not leave an
-        # otherwise-configured firewall with an unrecoverable administrator
-        # password.
+
+        # Persist the encrypted credential immediately to prevent plaintext exposure
         vm.admin_password = encrypt_secret(admin_password)
         vm.updated_at = utcnow()
         db.commit()

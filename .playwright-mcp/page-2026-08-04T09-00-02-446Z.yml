@@ -1,0 +1,23 @@
+- generic [active] [ref=f4e1]:
+  - navigation [ref=f4e2]:
+    - link ">_ CTF Platform |" [ref=f4e3] [cursor=pointer]:
+      - /url: /
+  - generic [ref=f4e4]:
+    - generic [ref=f4e6]:
+      - generic [ref=f4e7]: ">_ CTFPlatform"
+      - generic [ref=f4e8]: "|"
+      - generic [ref=f4e9]: ┌──────────────────────────────────────┐ │ ██████╗████████╗███████╗ │ │ ██╔════╝╚══██╔══╝██╔════╝ │ │ ██║ ██║ █████╗ │ │ ██║ ██║ ██╔══╝ │ │ ╚██████╗ ██║ ██║ │ │ ╚═════╝ ╚═╝ ╚═╝ │ │ │ │ Find vulnerabilities. │ │ Harden systems. │ │ Prove your skills. │ └──────────────────────────────────────┘
+    - generic [ref=f4e11]:
+      - heading "Login" [level=2] [ref=f4e12]
+      - generic [ref=f4e13]:
+        - generic [ref=f4e14]:
+          - generic [ref=f4e15]: Username
+          - textbox "Username" [ref=f4e16]
+        - generic [ref=f4e17]:
+          - generic [ref=f4e18]: Password
+          - textbox "Password" [ref=f4e19]
+        - button "Login" [ref=f4e20] [cursor=pointer]
+      - paragraph [ref=f4e21]:
+        - text: Don't have an account?
+        - link "Register" [ref=f4e22] [cursor=pointer]:
+          - /url: "#"

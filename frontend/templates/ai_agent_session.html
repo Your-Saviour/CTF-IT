@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}AI Agent Session - {{ session_id[:8] }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <a href="/admin/ai-agent" class="link">← Back to Sessions</a>
+        <h1>AI Agent Session <span class="mono">{{ session_id[:8] }}</span></h1>
+    </div>
+    <div class="header-actions">
+        <div class="connection-indicator" id="connection-status">
+            <span class="status-dot"></span>
+            <span class="status-text">Connecting...</span>
+        </div>
+        <button class="btn btn-primary" id="step-btn" onclick="doStep()">Step</button>
+        <button class="btn btn-success" id="start-btn" onclick="doStart()">Start</button>
+        <button class="btn btn-danger" id="stop-btn" onclick="doStop()">Stop</button>
+        <button class="btn btn-sm" onclick="loadSession()">Refresh</button>
+    </div>
+</div>
+
+<div class="progress-bar-container">
+    <div class="progress-bar" id="step-progress"></div>
+</div>
+
+<div class="grid-3">
+    <div class="card">
+        <div class="card-header"><h2>Status</h2></div>
+        <div class="card-body" id="status-panel">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2>Operation Health</h2></div>
+        <div class="card-body" id="health-panel">
+            <div class="loading">Loading...</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2>Pending Approvals</h2></div>
+        <div class="card-body" id="approvals-panel">
+            <div class="empty">No pending actions</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>Error History</h2></div>
+    <div class="card-body" id="errors-panel">
+        <div class="empty">No errors yet</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header"><h2>Attack Tree</h2></div>
+        <div class="card-body" id="tree-panel">
+            <div class="empty">No attack tree loaded</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Recent Actions</h2>
+            <button class="btn btn-sm" onclick="loadActions()">Refresh</button>
+        </div>
+        <div class="card-body" id="actions-panel">
+            <div class="empty">No actions yet</div>
+        </div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-header">
+            <h2>Recent Actions</h2>
+            <button class="btn btn-sm" onclick="loadActions()">Refresh</button>
+        </div>
+        <div class="card-body" id="actions-panel">
+            <div class="empty">No actions yet</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Agent Logs</h2>
+            <button class="btn btn-sm" onclick="loadLogs()">Refresh</button>
+        </div>
+        <div class="card-body" id="logs-panel">
+            <div class="empty">No logs yet</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const SESSION_ID = '{{ session_id }}';
+const API_BASE = '/admin/ai-agent';
+
+let sessionData = null;
+let healthData = null;
+let errorsData = null;
+let actionsData = [];
+let ws = null;
+let lastActionCount = 0;
+
+// HTML escape function to prevent XSS from LLM-generated content
+function esc(str) {
+    if (str === null || str === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
+
+function showErrorToast(message, type = 'error') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+}
+
+function showSuccessToast(message) {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-success`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadSession();
+    loadLogs();
+    loadHealth();
+    loadErrors();
+    loadActions();
+    connectWebSocket();
+    setInterval(loadSession, 5000);
+    setInterval(loadLogs, 8000);
+});
+
+async function loadSession() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions/${SESSION_ID}`);
+        sessionData = await resp.json();
+        renderStatus();
+        renderApprovals();
+        renderTree();
+        renderActions();
+        updateButtons();
+
+        if (sessionData.status === 'running' && sessionData.error_message) {
+            showErrorToast(sessionData.error_message);
+        }
+
+        if (sessionData.status === 'stopped') {
+            showSuccessToast('Session stopped successfully');
+        }
+    } catch (err) {
+        console.error('Failed to load session:', err);
+    }
+}
+
+function renderStatus() {
+    const panel = document.getElementById('status-panel');
+    if (!sessionData) return;
+
+    const statusClass = sessionData.status === 'running' ? 'status-active' :
+                       sessionData.status === 'pending' ? 'status-creating' :
+                       sessionData.status === 'stopped' ? 'status-stopped' : 'status-failed';
+
+    panel.innerHTML = `
+        <div class="status-row">
+            <span>Status:</span>
+            <span class="status-badge ${statusClass}">${esc(sessionData.status)}</span>
+        </div>
+        <div class="status-row">
+            <span>Steps:</span>
+            <span>${sessionData.current_step} / ${sessionData.max_steps}</span>
+        </div>
+        <div class="status-row">
+            <span>Approval Required:</span>
+            <span>${sessionData.approval_required ? 'Yes' : 'No'}</span>
+        </div>
+        <div class="status-row">
+            <span>Target:</span>
+            <span>${esc(sessionData.target_ip || 'Event ' + sessionData.ctf_event_id)}</span>
+        </div>
+        ${sessionData.error_message ? `<div class="status-row error"><span>Error:</span><span>${esc(sessionData.error_message)}</span></div>` : ''}
+    `;
+}
+
+function renderApprovals() {
+    const panel = document.getElementById('approvals-panel');
+    const pending = sessionData?.pending_actions || [];
+
+    if (!pending.length) {
+        panel.innerHTML = '<div class="empty">No pending actions</div>';
+        return;
+    }
+
+    panel.innerHTML = pending.map(a => {
+        const riskClass = a.risk_level === 'high' ? 'text-danger' :
+                         a.risk_level === 'medium' ? 'text-warning' : '';
+        return `<div class="approval-card">
+            <div class="approval-header">
+                <span class="risk-badge ${riskClass}">${esc(a.risk_level)}</span>
+                <strong>${esc(a.description)}</strong>
+            </div>
+            <div class="approval-reasoning">${esc(a.reasoning)}</div>
+            ${a.target ? `<div class="approval-target">Target: ${esc(a.target)}</div>` : ''}
+            <div class="approval-actions">
+                <button class="btn btn-sm btn-success" onclick="approveAction('${esc(a.id)}')">Approve</button>
+                <button class="btn btn-sm btn-danger" onclick="rejectAction('${esc(a.id)}')">Reject</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderTree() {
+    const panel = document.getElementById('tree-panel');
+    const tree = sessionData?.attack_tree;
+
+    if (!tree || !tree.description) {
+        panel.innerHTML = '<div class="empty">No attack tree loaded</div>';
+        return;
+    }
+
+    panel.innerHTML = renderTreeNode(tree);
+}
+
+function renderTreeNode(node, depth = 0) {
+    if (depth > 3) return '';
+
+    const statusIcon = node.status === 'completed' ? '✓' :
+                      node.status === 'failed' ? '✗' :
+                      node.status === 'active' ? '▶' :
+                      node.status === 'pruned' ? '✕' : '○';
+
+    let html = `<div style="padding-left: ${depth * 16}px; margin: 2px 0;">
+        <span class="mono" style="color: var(--muted);">${statusIcon}</span>
+        <span>${esc(node.description || '')}</span>
+        <span class="mono" style="color: var(--muted); font-size: 0.8em;">
+            φ=${(node.promise_score || 0).toFixed(2)} TDI=${(node.tdi || 0).toFixed(2)}
+        </span>
+    </div>`;
+
+    if (node.children) {
+        html += node.children.slice(0, 5).map(c => renderTreeNode(c, depth + 1)).join('');
+    }
+
+    return html;
+}
+
+function renderActions() {
+    const panel = document.getElementById('actions-panel');
+    const actions = sessionData?.recent_actions || [];
+
+    if (!actions.length) {
+        panel.innerHTML = '<div class="empty">No actions yet</div>';
+        return;
+    }
+
+    panel.innerHTML = `<div class="action-list">
+        ${actions.map(a => {
+            const statusIcon = a.status === 'completed' ? '✓' :
+                              a.status === 'failed' ? '✗' :
+                              a.status === 'pending' ? '⏳' : '→';
+            const healthScore = a.health_score !== undefined ? a.health_score.toFixed(2) : 'N/A';
+            const healthClass = a.health_score !== undefined && a.health_score < 0.5 ? 'text-danger' :
+                               a.health_score !== undefined && a.health_score < 0.8 ? 'text-warning' : '';
+            return `<div class="action-item ${healthClass}">
+                <span class="mono">${statusIcon}</span>
+                <span>${esc(a.description || '')}</span>
+                <span class="mono" style="color: var(--muted);">${esc(a.status)}</span>
+                <span class="mono" style="color: var(--muted); font-size: 0.8em;">Health: ${healthScore}</span>
+                ${a.status === 'failed' ? `<button class="btn btn-sm btn-warning" onclick="retryAction('${esc(a.id)}')">Retry</button>` : ''}
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+function renderHealth() {
+    const panel = document.getElementById('health-panel');
+    if (!healthData) return;
+
+    const healthScore = healthData.health_score || 0;
+    const healthClass = healthScore >= 0.8 ? 'status-active' :
+                       healthScore >= 0.5 ? 'status-warning' : 'status-failed';
+    const healthPercent = Math.round(healthScore * 100);
+
+    panel.innerHTML = `
+        <div class="health-overview">
+            <div class="health-score">
+                <span class="health-score-value ${healthClass}">${healthPercent}%</span>
+                <span>Health Score</span>
+            </div>
+            <div class="health-status">
+                <span class="status-badge ${healthClass}">${esc(healthData.status || 'Unknown')}</span>
+            </div>
+        </div>
+        ${healthData.staleness ? `<div class="status-row">
+            <span>Staleness:</span>
+            <span>${healthData.staleness > 60 ? 'High' : healthData.staleness > 30 ? 'Medium' : 'Low'}</span>
+        </div>` : ''}
+        ${healthData.issues?.length ? `<div class="health-issues">
+            <h3>Issues</h3>
+            <ul>${healthData.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+        </div>` : ''}
+    `;
+}
+
+function renderErrors() {
+    const panel = document.getElementById('errors-panel');
+    if (!errorsData || !errorsData.length) {
+        panel.innerHTML = '<div class="empty">No errors yet</div>';
+        return;
+    }
+
+    panel.innerHTML = `<div class="error-list">
+        ${errorsData.slice(0, 20).map(e => {
+            const severityClass = e.severity === 'critical' ? 'text-danger' :
+                                e.severity === 'high' ? 'text-warning' :
+                                e.severity === 'medium' ? 'text-info' : '';
+            const time = new Date(e.created_at).toLocaleTimeString();
+            return `<div class="error-item ${severityClass}">
+                <div class="error-header">
+                    <span class="error-severity">${esc(e.severity)}</span>
+                    <span class="error-type">${esc(e.error_type)}</span>
+                    <span class="mono" style="color: var(--muted);">${time}</span>
+                </div>
+                <div class="error-message">${esc(e.error_message)}</div>
+                ${e.error_context ? `<div class="error-context">${esc(e.error_context)}</div>` : ''}
+                ${e.operation_id ? `<div class="error-meta">Operation: ${esc(e.operation_id)}</div>` : ''}
+                ${e.action_id ? `<div class="error-meta">Action: ${esc(e.action_id)}</div>` : ''}
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+function updateButtons() {
+    const status = sessionData?.status;
+    document.getElementById('step-btn').disabled = status !== 'running';
+    document.getElementById('start-btn').disabled = status !== 'pending';
+    document.getElementById('stop-btn').disabled = status === 'stopped' || status === 'pending';
+
+    // Update progress bar
+    if (sessionData) {
+        const progress = (sessionData.current_step / sessionData.max_steps) * 100;
+        document.getElementById('step-progress').style.width = `${progress}%`;
+    }
+}
+
+function updateConnectionStatus(status) {
+    const indicator = document.getElementById('connection-status');
+    const dot = indicator.querySelector('.status-dot');
+    const text = indicator.querySelector('.status-text');
+
+    switch (status) {
+        case 'connected':
+            dot.className = 'status-dot status-active';
+            text.textContent = 'Real-time updates active';
+            break;
+        case 'disconnected':
+            dot.className = 'status-dot status-stopped';
+            text.textContent = 'WebSocket disconnected (polling)';
+            break;
+        case 'connecting':
+        default:
+            dot.className = 'status-dot status-creating';
+            text.textContent = 'Connecting...';
+            break;
+    }
+}
+
+function connectWebSocket() {
+    try {
+        ws = new WebSocket(`ws://${window.location.host}/admin/ai-agent/sessions/${SESSION_ID}/ws`);
+
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+            updateConnectionStatus('connected');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket closed, reconnecting in 5s...');
+            updateConnectionStatus('disconnected');
+            setTimeout(connectWebSocket, 5000);
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            updateConnectionStatus('disconnected');
+        };
+    } catch (err) {
+        console.error('Failed to connect WebSocket:', err);
+        updateConnectionStatus('disconnected');
+    }
+}
+
+async function loadHealth() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions/${SESSION_ID}/health`);
+        healthData = await resp.json();
+        renderHealth();
+    } catch (err) {
+        console.error('Failed to load health:', err);
+    }
+}
+
+async function loadErrors() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions/${SESSION_ID}/errors?limit=20`);
+        errorsData = await resp.json();
+        renderErrors();
+    } catch (err) {
+        console.error('Failed to load errors:', err);
+    }
+}
+
+async function loadActions() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions/${SESSION_ID}/actions?limit=50`);
+        actionsData = await resp.json();
+        renderActions();
+    } catch (err) {
+        console.error('Failed to load actions:', err);
+    }
+}
+
+async function loadLogs() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions/${SESSION_ID}/logs?limit=30`);
+        const logs = await resp.json();
+        const panel = document.getElementById('logs-panel');
+
+        if (!logs.length) {
+            panel.innerHTML = '<div class="empty">No logs yet</div>';
+            return;
+        }
+
+        panel.innerHTML = `<div class="log-list">
+            ${logs.map(l => {
+                const levelClass = l.level === 'error' ? 'text-danger' :
+                                  l.level === 'warning' ? 'text-warning' : '';
+                const time = new Date(l.timestamp).toLocaleTimeString();
+                return `<div class="log-entry ${levelClass}">
+                    <span class="mono" style="color: var(--muted);">[${time}] [${esc(l.component)}]</span>
+                    <span>${esc(l.message)}</span>
+                </div>`;
+            }).join('')}
+        </div>`;
+    } catch (err) {
+        console.error('Failed to load logs:', err);
+    }
+}
+
+function connectWebSocket() {
+    try {
+        ws = new WebSocket(`ws://${window.location.host}/admin/ai-agent/sessions/${SESSION_ID}/ws`);
+
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket closed, reconnecting in 5s...');
+            setTimeout(connectWebSocket, 5000);
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+    } catch (err) {
+        console.error('Failed to connect WebSocket:', err);
+    }
+}
+
+function handleWebSocketMessage(data) {
+    switch (data.type) {
+        case 'initial':
+            loadSession();
+            loadHealth();
+            loadErrors();
+            loadActions();
+            break;
+
+        case 'heartbeat':
+            console.log('Heartbeat received');
+            break;
+
+        case 'session_status_change':
+            console.log('Session status changed to:', data.status);
+            updateConnectionStatus('connected');
+            loadSession();
+            if (data.status === 'stopped') {
+                showSuccessToast('Session stopped successfully');
+            }
+            break;
+
+        case 'new_action':
+            console.log('New action:', data.action);
+            loadActions();
+            loadSession();
+            if (data.action.status === 'completed') {
+                showSuccessToast(`Action completed: ${data.action.description}`);
+            } else if (data.action.status === 'failed') {
+                showErrorToast(`Action failed: ${data.action.description}`);
+            }
+            break;
+
+        case 'action_completed':
+            console.log('Action completed:', data.action);
+            loadActions();
+            loadSession();
+            updateConnectionStatus('connected');
+            showSuccessToast(`Action completed: ${data.action.description}`);
+            break;
+
+        case 'action_failed':
+            console.log('Action failed:', data.action);
+            loadActions();
+            loadSession();
+            updateConnectionStatus('connected');
+            showErrorToast(`Action failed: ${data.action.description}`);
+            break;
+
+        case 'operation_health_changed':
+            console.log('Health changed:', data.health);
+            loadHealth();
+            break;
+
+        case 'new_error':
+            console.log('New error:', data.error);
+            loadErrors();
+            updateConnectionStatus('connected');
+            showErrorToast(`Error: ${data.error.error_message}`);
+            break;
+
+        case 'session_error':
+            console.log('Session error:', data.error);
+            loadSession();
+            updateConnectionStatus('connected');
+            showErrorToast(`Session error: ${data.error.error_message}`);
+            break;
+    }
+}
+
+async function doStep() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions/${SESSION_ID}/step`, { method: 'POST' });
+        const result = await resp.json();
+        console.log('Step result:', result);
+        loadSession();
+        loadLogs();
+    } catch (err) {
+        alert('Step failed: ' + err.message);
+    }
+}
+
+async function doStart() {
+    try {
+        await fetch(`${API_BASE}/sessions/${SESSION_ID}/start`, { method: 'POST' });
+        loadSession();
+    } catch (err) {
+        alert('Start failed: ' + err.message);
+    }
+}
+
+async function doStop() {
+    if (!confirm('Stop this session?')) return;
+    try {
+        await fetch(`${API_BASE}/sessions/${SESSION_ID}/stop`, { method: 'POST' });
+        loadSession();
+    } catch (err) {
+        alert('Stop failed: ' + err.message);
+    }
+}
+
+async function approveAction(actionId) {
+    try {
+        await fetch(`${API_BASE}/sessions/${SESSION_ID}/approve/${actionId}`, { method: 'POST' });
+        loadSession();
+        loadLogs();
+    } catch (err) {
+        alert('Approve failed: ' + err.message);
+    }
+}
+
+async function rejectAction(actionId) {
+    try {
+        await fetch(`${API_BASE}/sessions/${SESSION_ID}/reject/${actionId}`, { method: 'POST' });
+        loadSession();
+    } catch (err) {
+        alert('Reject failed: ' + err.message);
+    }
+}
+
+async function retryAction(actionId) {
+    try {
+        await fetch(`${API_BASE}/sessions/${SESSION_ID}/retry/${actionId}`, { method: 'POST' });
+        showSuccessToast('Retrying action...');
+    } catch (err) {
+        alert('Retry failed: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

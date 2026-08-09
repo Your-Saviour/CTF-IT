@@ -1,0 +1,28 @@
+- generic [ref=f3e1]:
+  - navigation [ref=f3e2]:
+    - link ">_ CTF Platform |" [ref=f3e3] [cursor=pointer]:
+      - /url: /
+  - generic [ref=f3e4]:
+    - generic [ref=f3e6]:
+      - generic [ref=f3e7]: ">_ CTFPlatform"
+      - generic [ref=f3e8]: Your sandbox. Your rules.|
+      - generic [ref=f3e9]: ┌──────────────────────────────────────┐ │ ██████╗████████╗███████╗ │ │ ██╔════╝╚══██╔══╝██╔════╝ │ │ ██║ ██║ █████╗ │ │ ██║ ██║ ██╔══╝ │ │ ╚██████╗ ██║ ██║ │ │ ╚═════╝ ╚═╝ ╚═╝ │ │ │ │ Find vulnerabilities. │ │ Harden systems. │ │ Prove your skills. │ └──────────────────────────────────────┘
+    - generic [ref=f3e11]:
+      - heading "Register" [level=2] [ref=f3e23]
+      - generic [ref=f3e13]:
+        - generic [ref=f3e14]:
+          - generic [ref=f3e15]: Username
+          - textbox "Username" [ref=f3e16]
+        - generic [ref=f3e17]:
+          - generic [ref=f3e18]: Password
+          - textbox "Password" [ref=f3e19]
+        - generic [ref=f3e24]:
+          - generic [ref=f3e25]: Event
+          - combobox "Event" [ref=f3e26]:
+            - option "Playwright UI Validation 2026-08-04" [selected]
+          - generic [ref=f3e27]: Frontend validation event created through the admin UI.
+        - button "Register" [ref=f3e28] [cursor=pointer]
+      - paragraph [ref=f3e21]:
+        - text: Already have an account?
+        - link "Login" [active] [ref=f3e29] [cursor=pointer]:
+          - /url: "#"

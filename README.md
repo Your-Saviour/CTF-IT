@@ -8,6 +8,7 @@ A VM-based red-team/blue-team training platform. Administrators create events an
 - **Multi-event support** — independent leaderboards, quotas, and settings per event
 - **Blue team scoring** — vulnerabilities, hardening tasks, and payloads; points awarded when fixed
 - **Red team emulation** — MITRE Caldera integration with attack trees, adversary operations, and goal objectives
+- **AI Agent** — autonomous red team agent with real-time updates, health monitoring, and error feedback
 - **VM auto-provisioning** — Vultr VPS creation and Ansible module deployment via Semaphore
 - **Ansible export** — generate playbooks from any event quota for bare-metal deployments
 - **Network topology** — live D3 force-directed graph of event → team → VM hierarchy
@@ -306,6 +307,68 @@ GET /admin/caldera/scoreboard?event_id=N
 ```
 
 Returns per-team `blue_defensive` (completed preapplied module points), `blue_reactive` (goal reverts × defend_points), and `red_offensive` (goal achievements × red_points).
+
+### AI Agent
+
+The AI Agent provides autonomous penetration testing capabilities with human-in-the-loop approval. Key features:
+
+**Real-time Updates:**
+- WebSocket connections for instant status updates
+- Auto-refresh on action completion
+- Health monitoring with real-time score tracking
+- Error tracking with severity levels
+
+**Operation Management:**
+- EGATS planner with UCB node selection and TDI difficulty scoring
+- Task Difficulty Assessment (4 weighted dimensions)
+- Promise backpropagation for adaptive planning
+- Multi-target attack surface prioritization
+
+**Session Control:**
+- Create sessions targeting events, VMs, or IP addresses
+- Manual or auto-stepping modes
+- Approval workflow for human-in-the-loop execution
+- Session resume with tree integrity validation
+
+**Error Handling:**
+- Comprehensive error tracking and history
+- Operation health scoring (0-1 scale)
+- Retry suggestions for failed operations
+- Error categorization and context tracking
+
+**API Endpoints:**
+```
+# Session management
+POST   /admin/ai-agent/sessions             # Create new session
+GET    /admin/ai-agent/sessions             # List sessions
+GET    /admin/ai-agent/sessions/{id}        # Session details
+POST   /admin/ai-agent/sessions/{id}/start  # Start session
+POST   /admin/ai-agent/sessions/{id}/stop   # Stop session
+POST   /admin/ai-agent/sessions/{id}/step   # Plan next action
+POST   /admin/ai-agent/sessions/{id}/approve/{action_id}  # Approve action
+POST   /admin/ai-agent/sessions/{id}/reject/{action_id}    # Reject action
+
+# Real-time data
+GET    /admin/ai-agent/sessions/{id}/actions         # Stream recent actions
+GET    /admin/ai-agent/sessions/{id}/health          # Operation health status
+GET    /admin/ai-agent/sessions/{id}/errors          # Recent errors with context
+
+# WebSocket for real-time updates
+ws://<host>/admin/ai-agent/sessions/{id}/ws
+```
+
+**Configuration:**
+- `AGENT_API_KEY` — shared key for CTF API ↔ agent communication
+- `AI_API_BASE` — OpenAI-compatible API endpoint
+- `AI_API_KEY` — AI provider API key
+- `AI_MODEL` — model ID (default: gpt-4o)
+- `AGENT_APPROVAL_REQUIRED` — require human approval for actions
+- `AGENT_AUTO_STEP` — enable background auto-stepping
+- `AGENT_MAX_STEPS` — step budget per session (default: 100)
+- `WEBSOCKET_ENABLED` — enable/disable WebSocket (default: true)
+- `WEBSOCKET_HEARTBEAT_INTERVAL` — heartbeat interval in seconds (default: 30)
+
+See `/docs/AI_AGENT_UI_IMPLEMENTATION_SUMMARY.md` for detailed implementation notes.
 
 ## VM Provisioning
 

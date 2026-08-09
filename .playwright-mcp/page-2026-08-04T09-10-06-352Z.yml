@@ -1,0 +1,890 @@
+- generic [ref=f11e1]:
+  - navigation [ref=f11e2]:
+    - link ">_ CTF Platform |" [ref=f11e3] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f11e4]:
+      - link "Admin" [ref=f11e5] [cursor=pointer]:
+        - /url: /admin
+      - button "Logout" [ref=f11e7] [cursor=pointer]
+  - generic [ref=f11e8]:
+    - heading "Admin Panel" [level=1] [ref=f11e9]
+    - generic [ref=f11e10]:
+      - generic [ref=f11e11]:
+        - heading "Events" [level=3] [ref=f11e12]
+        - button "+ New Event" [ref=f11e13] [cursor=pointer]
+      - table [ref=f11e15]:
+        - rowgroup [ref=f11e16]:
+          - row [ref=f11e17]:
+            - columnheader "Name" [ref=f11e18]
+            - columnheader "Status" [ref=f11e19]
+            - columnheader "Users" [ref=f11e20]
+            - columnheader "Created" [ref=f11e21]
+            - columnheader "Actions" [ref=f11e22]
+        - rowgroup [ref=f11e23]:
+          - row [ref=f11e24]:
+            - cell [ref=f11e25]:
+              - strong [ref=f11e26]: Playwright UI Validation 2026-08-04
+            - cell "open" [ref=f11e27]
+            - cell "1" [ref=f11e29]
+            - cell "04/08/2026" [ref=f11e30]
+            - cell [ref=f11e31]:
+              - generic [ref=f11e32]:
+                - button "Edit" [ref=f11e33] [cursor=pointer]
+                - link "Plan" [ref=f11e34] [cursor=pointer]:
+                  - /url: /admin/events/4/plan
+                - button "Caldera" [ref=f11e35] [cursor=pointer]
+                - button "Stop" [ref=f11e36] [cursor=pointer]
+          - row [ref=f11e37]:
+            - cell [ref=f11e38]:
+              - strong [ref=f11e39]: CTF-IT Clean E2E
+            - cell "stopped" [ref=f11e40]
+            - cell "1" [ref=f11e42]
+            - cell "03/08/2026" [ref=f11e43]
+            - cell [ref=f11e44]:
+              - generic [ref=f11e45]:
+                - button "Edit" [ref=f11e46] [cursor=pointer]
+                - link "Plan" [ref=f11e47] [cursor=pointer]:
+                  - /url: /admin/events/3/plan
+                - button "Caldera" [ref=f11e48] [cursor=pointer]
+                - button "Start" [ref=f11e49] [cursor=pointer]
+          - row [ref=f11e50]:
+            - cell [ref=f11e51]:
+              - strong [ref=f11e52]: CTF-IT E2E Validation
+            - cell "stopped" [ref=f11e53]
+            - cell "0" [ref=f11e55]
+            - cell "03/08/2026" [ref=f11e56]
+            - cell [ref=f11e57]:
+              - generic [ref=f11e58]:
+                - button "Edit" [ref=f11e59] [cursor=pointer]
+                - link "Plan" [ref=f11e60] [cursor=pointer]:
+                  - /url: /admin/events/2/plan
+                - button "Caldera" [ref=f11e61] [cursor=pointer]
+                - button "Start" [ref=f11e62] [cursor=pointer]
+                - button "Delete" [ref=f11e63] [cursor=pointer]
+          - row [ref=f11e64]:
+            - cell [ref=f11e65]:
+              - strong [ref=f11e66]: Default CTF Event
+            - cell "stopped" [ref=f11e67]
+            - cell "1" [ref=f11e69]
+            - cell "03/08/2026" [ref=f11e70]
+            - cell [ref=f11e71]:
+              - generic [ref=f11e72]:
+                - button "Edit" [ref=f11e73] [cursor=pointer]
+                - link "Plan" [ref=f11e74] [cursor=pointer]:
+                  - /url: /admin/events/1/plan
+                - button "Caldera" [ref=f11e75] [cursor=pointer]
+                - button "Start" [ref=f11e76] [cursor=pointer]
+    - generic [ref=f11e77]:
+      - heading "Users" [level=3] [ref=f11e78]
+      - table [ref=f11e80]:
+        - rowgroup [ref=f11e81]:
+          - row [ref=f11e82]:
+            - columnheader "Username" [ref=f11e83]
+            - columnheader "Event" [ref=f11e84]
+        - rowgroup [ref=f11e85]:
+          - row [ref=f11e86]:
+            - cell "e2e-admin (admin)" [ref=f11e87]
+            - cell "Default CTF Event" [ref=f11e88]
+          - row [ref=f11e89]:
+            - cell "admin" [ref=f11e90]
+            - cell "CTF-IT Clean E2E" [ref=f11e91]
+          - row [ref=f11e92]:
+            - cell "ctf-it-admin (admin)" [ref=f11e93]
+            - cell "—" [ref=f11e94]
+          - row [ref=f11e95]:
+            - cell "playwright-e2e-user-20260804" [ref=f11e96]
+            - cell "Playwright UI Validation 2026-08-04" [ref=f11e97]
+    - generic [ref=f11e98]:
+      - generic [ref=f11e99]:
+        - heading "Teams & VMs" [level=3] [ref=f11e100]
+        - generic [ref=f11e101]:
+          - link "⬡ Network Topology" [ref=f11e102] [cursor=pointer]:
+            - /url: /admin/topology
+          - button "+ New Team" [ref=f11e103] [cursor=pointer]
+          - button "+ Register VM" [active] [ref=f11e104] [cursor=pointer]
+      - generic [ref=f11e801]:
+        - generic [ref=f11e802]:
+          - button "Create on Vultr" [ref=f11e803] [cursor=pointer]
+          - button "Register Existing" [ref=f11e804] [cursor=pointer]
+        - generic [ref=f11e805]:
+          - generic [ref=f11e806]:
+            - generic [ref=f11e807]:
+              - generic [ref=f11e808]: Hostname
+              - textbox "Hostname" [ref=f11e809]:
+                - /placeholder: e.g. target-01
+            - generic [ref=f11e810]:
+              - generic [ref=f11e811]: Team
+              - combobox "Team" [ref=f11e812]:
+                - option "Playwright E2E Team (Playwright UI Validation 2026-08-04)" [selected]
+                - option "Clean E2E Team (CTF-IT Clean E2E)"
+            - generic [ref=f11e813]:
+              - generic [ref=f11e814]: Operating System
+              - combobox "Operating System" [ref=f11e815]:
+                - option "AlmaLinux 10 x64" [selected]
+                - option "AlmaLinux 9 x64"
+                - option "AlmaLinux x64"
+                - option "Alpine Linux x64"
+                - option "Application"
+                - option "Arch Linux x64"
+                - option "Backup"
+                - option "CentOS 10 Stream x64"
+                - option "CentOS 9 Stream x64"
+                - option "Custom"
+                - option "Debian 11 x64 (bullseye)"
+                - option "Debian 12 x64 (bookworm)"
+                - option "Debian 13 x64 (trixie)"
+                - option "Fedora 43 x64"
+                - option "Fedora 44 x64"
+                - option "Fedora CoreOS Next"
+                - option "Fedora CoreOS Stable"
+                - option "Fedora CoreOS Testing"
+                - option "Flatcar Container Linux Alpha x64"
+                - option "Flatcar Container Linux Beta x64"
+                - option "Flatcar Container Linux LTS x64"
+                - option "Flatcar Container Linux Stable x64"
+                - option "FreeBSD 14 x64"
+                - option "FreeBSD 15 x64"
+                - option "Marketplace App"
+                - option "OpenBSD 7.8 x64"
+                - option "OpenBSD 7.9 x64"
+                - option "Rocky Linux 10 x64"
+                - option "Rocky Linux 9 x64"
+                - option "Rocky Linux x64"
+                - option "Snapshot"
+                - option "Ubuntu 22.04 LTS x64"
+                - option "Ubuntu 24.04 LTS x64"
+                - option "Ubuntu 26.04 LTS x64"
+                - option "Windows 2016 Standard x64"
+                - option "Windows 2019 Datacenter x64"
+                - option "Windows 2019 Standard x64"
+                - option "Windows 2022 Datacenter x64"
+                - option "Windows 2022 Standard x64"
+                - option "Windows 2025 Datacenter x64"
+                - option "Windows 2025 Standard x64"
+                - option "Windows Core 2016 Standard x64"
+                - option "Windows Core 2019 Datacenter x64"
+                - option "Windows Core 2019 Standard x64"
+                - option "Windows Core 2022 Datacenter x64"
+                - option "Windows Core 2022 Standard x64"
+                - option "Windows Core 2025 Datacenter x64"
+                - option "Windows Core 2025 Standard x64"
+                - option "openSUSE Leap 16 x64"
+            - generic [ref=f11e816]:
+              - generic [ref=f11e817]: Plan
+              - combobox "Plan" [ref=f11e818]:
+                - option "vc2-1c-0.5gb-v6 — 1 vCPU, 0.5GB RAM, 10GB disk ($2.5/mo)"
+                - option "vc2-1c-0.5gb — 1 vCPU, 0.5GB RAM, 10GB disk ($3.5/mo)"
+                - option "vc2-1c-1gb — 1 vCPU, 1GB RAM, 25GB disk ($5/mo)" [selected]
+                - option "vc2-1c-2gb — 1 vCPU, 2GB RAM, 55GB disk ($10/mo)"
+                - option "vc2-2c-2gb — 2 vCPU, 2GB RAM, 65GB disk ($15/mo)"
+                - option "vc2-2c-4gb — 2 vCPU, 4GB RAM, 80GB disk ($20/mo)"
+                - option "vc2-4c-8gb — 4 vCPU, 8GB RAM, 160GB disk ($40/mo)"
+                - option "vc2-6c-16gb — 6 vCPU, 16GB RAM, 320GB disk ($80/mo)"
+                - option "vc2-8c-32gb — 8 vCPU, 32GB RAM, 640GB disk ($160/mo)"
+                - option "vc2-16c-64gb — 16 vCPU, 64GB RAM, 1280GB disk ($320/mo)"
+                - option "vc2-24c-96gb — 24 vCPU, 96GB RAM, 1600GB disk ($640/mo)"
+            - generic [ref=f11e819]:
+              - generic [ref=f11e820]: SSH User
+              - textbox "SSH User" [ref=f11e821]: root
+          - generic [ref=f11e822]:
+            - generic [ref=f11e823]: Notes
+            - textbox "Notes" [ref=f11e824]
+          - generic [ref=f11e825]:
+            - button "Create VM" [ref=f11e826] [cursor=pointer]
+            - button "Cancel" [ref=f11e827] [cursor=pointer]
+      - heading "Teams" [level=4] [ref=f11e105]
+      - table [ref=f11e107]:
+        - rowgroup [ref=f11e108]:
+          - row [ref=f11e109]:
+            - columnheader "Name" [ref=f11e110]
+            - columnheader "Event" [ref=f11e111]
+            - columnheader "VMs" [ref=f11e112]
+            - columnheader "Actions" [ref=f11e113]
+        - rowgroup [ref=f11e114]:
+          - row [ref=f11e115]:
+            - cell [ref=f11e116]:
+              - strong [ref=f11e117]: Playwright E2E Team
+            - cell "Playwright UI Validation 2026-08-04" [ref=f11e118]
+            - cell "0" [ref=f11e119]
+            - cell [ref=f11e120]:
+              - button "Delete" [ref=f11e121] [cursor=pointer]
+          - row [ref=f11e122]:
+            - cell [ref=f11e123]:
+              - strong [ref=f11e124]: Clean E2E Team
+            - cell "CTF-IT Clean E2E" [ref=f11e125]
+            - cell "0" [ref=f11e126]
+            - cell [ref=f11e127]:
+              - button "Delete" [ref=f11e128] [cursor=pointer]
+      - heading "VMs" [level=4] [ref=f11e129]
+      - table [ref=f11e131]:
+        - rowgroup [ref=f11e140]:
+          - row [ref=f11e141]:
+            - columnheader "Hostname" [ref=f11e142]
+            - columnheader "IP" [ref=f11e143]
+            - columnheader "Team" [ref=f11e144]
+            - columnheader "Event" [ref=f11e145]
+            - columnheader "Status" [ref=f11e146]
+            - columnheader "Modules" [ref=f11e147]
+            - columnheader "Actions" [ref=f11e148]
+        - rowgroup [ref=f11e149]:
+          - row [ref=f11e150]:
+            - cell "No VMs registered yet." [ref=f11e151]
+    - generic [ref=f11e152]:
+      - heading "Module Library" [level=3] [ref=f11e153]
+      - generic [ref=f11e154]:
+        - textbox "Search by name, ID, description..." [ref=f11e155]
+        - combobox [ref=f11e156]:
+          - option "All Types" [selected]
+          - option "application external"
+          - option "goal"
+          - option "hardening"
+          - option "vulnerability"
+        - combobox [ref=f11e157]:
+          - option "All Difficulties" [selected]
+          - option "Easy"
+          - option "Medium"
+          - option "Hard"
+        - combobox [ref=f11e158]:
+          - option "All Categories" [selected]
+          - option "authentication"
+          - option "command-and-control"
+          - option "configuration"
+          - option "credential-access"
+          - option "filesystem"
+          - option "impact"
+          - option "network"
+          - option "persistence"
+          - option "services"
+          - option "web"
+      - table [ref=f11e160]:
+        - rowgroup [ref=f11e169]:
+          - row [ref=f11e170]:
+            - columnheader "ID" [ref=f11e171]
+            - columnheader "Name" [ref=f11e172]
+            - columnheader "Type" [ref=f11e173]
+            - columnheader "Difficulty" [ref=f11e174]
+            - columnheader "Pts" [ref=f11e175]
+            - columnheader "Category" [ref=f11e176]
+            - columnheader "Tags" [ref=f11e177]
+        - rowgroup [ref=f11e178]:
+          - row [ref=f11e179]:
+            - cell "go_fileserver" [ref=f11e180]
+            - cell [ref=f11e181]:
+              - link "Go File Server" [ref=f11e182] [cursor=pointer]:
+                - /url: /admin/module/go_fileserver
+            - cell "app/ext" [ref=f11e183]
+            - cell "easy" [ref=f11e184]
+            - cell "0" [ref=f11e186]
+            - cell "web" [ref=f11e187]
+            - cell "webgofileserverhttps" [ref=f11e188]
+          - row [ref=f11e189]:
+            - cell "fileserver_anon_upload" [ref=f11e190]
+            - cell [ref=f11e191]:
+              - link "Anonymous Upload Enabled" [ref=f11e192] [cursor=pointer]:
+                - /url: /admin/module/fileserver_anon_upload
+            - cell "vulnerability" [ref=f11e193]
+            - cell "medium" [ref=f11e194]
+            - cell "200" [ref=f11e196]
+            - cell "web" [ref=f11e197]
+            - cell "misconfigurationwebgofile-uploadunauthenticated" [ref=f11e198]
+          - row [ref=f11e199]:
+            - cell "fileserver_default_tls_key" [ref=f11e200]
+            - cell [ref=f11e201]:
+              - link "World-Readable TLS Private Key" [ref=f11e202] [cursor=pointer]:
+                - /url: /admin/module/fileserver_default_tls_key
+            - cell "vulnerability" [ref=f11e203]
+            - cell "easy" [ref=f11e204]
+            - cell "100" [ref=f11e206]
+            - cell "filesystem" [ref=f11e207]
+            - cell "tlspermissionsfilesystemcryptography" [ref=f11e208]
+          - row [ref=f11e209]:
+            - cell "fileserver_hidden_files" [ref=f11e210]
+            - cell [ref=f11e211]:
+              - link "Directory Listing Exposes Hidden Files" [ref=f11e212] [cursor=pointer]:
+                - /url: /admin/module/fileserver_hidden_files
+            - cell "vulnerability" [ref=f11e213]
+            - cell "medium" [ref=f11e214]
+            - cell "200" [ref=f11e216]
+            - cell "web" [ref=f11e217]
+            - cell "information-disclosurewebgoconfiguration" [ref=f11e218]
+          - row [ref=f11e219]:
+            - cell "fileserver_path_traversal" [ref=f11e220]
+            - cell [ref=f11e221]:
+              - link "Path Traversal in File Server" [ref=f11e222] [cursor=pointer]:
+                - /url: /admin/module/fileserver_path_traversal
+            - cell "vulnerability" [ref=f11e223]
+            - cell "hard" [ref=f11e224]
+            - cell "300" [ref=f11e226]
+            - cell "web" [ref=f11e227]
+            - cell "path-traversalwebgolfi" [ref=f11e228]
+          - row [ref=f11e229]:
+            - cell "fileserver_running_as_root" [ref=f11e230]
+            - cell [ref=f11e231]:
+              - link "File Server Running as Root" [ref=f11e232] [cursor=pointer]:
+                - /url: /admin/module/fileserver_running_as_root
+            - cell "vulnerability" [ref=f11e233]
+            - cell "medium" [ref=f11e234]
+            - cell "200" [ref=f11e236]
+            - cell "services" [ref=f11e237]
+            - cell "privilege-escalationservicesmisconfigurationsystemd" [ref=f11e238]
+          - row [ref=f11e239]:
+            - cell "inventory_dashboard" [ref=f11e240]
+            - cell [ref=f11e241]:
+              - link "Python Inventory Dashboard" [ref=f11e242] [cursor=pointer]:
+                - /url: /admin/module/inventory_dashboard
+            - cell "app/ext" [ref=f11e243]
+            - cell "easy" [ref=f11e244]
+            - cell "0" [ref=f11e246]
+            - cell "web" [ref=f11e247]
+            - cell "webflaskpythoninventory" [ref=f11e248]
+          - row [ref=f11e249]:
+            - cell "inventory_backup_file" [ref=f11e250]
+            - cell [ref=f11e251]:
+              - link "Exposed Database Backup" [ref=f11e252] [cursor=pointer]:
+                - /url: /admin/module/inventory_backup_file
+            - cell "vulnerability" [ref=f11e253]
+            - cell "easy" [ref=f11e254]
+            - cell "100" [ref=f11e256]
+            - cell "web" [ref=f11e257]
+            - cell "webbackupdata-exposure" [ref=f11e258]
+          - row [ref=f11e259]:
+            - cell "inventory_debug_mode" [ref=f11e260]
+            - cell [ref=f11e261]:
+              - link "Flask Debug Mode Enabled" [ref=f11e262] [cursor=pointer]:
+                - /url: /admin/module/inventory_debug_mode
+            - cell "vulnerability" [ref=f11e263]
+            - cell "medium" [ref=f11e264]
+            - cell "200" [ref=f11e266]
+            - cell "web" [ref=f11e267]
+            - cell "webdebugflaskremote-code-execution" [ref=f11e268]
+          - row [ref=f11e269]:
+            - cell "inventory_default_creds" [ref=f11e270]
+            - cell [ref=f11e271]:
+              - link "Default Admin Credentials" [ref=f11e272] [cursor=pointer]:
+                - /url: /admin/module/inventory_default_creds
+            - cell "vulnerability" [ref=f11e273]
+            - cell "easy" [ref=f11e274]
+            - cell "100" [ref=f11e276]
+            - cell "authentication" [ref=f11e277]
+            - cell "webcredentialsauthentication" [ref=f11e278]
+          - row [ref=f11e279]:
+            - cell "inventory_secret_key" [ref=f11e280]
+            - cell [ref=f11e281]:
+              - link "Hardcoded Secret Key" [ref=f11e282] [cursor=pointer]:
+                - /url: /admin/module/inventory_secret_key
+            - cell "vulnerability" [ref=f11e283]
+            - cell "easy" [ref=f11e284]
+            - cell "100" [ref=f11e286]
+            - cell "web" [ref=f11e287]
+            - cell "websecretsflask" [ref=f11e288]
+          - row [ref=f11e289]:
+            - cell "inventory_unrestricted_upload" [ref=f11e290]
+            - cell [ref=f11e291]:
+              - link "Unrestricted File Upload" [ref=f11e292] [cursor=pointer]:
+                - /url: /admin/module/inventory_unrestricted_upload
+            - cell "vulnerability" [ref=f11e293]
+            - cell "medium" [ref=f11e294]
+            - cell "200" [ref=f11e296]
+            - cell "web" [ref=f11e297]
+            - cell "webuploadwebshell" [ref=f11e298]
+          - row [ref=f11e299]:
+            - cell "log4shell_app" [ref=f11e300]
+            - cell [ref=f11e301]:
+              - link "Java Log Management App" [ref=f11e302] [cursor=pointer]:
+                - /url: /admin/module/log4shell_app
+            - cell "app/ext" [ref=f11e303]
+            - cell "hard" [ref=f11e304]
+            - cell "0" [ref=f11e306]
+            - cell "web" [ref=f11e307]
+            - cell "webjavaspring-bootlog4jlog4shell" [ref=f11e308]
+          - row [ref=f11e309]:
+            - cell "log4shell_actuator" [ref=f11e310]
+            - cell [ref=f11e311]:
+              - link "Exposed Spring Boot Actuator" [ref=f11e312] [cursor=pointer]:
+                - /url: /admin/module/log4shell_actuator
+            - cell "vulnerability" [ref=f11e313]
+            - cell "medium" [ref=f11e314]
+            - cell "200" [ref=f11e316]
+            - cell "web" [ref=f11e317]
+            - cell "information-disclosurespring-bootactuatorjavaconfiguration" [ref=f11e318]
+          - row [ref=f11e319]:
+            - cell "log4shell_cve" [ref=f11e320]
+            - cell [ref=f11e321]:
+              - link "Log4Shell (CVE-2021-44228)" [ref=f11e322] [cursor=pointer]:
+                - /url: /admin/module/log4shell_cve
+            - cell "vulnerability" [ref=f11e323]
+            - cell "hard" [ref=f11e324]
+            - cell "300" [ref=f11e326]
+            - cell "web" [ref=f11e327]
+            - cell "cvelog4shelllog4jrcejavajndi" [ref=f11e328]
+          - row [ref=f11e329]:
+            - cell "log4shell_running_as_root" [ref=f11e330]
+            - cell [ref=f11e331]:
+              - link "Log App Running as Root" [ref=f11e332] [cursor=pointer]:
+                - /url: /admin/module/log4shell_running_as_root
+            - cell "vulnerability" [ref=f11e333]
+            - cell "medium" [ref=f11e334]
+            - cell "200" [ref=f11e336]
+            - cell "services" [ref=f11e337]
+            - cell "privilege-escalationservicessystemdjavamisconfiguration" [ref=f11e338]
+          - row [ref=f11e339]:
+            - cell "log4shell_world_readable_logs" [ref=f11e340]
+            - cell [ref=f11e341]:
+              - link "Sensitive Logs World-Readable" [ref=f11e342] [cursor=pointer]:
+                - /url: /admin/module/log4shell_world_readable_logs
+            - cell "vulnerability" [ref=f11e343]
+            - cell "easy" [ref=f11e344]
+            - cell "100" [ref=f11e346]
+            - cell "filesystem" [ref=f11e347]
+            - cell "permissionsfilesystemlogginginformation-disclosure" [ref=f11e348]
+          - row [ref=f11e349]:
+            - cell "monitord" [ref=f11e350]
+            - cell [ref=f11e351]:
+              - link "Bash Monitoring Daemon" [ref=f11e352] [cursor=pointer]:
+                - /url: /admin/module/monitord
+            - cell "app/ext" [ref=f11e353]
+            - cell "easy" [ref=f11e354]
+            - cell "0" [ref=f11e356]
+            - cell "services" [ref=f11e357]
+            - cell "servicesbashmonitoringdaemon" [ref=f11e358]
+          - row [ref=f11e359]:
+            - cell "monitord_cmd_injection" [ref=f11e360]
+            - cell [ref=f11e361]:
+              - link "Command Injection in Monitord" [ref=f11e362] [cursor=pointer]:
+                - /url: /admin/module/monitord_cmd_injection
+            - cell "vulnerability" [ref=f11e363]
+            - cell "hard" [ref=f11e364]
+            - cell "300" [ref=f11e366]
+            - cell "services" [ref=f11e367]
+            - cell "command-injectionbashservicesrce" [ref=f11e368]
+          - row [ref=f11e369]:
+            - cell "monitord_creds_in_log" [ref=f11e370]
+            - cell [ref=f11e371]:
+              - link "Credentials Leaked in Monitord Logs" [ref=f11e372] [cursor=pointer]:
+                - /url: /admin/module/monitord_creds_in_log
+            - cell "vulnerability" [ref=f11e373]
+            - cell "medium" [ref=f11e374]
+            - cell "200" [ref=f11e376]
+            - cell "authentication" [ref=f11e377]
+            - cell "credentialslogginginformation-disclosurebash" [ref=f11e378]
+          - row [ref=f11e379]:
+            - cell "monitord_open_port" [ref=f11e380]
+            - cell [ref=f11e381]:
+              - link "Unauthenticated Metrics Endpoint" [ref=f11e382] [cursor=pointer]:
+                - /url: /admin/module/monitord_open_port
+            - cell "vulnerability" [ref=f11e383]
+            - cell "medium" [ref=f11e384]
+            - cell "200" [ref=f11e386]
+            - cell "network" [ref=f11e387]
+            - cell "networkinformation-disclosureunauthenticatedservices" [ref=f11e388]
+          - row [ref=f11e389]:
+            - cell "monitord_suid_script" [ref=f11e390]
+            - cell [ref=f11e391]:
+              - link "SUID Bit on Daemon Script" [ref=f11e392] [cursor=pointer]:
+                - /url: /admin/module/monitord_suid_script
+            - cell "vulnerability" [ref=f11e393]
+            - cell "medium" [ref=f11e394]
+            - cell "200" [ref=f11e396]
+            - cell "filesystem" [ref=f11e397]
+            - cell "suidpermissionsprivilege-escalationbash" [ref=f11e398]
+          - row [ref=f11e399]:
+            - cell "monitord_writable_logdir" [ref=f11e400]
+            - cell [ref=f11e401]:
+              - link "World-Writable Monitord Log Directory" [ref=f11e402] [cursor=pointer]:
+                - /url: /admin/module/monitord_writable_logdir
+            - cell "vulnerability" [ref=f11e403]
+            - cell "easy" [ref=f11e404]
+            - cell "100" [ref=f11e406]
+            - cell "filesystem" [ref=f11e407]
+            - cell "permissionsfilesystemlogging" [ref=f11e408]
+          - row [ref=f11e409]:
+            - cell "nextjs_portal" [ref=f11e410]
+            - cell [ref=f11e411]:
+              - link "Next.js Employee Portal" [ref=f11e412] [cursor=pointer]:
+                - /url: /admin/module/nextjs_portal
+            - cell "app/ext" [ref=f11e413]
+            - cell "hard" [ref=f11e414]
+            - cell "0" [ref=f11e416]
+            - cell "web" [ref=f11e417]
+            - cell "webnodejsnextjsreactemployee-portal" [ref=f11e418]
+          - row [ref=f11e419]:
+            - cell "nextjs_hardcoded_secret" [ref=f11e420]
+            - cell [ref=f11e421]:
+              - link "Hardcoded Session Secret" [ref=f11e422] [cursor=pointer]:
+                - /url: /admin/module/nextjs_hardcoded_secret
+            - cell "vulnerability" [ref=f11e423]
+            - cell "easy" [ref=f11e424]
+            - cell "100" [ref=f11e426]
+            - cell "authentication" [ref=f11e427]
+            - cell "hardcoded-credentialsauthenticationnextjsnextauth" [ref=f11e428]
+          - row [ref=f11e429]:
+            - cell "nextjs_middleware_bypass" [ref=f11e430]
+            - cell [ref=f11e431]:
+              - link "Middleware Auth Bypass (CVE-2025-29927)" [ref=f11e432] [cursor=pointer]:
+                - /url: /admin/module/nextjs_middleware_bypass
+            - cell "vulnerability" [ref=f11e433]
+            - cell "hard" [ref=f11e434]
+            - cell "300" [ref=f11e436]
+            - cell "web" [ref=f11e437]
+            - cell "cvenextjsauthentication-bypassmiddlewareweb" [ref=f11e438]
+          - row [ref=f11e439]:
+            - cell "nextjs_source_maps" [ref=f11e440]
+            - cell [ref=f11e441]:
+              - link "Source Maps Exposed in Production" [ref=f11e442] [cursor=pointer]:
+                - /url: /admin/module/nextjs_source_maps
+            - cell "vulnerability" [ref=f11e443]
+            - cell "easy" [ref=f11e444]
+            - cell "100" [ref=f11e446]
+            - cell "web" [ref=f11e447]
+            - cell "information-disclosurenextjssource-mapswebconfiguration" [ref=f11e448]
+          - row [ref=f11e449]:
+            - cell "nextjs_unprotected_api" [ref=f11e450]
+            - cell [ref=f11e451]:
+              - link "Admin API Route Unprotected" [ref=f11e452] [cursor=pointer]:
+                - /url: /admin/module/nextjs_unprotected_api
+            - cell "vulnerability" [ref=f11e453]
+            - cell "medium" [ref=f11e454]
+            - cell "200" [ref=f11e456]
+            - cell "web" [ref=f11e457]
+            - cell "authenticationapinextjswebinformation-disclosure" [ref=f11e458]
+          - row [ref=f11e459]:
+            - cell "notes_api" [ref=f11e460]
+            - cell [ref=f11e461]:
+              - link "Node.js Notes API" [ref=f11e462] [cursor=pointer]:
+                - /url: /admin/module/notes_api
+            - cell "app/ext" [ref=f11e463]
+            - cell "easy" [ref=f11e464]
+            - cell "0" [ref=f11e466]
+            - cell "web" [ref=f11e467]
+            - cell "webnodejsexpresssqliteapi" [ref=f11e468]
+          - row [ref=f11e469]:
+            - cell "notes_debug_mode" [ref=f11e470]
+            - cell [ref=f11e471]:
+              - link "Node.js Debug Mode Enabled" [ref=f11e472] [cursor=pointer]:
+                - /url: /admin/module/notes_debug_mode
+            - cell "vulnerability" [ref=f11e473]
+            - cell "easy" [ref=f11e474]
+            - cell "100" [ref=f11e476]
+            - cell "web" [ref=f11e477]
+            - cell "misconfigurationnodejsdebuginformation-disclosure" [ref=f11e478]
+          - row [ref=f11e479]:
+            - cell "notes_hardcoded_token" [ref=f11e480]
+            - cell [ref=f11e481]:
+              - link "Hardcoded Admin API Token" [ref=f11e482] [cursor=pointer]:
+                - /url: /admin/module/notes_hardcoded_token
+            - cell "vulnerability" [ref=f11e483]
+            - cell "medium" [ref=f11e484]
+            - cell "200" [ref=f11e486]
+            - cell "authentication" [ref=f11e487]
+            - cell "hardcoded-credentialsauthenticationnodejs" [ref=f11e488]
+          - row [ref=f11e489]:
+            - cell "notes_sqli" [ref=f11e490]
+            - cell [ref=f11e491]:
+              - link "SQL Injection in Notes Search" [ref=f11e492] [cursor=pointer]:
+                - /url: /admin/module/notes_sqli
+            - cell "vulnerability" [ref=f11e493]
+            - cell "hard" [ref=f11e494]
+            - cell "300" [ref=f11e496]
+            - cell "web" [ref=f11e497]
+            - cell "sqliwebnodejsinjection" [ref=f11e498]
+          - row [ref=f11e499]:
+            - cell "notes_world_readable_db" [ref=f11e500]
+            - cell [ref=f11e501]:
+              - link "World-Readable Notes Database" [ref=f11e502] [cursor=pointer]:
+                - /url: /admin/module/notes_world_readable_db
+            - cell "vulnerability" [ref=f11e503]
+            - cell "easy" [ref=f11e504]
+            - cell "100" [ref=f11e506]
+            - cell "filesystem" [ref=f11e507]
+            - cell "permissionsfilesystemsqlitedata-exposure" [ref=f11e508]
+          - row [ref=f11e509]:
+            - cell "php_guestbook" [ref=f11e510]
+            - cell [ref=f11e511]:
+              - link "PHP Guestbook" [ref=f11e512] [cursor=pointer]:
+                - /url: /admin/module/php_guestbook
+            - cell "app/ext" [ref=f11e513]
+            - cell "easy" [ref=f11e514]
+            - cell "0" [ref=f11e516]
+            - cell "web" [ref=f11e517]
+            - cell "webphpapacheguestbook" [ref=f11e518]
+          - row [ref=f11e519]:
+            - cell "guestbook_apache_root" [ref=f11e520]
+            - cell [ref=f11e521]:
+              - link "Apache Running as Root" [ref=f11e522] [cursor=pointer]:
+                - /url: /admin/module/guestbook_apache_root
+            - cell "vulnerability" [ref=f11e523]
+            - cell "hard" [ref=f11e524]
+            - cell "300" [ref=f11e526]
+            - cell "services" [ref=f11e527]
+            - cell "privilege-escalationapachemisconfigurationservices" [ref=f11e528]
+          - row [ref=f11e529]:
+            - cell "guestbook_dir_listing" [ref=f11e530]
+            - cell [ref=f11e531]:
+              - link "Apache Directory Listing Enabled" [ref=f11e532] [cursor=pointer]:
+                - /url: /admin/module/guestbook_dir_listing
+            - cell "vulnerability" [ref=f11e533]
+            - cell "easy" [ref=f11e534]
+            - cell "100" [ref=f11e536]
+            - cell "web" [ref=f11e537]
+            - cell "misconfigurationapacheinformation-disclosuredirectory-listing" [ref=f11e538]
+          - row [ref=f11e539]:
+            - cell "guestbook_phpinfo" [ref=f11e540]
+            - cell [ref=f11e541]:
+              - link "Exposed phpinfo() Page" [ref=f11e542] [cursor=pointer]:
+                - /url: /admin/module/guestbook_phpinfo
+            - cell "vulnerability" [ref=f11e543]
+            - cell "easy" [ref=f11e544]
+            - cell "100" [ref=f11e546]
+            - cell "web" [ref=f11e547]
+            - cell "information-disclosurephpmisconfiguration" [ref=f11e548]
+          - row [ref=f11e549]:
+            - cell "guestbook_writable_config" [ref=f11e550]
+            - cell [ref=f11e551]:
+              - link "World-Writable Guestbook Config" [ref=f11e552] [cursor=pointer]:
+                - /url: /admin/module/guestbook_writable_config
+            - cell "vulnerability" [ref=f11e553]
+            - cell "medium" [ref=f11e554]
+            - cell "200" [ref=f11e556]
+            - cell "filesystem" [ref=f11e557]
+            - cell "permissionsfilesystemphpconfiguration" [ref=f11e558]
+          - row [ref=f11e559]:
+            - cell "guestbook_xss" [ref=f11e560]
+            - cell [ref=f11e561]:
+              - link "Stored XSS in Guestbook" [ref=f11e562] [cursor=pointer]:
+                - /url: /admin/module/guestbook_xss
+            - cell "vulnerability" [ref=f11e563]
+            - cell "medium" [ref=f11e564]
+            - cell "200" [ref=f11e566]
+            - cell "web" [ref=f11e567]
+            - cell "xsswebphpinput-validation" [ref=f11e568]
+          - row [ref=f11e569]:
+            - cell "vulnerable_flask_app" [ref=f11e570]
+            - cell [ref=f11e571]:
+              - link "Vulnerable Flask Application" [ref=f11e572] [cursor=pointer]:
+                - /url: /admin/module/vulnerable_flask_app
+            - cell "app/ext" [ref=f11e573]
+            - cell "easy" [ref=f11e574]
+            - cell "0" [ref=f11e576]
+            - cell "web" [ref=f11e577]
+            - cell "webflaskpython" [ref=f11e578]
+          - row [ref=f11e579]:
+            - cell "flask_defacement" [ref=f11e580]
+            - cell [ref=f11e581]:
+              - link "Defaced Flask Homepage" [ref=f11e582] [cursor=pointer]:
+                - /url: /admin/module/flask_defacement
+            - cell "vulnerability" [ref=f11e583]
+            - cell "medium" [ref=f11e584]
+            - cell "200" [ref=f11e586]
+            - cell "web" [ref=f11e587]
+            - cell "webdefacementflask" [ref=f11e588]
+          - row [ref=f11e589]:
+            - cell "deface_website" [ref=f11e590]
+            - cell [ref=f11e591]:
+              - link "Deface Website" [ref=f11e592] [cursor=pointer]:
+                - /url: /admin/module/deface_website
+            - cell "goal" [ref=f11e593]
+            - cell "medium" [ref=f11e594]
+            - cell "0" [ref=f11e596]
+            - cell "impact" [ref=f11e597]
+            - cell "webdefacementimpact" [ref=f11e598]
+          - row [ref=f11e599]:
+            - cell "exfil_shadow" [ref=f11e600]
+            - cell [ref=f11e601]:
+              - link "Exfiltrate Shadow File" [ref=f11e602] [cursor=pointer]:
+                - /url: /admin/module/exfil_shadow
+            - cell "goal" [ref=f11e603]
+            - cell "medium" [ref=f11e604]
+            - cell "0" [ref=f11e606]
+            - cell "credential-access" [ref=f11e607]
+            - cell "exfilcredentialscollection" [ref=f11e608]
+          - row [ref=f11e609]:
+            - cell "install_c2" [ref=f11e610]
+            - cell [ref=f11e611]:
+              - link "Install C2 Beacon" [ref=f11e612] [cursor=pointer]:
+                - /url: /admin/module/install_c2
+            - cell "goal" [ref=f11e613]
+            - cell "hard" [ref=f11e614]
+            - cell "0" [ref=f11e616]
+            - cell "command-and-control" [ref=f11e617]
+            - cell "c2persistencecommand-and-control" [ref=f11e618]
+          - row [ref=f11e619]:
+            - cell "change_root_password" [ref=f11e620]
+            - cell [ref=f11e621]:
+              - link "Change the default root password" [ref=f11e622] [cursor=pointer]:
+                - /url: /admin/module/change_root_password
+            - cell "hardening" [ref=f11e623]
+            - cell "easy" [ref=f11e624]
+            - cell "100" [ref=f11e626]
+            - cell "authentication" [ref=f11e627]
+            - cell "passwordrootcredentials" [ref=f11e628]
+          - row [ref=f11e629]:
+            - cell "disable_ssh_root_login" [ref=f11e630]
+            - cell [ref=f11e631]:
+              - link "Disable SSH root login" [ref=f11e632] [cursor=pointer]:
+                - /url: /admin/module/disable_ssh_root_login
+            - cell "hardening" [ref=f11e633]
+            - cell "easy" [ref=f11e634]
+            - cell "100" [ref=f11e636]
+            - cell "network" [ref=f11e637]
+            - cell "sshauthenticationaccess-control" [ref=f11e638]
+          - row [ref=f11e639]:
+            - cell "install_fail2ban" [ref=f11e640]
+            - cell [ref=f11e641]:
+              - link "Install and enable fail2ban" [ref=f11e642] [cursor=pointer]:
+                - /url: /admin/module/install_fail2ban
+            - cell "hardening" [ref=f11e643]
+            - cell "medium" [ref=f11e644]
+            - cell "200" [ref=f11e646]
+            - cell "services" [ref=f11e647]
+            - cell "brute-forceauthenticationnetwork" [ref=f11e648]
+          - row [ref=f11e649]:
+            - cell "setup_ssh_key_auth" [ref=f11e650]
+            - cell [ref=f11e651]:
+              - link "Set up SSH key-based authentication" [ref=f11e652] [cursor=pointer]:
+                - /url: /admin/module/setup_ssh_key_auth
+            - cell "hardening" [ref=f11e653]
+            - cell "medium" [ref=f11e654]
+            - cell "200" [ref=f11e656]
+            - cell "authentication" [ref=f11e657]
+            - cell "sshkeysauthenticationaccess-control" [ref=f11e658]
+          - row [ref=f11e659]:
+            - cell "anonymous_ftp" [ref=f11e660]
+            - cell [ref=f11e661]:
+              - link "Anonymous FTP Access" [ref=f11e662] [cursor=pointer]:
+                - /url: /admin/module/anonymous_ftp
+            - cell "vulnerability" [ref=f11e663]
+            - cell "medium" [ref=f11e664]
+            - cell "200" [ref=f11e666]
+            - cell "network" [ref=f11e667]
+            - cell "networkftpanonymousunauthenticatedservices" [ref=f11e668]
+          - row [ref=f11e669]:
+            - cell "backdoor_bashrc" [ref=f11e670]
+            - cell [ref=f11e671]:
+              - link "Backdoor in Root .bashrc" [ref=f11e672] [cursor=pointer]:
+                - /url: /admin/module/backdoor_bashrc
+            - cell "vulnerability" [ref=f11e673]
+            - cell "easy" [ref=f11e674]
+            - cell "100" [ref=f11e676]
+            - cell "persistence" [ref=f11e677]
+            - cell "persistencebackdoorbashrcreverse-shell" [ref=f11e678]
+          - row [ref=f11e679]:
+            - cell "core_dumps_unrestricted" [ref=f11e680]
+            - cell [ref=f11e681]:
+              - link "Unrestricted Core Dumps" [ref=f11e682] [cursor=pointer]:
+                - /url: /admin/module/core_dumps_unrestricted
+            - cell "vulnerability" [ref=f11e683]
+            - cell "medium" [ref=f11e684]
+            - cell "200" [ref=f11e686]
+            - cell "configuration" [ref=f11e687]
+            - cell "configurationkernelcredentialscore-dumpinformation-disclosure" [ref=f11e688]
+          - row [ref=f11e689]:
+            - cell "ip_forwarding_enabled" [ref=f11e690]
+            - cell [ref=f11e691]:
+              - link "IP Forwarding Enabled" [ref=f11e692] [cursor=pointer]:
+                - /url: /admin/module/ip_forwarding_enabled
+            - cell "vulnerability" [ref=f11e693]
+            - cell "easy" [ref=f11e694]
+            - cell "100" [ref=f11e696]
+            - cell "configuration" [ref=f11e697]
+            - cell "networkconfigurationkernelpivoting" [ref=f11e698]
+          - row [ref=f11e699]:
+            - cell "malicious_cron_beacon" [ref=f11e700]
+            - cell [ref=f11e701]:
+              - link "Malicious Cron Job (C2 Beacon)" [ref=f11e702] [cursor=pointer]:
+                - /url: /admin/module/malicious_cron_beacon
+            - cell "vulnerability" [ref=f11e703]
+            - cell "medium" [ref=f11e704]
+            - cell "200" [ref=f11e706]
+            - cell "persistence" [ref=f11e707]
+            - cell "persistencecronc2beaconmalware" [ref=f11e708]
+          - row [ref=f11e709]:
+            - cell "nopasswd_sudo" [ref=f11e710]
+            - cell [ref=f11e711]:
+              - link "NOPASSWD sudo entry" [ref=f11e712] [cursor=pointer]:
+                - /url: /admin/module/nopasswd_sudo
+            - cell "vulnerability" [ref=f11e713]
+            - cell "medium" [ref=f11e714]
+            - cell "200" [ref=f11e716]
+            - cell "authentication" [ref=f11e717]
+            - cell "sudoprivilege-escalationmisconfiguration" [ref=f11e718]
+          - row [ref=f11e719]:
+            - cell "open_telnet" [ref=f11e720]
+            - cell [ref=f11e721]:
+              - link "Telnet Service Enabled" [ref=f11e722] [cursor=pointer]:
+                - /url: /admin/module/open_telnet
+            - cell "vulnerability" [ref=f11e723]
+            - cell "easy" [ref=f11e724]
+            - cell "100" [ref=f11e726]
+            - cell "network" [ref=f11e727]
+            - cell "networktelnetcleartextservices" [ref=f11e728]
+          - row [ref=f11e729]:
+            - cell "suid_find" [ref=f11e730]
+            - cell [ref=f11e731]:
+              - link "SUID bit on /usr/bin/find" [ref=f11e732] [cursor=pointer]:
+                - /url: /admin/module/suid_find
+            - cell "vulnerability" [ref=f11e733]
+            - cell "easy" [ref=f11e734]
+            - cell "100" [ref=f11e736]
+            - cell "filesystem" [ref=f11e737]
+            - cell "suidpermissionsprivilege-escalation" [ref=f11e738]
+          - row [ref=f11e739]:
+            - cell "suid_python" [ref=f11e740]
+            - cell [ref=f11e741]:
+              - link "SUID Bit on Python3" [ref=f11e742] [cursor=pointer]:
+                - /url: /admin/module/suid_python
+            - cell "vulnerability" [ref=f11e743]
+            - cell "medium" [ref=f11e744]
+            - cell "200" [ref=f11e746]
+            - cell "filesystem" [ref=f11e747]
+            - cell "suidpermissionsprivilege-escalationpython" [ref=f11e748]
+          - row [ref=f11e749]:
+            - cell "unauthorized_ssh_key" [ref=f11e750]
+            - cell [ref=f11e751]:
+              - link "Unauthorized SSH key in root authorized_keys" [ref=f11e752] [cursor=pointer]:
+                - /url: /admin/module/unauthorized_ssh_key
+            - cell "vulnerability" [ref=f11e753]
+            - cell "medium" [ref=f11e754]
+            - cell "200" [ref=f11e756]
+            - cell "authentication" [ref=f11e757]
+            - cell "sshbackdoorpersistenceauthentication" [ref=f11e758]
+          - row [ref=f11e759]:
+            - cell "weak_ssh_credentials" [ref=f11e760]
+            - cell [ref=f11e761]:
+              - link "Weak SSH Credentials" [ref=f11e762] [cursor=pointer]:
+                - /url: /admin/module/weak_ssh_credentials
+            - cell "vulnerability" [ref=f11e763]
+            - cell "easy" [ref=f11e764]
+            - cell "0" [ref=f11e766]
+            - cell "authentication" [ref=f11e767]
+            - cell "sshcredentialsinitial-accessbrute-force" [ref=f11e768]
+          - row [ref=f11e769]:
+            - cell "world_writable_shadow" [ref=f11e770]
+            - cell [ref=f11e771]:
+              - link "World-writable /etc/shadow" [ref=f11e772] [cursor=pointer]:
+                - /url: /admin/module/world_writable_shadow
+            - cell "vulnerability" [ref=f11e773]
+            - cell "medium" [ref=f11e774]
+            - cell "200" [ref=f11e776]
+            - cell "filesystem" [ref=f11e777]
+            - cell "permissionsshadowauthentication" [ref=f11e778]
+          - row [ref=f11e779]:
+            - cell "writable_cron_script" [ref=f11e780]
+            - cell [ref=f11e781]:
+              - link "World-writable cron script" [ref=f11e782] [cursor=pointer]:
+                - /url: /admin/module/writable_cron_script
+            - cell "vulnerability" [ref=f11e783]
+            - cell "medium" [ref=f11e784]
+            - cell "200" [ref=f11e786]
+            - cell "filesystem" [ref=f11e787]
+            - cell "cronpermissionsprivilege-escalation" [ref=f11e788]
+          - row [ref=f11e789]:
+            - cell "writable_passwd" [ref=f11e790]
+            - cell [ref=f11e791]:
+              - link "World-Writable /etc/passwd" [ref=f11e792] [cursor=pointer]:
+                - /url: /admin/module/writable_passwd
+            - cell "vulnerability" [ref=f11e793]
+            - cell "hard" [ref=f11e794]
+            - cell "300" [ref=f11e796]
+            - cell "filesystem" [ref=f11e797]
+            - cell "permissionsprivilege-escalationfilesystempasswd" [ref=f11e798]
+      - generic [ref=f11e799]: 62 modules

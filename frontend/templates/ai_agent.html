@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}AI Red Team Agent{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>AI Red Team Agent</h1>
+    <p class="subtitle">Autonomous penetration testing powered by AI</p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>New Session</h2>
+    </div>
+    <div class="card-body">
+        <form id="new-session-form" class="form-grid">
+            <div class="form-group">
+                <label for="event-select">Event</label>
+                <select id="event-select" required>
+                    <option value="">Select event...</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="vm-select">Target VM (optional)</label>
+                <select id="vm-select">
+                    <option value="">Any VM in event</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="target-ip">Target IP (optional)</label>
+                <input type="text" id="target-ip" placeholder="10.10.10.50">
+            </div>
+            <div class="form-group checkbox-group">
+                <label>
+                    <input type="checkbox" id="approval-required" checked>
+                    Require approval for actions
+                </label>
+            </div>
+            <div class="form-group full-width">
+                <button type="submit" class="btn btn-primary">Create Session</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Active Sessions</h2>
+        <button class="btn btn-sm" onclick="loadSessions()">Refresh</button>
+    </div>
+    <div class="card-body">
+        <table class="data-table" id="sessions-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Event</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Steps</th>
+                    <th>Pending</th>
+                    <th>Errors</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="sessions-body">
+                <tr><td colspan="8" class="loading">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+const API_BASE = '/admin/ai-agent';
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadEvents();
+    loadSessions();
+    setInterval(loadSessions, 10000);
+});
+
+async function loadEvents() {
+    try {
+        const resp = await fetch('/admin/events');
+        const events = await resp.json();
+        const select = document.getElementById('event-select');
+        events.forEach(e => {
+            const opt = document.createElement('option');
+            opt.value = e.id;
+            opt.textContent = e.name;
+            select.appendChild(opt);
+        });
+        select.addEventListener('change', () => loadVms(select.value));
+    } catch (err) {
+        console.error('Failed to load events:', err);
+    }
+}
+
+async function loadVms(eventId) {
+    const select = document.getElementById('vm-select');
+    select.innerHTML = '<option value="">Any VM in event</option>';
+    if (!eventId) return;
+    try {
+        const resp = await fetch(`/admin/vms?event_id=${eventId}`);
+        if (!resp.ok) return;
+        const vms = await resp.json();
+        vms.forEach(vm => {
+            const opt = document.createElement('option');
+            opt.value = vm.id;
+            opt.textContent = `${vm.hostname} (${vm.ip_address || 'no IP'})`;
+            select.appendChild(opt);
+        });
+    } catch (err) {
+        console.error('Failed to load VMs:', err);
+    }
+}
+
+async function loadSessions() {
+    try {
+        const resp = await fetch(`${API_BASE}/sessions`);
+        const sessions = await resp.json();
+        const tbody = document.getElementById('sessions-body');
+
+        if (!sessions.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty">No sessions yet</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = sessions.map(s => {
+            const statusClass = s.status === 'running' ? 'status-active' :
+                               s.status === 'pending' ? 'status-creating' :
+                               s.status === 'stopped' ? 'status-stopped' : 'status-failed';
+            const target = s.target_ip || (s.ctf_vm_id ? `VM ${s.ctf_vm_id}` : `Event ${s.ctf_event_id}`);
+            const created = new Date(s.created_at).toLocaleString();
+            const errorCount = s.error_count || 0;
+
+            return `<tr>
+                <td><a href="/admin/ai-agent/session/${s.id}" class="link">${s.id.slice(0,8)}</a></td>
+                <td>Event ${s.ctf_event_id}</td>
+                <td>${target}</td>
+                <td><span class="status-badge ${statusClass}">${s.status}</span></td>
+                <td>${s.current_step}/${s.max_steps}</td>
+                <td>${s.pending_actions?.length || 0}</td>
+                ${errorCount > 0 ? `<td><span class="error-badge">${errorCount}</span></td>` : `<td class="mono">${created}</td>`}
+                <td>
+                    ${s.status === 'running' ? `<button class="btn btn-sm btn-danger" onclick="stopSession('${s.id}')">Stop</button>` : ''}
+                    ${s.status === 'pending' ? `<button class="btn btn-sm btn-primary" onclick="startSession('${s.id}')">Start</button>` : ''}
+                </td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Failed to load sessions:', err);
+    }
+}
+
+document.getElementById('new-session-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const eventData = {
+        event_id: parseInt(document.getElementById('event-select').value),
+        approval_required: document.getElementById('approval-required').checked,
+    };
+    const vmId = document.getElementById('vm-select').value;
+    if (vmId) eventData.vm_id = parseInt(vmId);
+    const targetIp = document.getElementById('target-ip').value;
+    if (targetIp) eventData.target_ip = targetIp;
+
+    try {
+        const resp = await fetch(`${API_BASE}/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(eventData),
+        });
+        const session = await resp.json();
+        if (session.id) {
+            window.location.href = `/admin/ai-agent/session/${session.id}`;
+        }
+    } catch (err) {
+        alert('Failed to create session: ' + err.message);
+    }
+});
+
+async function startSession(id) {
+    try {
+        await fetch(`${API_BASE}/sessions/${id}/start`, { method: 'POST' });
+        loadSessions();
+    } catch (err) {
+        alert('Failed to start session: ' + err.message);
+    }
+}
+
+async function stopSession(id) {
+    if (!confirm('Stop this AI agent session?')) return;
+    try {
+        await fetch(`${API_BASE}/sessions/${id}/stop`, { method: 'POST' });
+        loadSessions();
+    } catch (err) {
+        alert('Failed to stop session: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

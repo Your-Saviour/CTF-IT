@@ -178,7 +178,7 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
             "module_name": module_info.get("module_name"),
             "phase": module_info.get("phase"),
             "status": link.get("status"),  # exit-code: 0=success, >0=fail; -3=collecting, -2=caldera-fail, -5=discard
-            "output": (link.get("output") or "")[:500],  # truncate long outputs
+            "output": (link.get("output") or "")[:2000],  # truncate long outputs
             "collect": link.get("collect"),
             "finish": link.get("finish"),
         })

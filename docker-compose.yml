@@ -11,7 +11,38 @@ services:
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
       - COOKIE_SECURE=false
+      - AGENT_API_URL=http://ai-agent:8000/api/agent
+      - AGENT_API_KEY=${AGENT_API_KEY:-}
     restart: unless-stopped
+
+  ai-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    volumes:
+      - agent_data:/app/data
+    environment:
+      - AGENT_DATABASE_URL=sqlite:///data/agent.db
+      - CTF_API_URL=http://api:8000
+      - CTF_API_KEY=${CTF_API_KEY:-}
+      - CALDERA_INTERNAL_URL=${CALDERA_INTERNAL_URL:-http://ctf-caldera:8888}
+      - CALDERA_CONFIG_PATH=${CALDERA_CONFIG_PATH:-/caldera-config/local.yml}
+      - AI_API_BASE=${AI_API_BASE:-}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-gpt-4o}
+      - AGENT_API_KEY=${AGENT_API_KEY:-}
+      - AGENT_MAX_STEPS=${AGENT_MAX_STEPS:-100}
+      - AGENT_STEP_TIMEOUT=${AGENT_STEP_TIMEOUT:-120}
+      - AGENT_APPROVAL_REQUIRED=${AGENT_APPROVAL_REQUIRED:-true}
+      - AGENT_AUTO_STEP=${AGENT_AUTO_STEP:-false}
+      - AGENT_AUTO_STEP_INTERVAL=${AGENT_AUTO_STEP_INTERVAL:-30}
+      - WEBSOCKET_ENABLED=${WEBSOCKET_ENABLED:-true}
+      - WEBSOCKET_HEARTBEAT_INTERVAL=${WEBSOCKET_HEARTBEAT_INTERVAL:-30}
+      - MAX_ERROR_HISTORY=${MAX_ERROR_HISTORY:-50}
+      - ERROR_DISPLAY_DURATION=${ERROR_DISPLAY_DURATION:-300}
+      - AUTO_RETRY_FAILED_OPS=${AUTO_RETRY_FAILED_OPS:-false}
+    restart: unless-stopped
+    profiles: ["ai-agent"]
 
   tests:
     profiles: ["test"]
@@ -20,8 +51,9 @@ services:
       target: test
     env_file: .env
     environment:
-      - DATABASE_URL=sqlite://
+      - AGENT_DATABASE_URL=sqlite://
       - COOKIE_SECURE=false
 
 volumes:
   api_data:
+  agent_data:

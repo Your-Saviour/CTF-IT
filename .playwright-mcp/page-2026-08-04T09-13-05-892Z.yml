@@ -1,0 +1,123 @@
+- generic [active] [ref=f12e1]:
+  - navigation [ref=f12e2]:
+    - link ">_ CTF Platform |" [ref=f12e3] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f12e4]:
+      - link "Admin" [ref=f12e5] [cursor=pointer]:
+        - /url: /admin
+      - button "Logout" [ref=f12e7] [cursor=pointer]
+  - generic [ref=f12e8]:
+    - generic [ref=f12e9]:
+      - link "← Admin" [ref=f12e10] [cursor=pointer]:
+        - /url: /admin
+      - heading "playwright-e2e-02" [level=1] [ref=f12e11]
+      - generic [ref=f12e12]: registered
+    - generic [ref=f12e13]:
+      - generic [ref=f12e14]:
+        - heading "Connection Info" [level=3] [ref=f12e15]
+        - generic [ref=f12e16]:
+          - generic [ref=f12e17]:
+            - generic [ref=f12e18]: Hostname
+            - generic [ref=f12e19]: playwright-e2e-02
+          - generic [ref=f12e20]:
+            - generic [ref=f12e21]: IP Address
+            - generic [ref=f12e22]: 104.238.133.253
+          - generic [ref=f12e23]:
+            - generic [ref=f12e24]: OS
+            - generic [ref=f12e25]: AlmaLinux 10 x64
+          - generic [ref=f12e26]:
+            - generic [ref=f12e27]: SSH Port
+            - generic [ref=f12e28]: "22"
+          - generic [ref=f12e29]:
+            - generic [ref=f12e30]: Vultr Plan
+            - generic [ref=f12e31]: vc2-1c-1gb
+          - generic [ref=f12e32]:
+            - generic [ref=f12e33]: Region
+            - generic [ref=f12e34]: ewr
+        - generic [ref=f12e35]:
+          - generic [ref=f12e36]: Agent
+          - generic [ref=f12e37]: —
+        - generic [ref=f12e38]:
+          - generic [ref=f12e39]: SSH Command
+          - generic "Click to copy" [ref=f12e40] [cursor=pointer]: ssh root@104.238.133.253 COPY
+        - generic [ref=f12e41]:
+          - button "Test Connection" [ref=f12e42] [cursor=pointer]
+          - generic [ref=f12e183]: ✗ Failed
+        - generic [ref=f12e184]: "[Errno 111] Connection refused"
+        - generic [ref=f12e43]:
+          - generic [ref=f12e44]: "Created: 04/08/2026, 09:10:32"
+          - generic [ref=f12e45]: "Updated: 04/08/2026, 09:12:13"
+      - generic [ref=f12e46]:
+        - heading "Assignment" [level=3] [ref=f12e47]
+        - generic [ref=f12e48]:
+          - generic [ref=f12e49]: Event
+          - generic [ref=f12e50]: Playwright UI Validation 2026-08-04
+        - generic [ref=f12e51]:
+          - generic [ref=f12e52]: Team
+          - generic [ref=f12e53]: Playwright E2E Team
+        - generic [ref=f12e54]:
+          - generic [ref=f12e55]: Status
+          - combobox [ref=f12e57]:
+            - option "registered" [selected]
+            - option "provisioning"
+            - option "active"
+            - option "stopped"
+            - option "failed"
+        - generic [ref=f12e58]:
+          - generic [ref=f12e59]: Notes
+          - generic [ref=f12e60]:
+            - textbox "Add notes about this VM..." [ref=f12e61]: Full frontend E2E validation VM (1GB compatible plan).
+            - button "Save Notes" [ref=f12e62] [cursor=pointer]
+    - generic [ref=f12e63]:
+      - heading "Assigned Modules" [level=3] [ref=f12e64]
+      - generic [ref=f12e65]:
+        - button "Auto-assign from Quota" [ref=f12e66] [cursor=pointer]
+        - button "+ Add Module" [ref=f12e67] [cursor=pointer]
+      - table [ref=f12e68]:
+        - rowgroup [ref=f12e69]:
+          - row [ref=f12e70]:
+            - columnheader "ID" [ref=f12e71]
+            - columnheader "Name" [ref=f12e72]
+            - columnheader "Type" [ref=f12e73]
+            - columnheader "Difficulty" [ref=f12e74]
+            - columnheader "Points" [ref=f12e75]
+            - columnheader "Status" [ref=f12e76]
+            - columnheader [ref=f12e77]
+        - rowgroup [ref=f12e78]:
+          - row [ref=f12e170]:
+            - cell "No modules assigned. Click \"Auto-assign from Quota\" to get started." [ref=f12e171]
+    - generic [ref=f12e81]:
+      - heading "VM Creation Status" [level=3] [ref=f12e82]
+      - generic [ref=f12e83]:
+        - generic [ref=f12e172]:
+          - generic [ref=f12e173]: ✓
+          - text: Staging playbook
+        - generic [ref=f12e174]:
+          - generic [ref=f12e175]: ✓
+          - text: Configuring Semaphore
+        - generic [ref=f12e176]:
+          - generic [ref=f12e177]: ✓
+          - text: Creating Vultr instance
+        - generic [ref=f12e178]:
+          - generic [ref=f12e179]: ✓
+          - text: Extracting IP / DNS
+        - generic [ref=f12e180]:
+          - generic [ref=f12e181]: ✓
+          - text: VM ready
+    - generic [ref=f12e94]:
+      - heading "Red Team Status Run Attack" [level=3] [ref=f12e95]:
+        - generic [ref=f12e96]: Red Team Status
+        - button "Run Attack" [ref=f12e97] [cursor=pointer]
+      - generic [ref=f12e98]: No attack results yet.
+    - generic [ref=f12e99]:
+      - heading "Attack Graph" [level=3] [ref=f12e100]
+      - generic [ref=f12e101]: No attack tree data available. Run an attack to generate the tree.
+    - generic [ref=f12e102]:
+      - heading "Actions" [level=3] [ref=f12e103]
+      - generic [ref=f12e104]:
+        - button "Provision VM" [ref=f12e105] [cursor=pointer]
+        - button "Deploy Agent" [ref=f12e106] [cursor=pointer]
+        - button "Export Ansible Playbook" [ref=f12e107] [cursor=pointer]
+        - button "Destroy on Vultr" [ref=f12e182] [cursor=pointer]
+        - button "Delete VM" [ref=f12e108] [cursor=pointer]
+      - button "Show SSH Public Key" [ref=f12e109]

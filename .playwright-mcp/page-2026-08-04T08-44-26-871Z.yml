@@ -1,0 +1,27 @@
+- generic [ref=e1]:
+  - navigation [ref=e2]:
+    - link ">_ CTF Platform |" [ref=e3] [cursor=pointer]:
+      - /url: /
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: ">_ CTFPlatform"
+      - generic [ref=e8]: Your sandbox. Your rules.|
+    - generic [ref=e11]:
+      - heading "Register" [level=2] [ref=e23]
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: Username
+          - textbox "Username" [ref=e16]
+        - generic [ref=e17]:
+          - generic [ref=e18]: Password
+          - textbox "Password" [ref=e19]
+        - generic [ref=e24]:
+          - generic [ref=e25]: Event
+          - combobox "Event" [ref=e26]:
+            - option "No events available" [selected]
+          - generic [ref=e27]: No events are currently open for registration.
+        - button "Register" [disabled] [ref=e28] [cursor=pointer]
+      - paragraph [ref=e21]:
+        - text: Already have an account?
+        - link "Login" [active] [ref=e29] [cursor=pointer]:
+          - /url: "#"
