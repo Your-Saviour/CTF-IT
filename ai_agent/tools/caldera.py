@@ -334,23 +334,32 @@ class CalderaTool:
         except httpx.HTTPError as e:
             return f"Failed to queue ability: {e}"
 
-    @lru_cache(maxsize=100)
+    _adversaries_cache: list[dict] | None = None
+    _planners_cache: list[dict] | None = None
+
     async def _get_adversaries(self) -> list[dict]:
         """Get adversaries with caching."""
         global cache_stats
+        if self._adversaries_cache is not None:
+            cache_stats["hits"] += 1
+            return self._adversaries_cache
         cache_stats["misses"] += 1
         resp = await self.client.get("/api/v2/adversaries")
         resp.raise_for_status()
-        return resp.json()
+        self._adversaries_cache = resp.json()
+        return self._adversaries_cache
 
-    @lru_cache(maxsize=100)
     async def _get_planners(self) -> list[dict]:
         """Get planners with caching."""
         global cache_stats
+        if self._planners_cache is not None:
+            cache_stats["hits"] += 1
+            return self._planners_cache
         cache_stats["misses"] += 1
         resp = await self.client.get("/api/v2/planners")
         resp.raise_for_status()
-        return resp.json()
+        self._planners_cache = resp.json()
+        return self._planners_cache
 
     def invalidate_adversary_cache(self) -> None:
         """Invalidate adversary cache."""
