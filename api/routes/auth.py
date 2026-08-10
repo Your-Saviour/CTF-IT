@@ -105,6 +105,7 @@ async def register(
     admin_bootstrap_token: str = Form(""),
     db: Session = Depends(get_db),
 ):
+    from api.models import User as UserModel, Event as EventModel
     username = username.strip()
     password_bytes = password.encode("utf-8")
     if not 3 <= len(username) <= 64:
@@ -114,8 +115,8 @@ async def register(
 
     import sys
     db_path = db.bind.url.database if db.bind else "N/A"
-    raw_count = db.query(User).count()
-    all_users = db.query(User).all()
+    raw_count = db.query(UserModel).count()
+    all_users = db.query(UserModel).all()
     user_ids = [u.id for u in all_users]
     user_names = [u.username for u in all_users]
     print(f"DBG-REGISTER: count={raw_count} first_user={raw_count == 0} token_set={bool(ADMIN_BOOTSTRAP_TOKEN)} db_path={db_path} user_ids={user_ids} user_names={user_names}", file=sys.stderr, flush=True)
@@ -127,14 +128,14 @@ async def register(
     if not hmac.compare_digest(admin_bootstrap_token, ADMIN_BOOTSTRAP_TOKEN):
         return RedirectResponse("/?error=invalid_bootstrap_token", status_code=303)
 
-    event = db.query(Event).filter(Event.id == event_id).first()
+    event = db.query(EventModel).filter(EventModel.id == event_id).first()
     if not event:
         return RedirectResponse("/?error=invalid_event", status_code=303)
-    if db.query(User).filter(User.username == username).first():
+    if db.query(UserModel).filter(UserModel.username == username).first():
         return RedirectResponse("/?error=username_taken", status_code=303)
 
     hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode()
-    user = User(username=username, password_hash=hashed, event_id=event.id)
+    user = UserModel(username=username, password_hash=hashed, event_id=event.id)
 
     user.is_admin = True
 
