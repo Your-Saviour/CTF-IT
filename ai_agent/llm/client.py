@@ -67,7 +67,14 @@ class LLMClient:
         resp = await self.client.chat.completions.create(**kwargs)
         message = resp.choices[0].message
         content = message.content or getattr(message, "reasoning_content", "") or ""
-        return content.strip()
+        content = content.strip()
+        # Strip markdown code blocks that some models wrap responses in
+        if content.startswith("```"):
+            lines = content.split("\n")
+            # Remove the opening ```[language] line and closing ``` line
+            content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            content = content.strip()
+        return content
 
     async def chat_structured(
         self,
