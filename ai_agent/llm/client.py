@@ -4,28 +4,9 @@ import uuid
 from typing import Any
 
 import httpx
+from openai import AsyncOpenAI
 
 from ai_agent.config import get_config
-
-_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
-
-
-def _resolve_verify(verify_ssl: object) -> bool | str | ssl.SSLContext:
-    """Resolve verify_ssl to a value httpx understands."""
-    if isinstance(verify_ssl, str):
-        verify_ssl = verify_ssl.lower() not in ("false", "0", "no")
-    if verify_ssl is True:
-        return True
-    if verify_ssl is False:
-        # Use CA bundle instead of bare False — avoids httpx SSL context
-        # caching issues with RunPod proxy certificates
-        if _CA_BUNDLE:
-            return _CA_BUNDLE
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        return ctx
-    return verify_ssl
 
 
 class LLMClient:
@@ -33,22 +14,39 @@ class LLMClient:
 
     def __init__(self):
         config = get_config()
-        self.base_url = config.AI_API_BASE.rstrip("/")
+        base_url = config.AI_API_BASE.rstrip("/") + "/"
         self.api_key = config.AI_API_KEY
         self.model = config.AI_MODEL
         verify_ssl = getattr(config, "AI_API_VERIFY_SSL", True)
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=120.0,
-            verify=_resolve_verify(verify_ssl),
-        )
+        if isinstance(verify_ssl, str):
+            verify_ssl = verify_ssl.lower() not in ("false", "0", "no")
+
+        if verify_ssl is False:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            self.client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=base_url,
+                http_client=httpx.AsyncClient(
+                    timeout=120.0,
+                    verify=ctx,
+                    trust_env=False,
+                ),
+            )
+        else:
+            self.client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=base_url,
+                http_client=httpx.AsyncClient(
+                    timeout=120.0,
+                    verify=True,
+                    trust_env=False,
+                ),
+            )
 
     async def close(self):
-        await self.client.aclose()
+        await self.client.http_client.aclose()
 
     async def chat(
         self,
@@ -57,20 +55,18 @@ class LLMClient:
         max_tokens: int = 4096,
         response_format: dict | None = None,
     ) -> str:
-        payload = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
         if response_format:
-            payload["response_format"] = response_format
+            kwargs["response_format"] = response_format
 
-        resp = await self.client.post("/chat/completions", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        message = data["choices"][0]["message"]
-        content = message.get("content") or message.get("reasoning_content", "")
+        resp = await self.client.chat.completions.create(**kwargs)
+        message = resp.choices[0].message
+        content = message.content or getattr(message, "reasoning_content", "") or ""
         return content.strip()
 
     async def chat_structured(
