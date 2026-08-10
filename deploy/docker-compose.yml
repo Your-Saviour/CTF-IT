@@ -294,21 +294,21 @@ services:
       dockerfile: Dockerfile.agent
     container_name: ctf-ai-agent
     restart: unless-stopped
+    network_mode: host
     env_file: ../.env
     volumes:
       - ctf-ai-agent_data:/app/data
       - ctf-shared_playbooks:/shared/playbooks:ro
       - ./caldera/config/local.yml:/caldera-config/local.yml:ro
     environment:
-      - CTF_API_URL=http://api:8000
-      - CALDERA_INTERNAL_URL=http://ctf-caldera:8888
+      - CTF_API_URL=http://172.19.0.6:8000
+      - CALDERA_INTERNAL_URL=http://172.18.0.5:8888
       - CALDERA_CONFIG_PATH=/caldera-config/local.yml
       - AGENT_MAX_STEPS=100
       - AGENT_APPROVAL_REQUIRED=true
       - AGENT_AUTO_STEP=false
       - AGENT_DATABASE_URL=sqlite:///data/agent.db
-    networks:
-      - ctf-internal
+      - AI_API_VERIFY_SSL=false
     depends_on:
       - api
       - caldera

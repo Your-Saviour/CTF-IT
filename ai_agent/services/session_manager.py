@@ -78,12 +78,15 @@ class SessionManager:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 headers = {"X-API-Key": ctf_api_key}
                 try:
-                    resp = await client.get(
-                        f"{self.config.CTF_API_URL}/admin/caldera/attack-tree/{vm_id}",
-                        headers=headers,
-                    )
+                    url = f"{self.config.CTF_API_URL}/admin/caldera/attack-tree/{vm_id}"
+                    logger.info(f"Fetching attack tree from {url}")
+                    resp = await client.get(url, headers=headers)
+                    logger.info(f"Attack tree response: {resp.status_code}, body length: {len(resp.text)}")
                     if resp.status_code == 200:
                         attack_tree_json = json.dumps(resp.json())
+                        logger.info(f"Attack tree stored, length: {len(attack_tree_json)}")
+                    else:
+                        logger.warning(f"Failed to fetch attack tree: {resp.status_code} {resp.text[:200]}")
                 except Exception as e:
                     logger.warning(f"Failed to fetch attack tree for VM {vm_id}: {e}")
 
@@ -640,6 +643,13 @@ class SessionManager:
         planner = self.planners.get(session.id)
         tree_state = planner.get_tree_state() if planner else {}
 
+        attack_tree = tree_state
+        if not attack_tree and session.attack_tree_json:
+            try:
+                attack_tree = json.loads(session.attack_tree_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         return {
             "id": session.id,
             "ctf_event_id": session.ctf_event_id,
@@ -655,7 +665,7 @@ class SessionManager:
             "stopped_at": session.stopped_at.isoformat() if session.stopped_at else None,
             "pending_actions": [self._action_to_dict(a) for a in pending_actions],
             "recent_actions": [self._action_to_dict(a) for a in recent_actions],
-            "attack_tree": tree_state,
+            "attack_tree": attack_tree,
         }
 
     def _action_to_dict(self, action: AgentAction) -> dict[str, Any]:

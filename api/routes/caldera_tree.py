@@ -1,8 +1,9 @@
 """Caldera attack tree API endpoints."""
 
 import json
+import os
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -12,16 +13,24 @@ from api.routes.admin import require_admin
 
 router = APIRouter(prefix="/admin/caldera", tags=["admin"])
 
+API_KEY = os.environ.get("CTF_API_KEY", "")
+
 
 @router.get("/attack-tree/{vm_id}")
-async def get_attack_tree(vm_id: int, request: Request, db: Session = Depends(get_db)):
+async def get_attack_tree(
+    vm_id: int,
+    request: Request,
+    x_api_key: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
     """Return the attack tree for a VM, computed from its assigned modules.
 
     If the VM has a cached attack_tree_json, returns that with an is_stale flag.
     Otherwise computes fresh from VMModule assignments.
     """
+    # Accept API key auth for agent service, or admin session for UI
     admin = require_admin(request, db)
-    if not admin:
+    if not admin and (not API_KEY or x_api_key != API_KEY):
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     vm = db.query(VM).filter(VM.id == vm_id).first()

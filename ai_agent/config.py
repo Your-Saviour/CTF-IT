@@ -16,6 +16,7 @@ class AgentConfig:
     AI_API_BASE: str = os.environ.get("AI_API_BASE", "http://localhost:8080/v1")
     AI_API_KEY: str = os.environ.get("AI_API_KEY", "")
     AI_MODEL: str = os.environ.get("AI_MODEL", "gpt-4o")
+    AI_API_VERIFY_SSL: bool = os.environ.get("AI_API_VERIFY_SSL", "true").lower() in ("true", "1", "yes")
 
     # Caldera
     CALDERA_URL: str = os.environ.get("CALDERA_INTERNAL_URL", "http://ctf-caldera:8888")

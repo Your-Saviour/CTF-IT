@@ -27,7 +27,7 @@ class EGATSPlanner:
         self.session_id = session_id
         self.tree = AttackTree()
         self.state_store = StateStore(session_id)
-        self.context_manager = ContextManager(session_id)
+        self.context_manager = ContextManager(session_id, self.state_store)
         self.caldera_tool = CalderaTool(session_id)
         self.llm = get_llm()
         self.config = get_config()
@@ -50,34 +50,53 @@ class EGATSPlanner:
         self.tree.root = root
         self.tree.budget_remaining = self.config.MAX_STEPS
 
-        nodes = ctf_data.get("nodes", {})
-        edges = ctf_data.get("edges", [])
+        # Handle both wrapped format {"tree": {...}} and flat format
+        if "tree" in ctf_data:
+            inner = ctf_data["tree"]
+            nodes_raw = inner.get("nodes", [])
+            edges = inner.get("edges", [])
+        else:
+            nodes_raw = ctf_data.get("nodes", [])
+            edges = ctf_data.get("edges", [])
 
-        node_map: dict[str, AttackNode] = {}
-        for nid, ndata in nodes.items():
+        # nodes_raw can be a list (CTF API format) or dict (legacy format)
+        if isinstance(nodes_raw, list):
+            node_map: dict[str, dict] = {n.get("id", str(i)): n for i, n in enumerate(nodes_raw)}
+        else:
+            node_map = nodes_raw
+
+        node_objects: dict[str, AttackNode] = {}
+        for nid, ndata in node_map.items():
+            module_name = ndata.get("module_name", nid)
+            tactic = ndata.get("tactic", "")
+            desc = f"{module_name} ({tactic})" if tactic else module_name
             node = AttackNode(
                 id=nid,
-                description=f"{ndata.get('module_name', nid)} ({ndata.get('tactic', '')})",
+                description=desc,
                 node_type="hypothesis",
                 metadata=ndata,
                 depth=ndata.get("phase", 0),
             )
-            node_map[nid] = node
+            node_objects[nid] = node
 
         # Build adjacency: edges are [source, target, ...] where source is prerequisite
         # We want: prerequisites are parents, dependents are children
-        children_of: dict[str, list[str]] = {nid: [] for nid in node_map}
+        children_of: dict[str, list[str]] = {nid: [] for nid in node_objects}
         has_parent: set[str] = set()
 
         for edge in edges:
-            if len(edge) >= 2:
+            if isinstance(edge, dict):
+                src, dst = edge.get("source"), edge.get("target")
+            elif isinstance(edge, (list, tuple)) and len(edge) >= 2:
                 src, dst = edge[0], edge[1]
-                if src in node_map and dst in node_map:
-                    children_of[src].append(dst)
-                    has_parent.add(dst)
+            else:
+                continue
+            if src in node_objects and dst in node_objects:
+                children_of[src].append(dst)
+                has_parent.add(dst)
 
         # Build tree: nodes without parents are root children
-        for nid, node in node_map.items():
+        for nid, node in node_objects.items():
             if nid not in has_parent:
                 root.children.append(node)
             else:
@@ -85,10 +104,10 @@ class EGATSPlanner:
                 for parent_id, child_ids in children_of.items():
                     if nid in child_ids:
                         node.parent_id = parent_id
-                        node_map[parent_id].children.append(node)
+                        node_objects[parent_id].children.append(node)
                         break
 
-        self._log("Loaded attack tree from CTF platform", {"nodes": len(nodes), "edges": len(edges)})
+        self._log("Loaded attack tree from CTF platform", {"nodes": len(node_objects), "edges": len(edges)})
         return self.tree
 
     async def plan_next_action(self) -> dict[str, Any] | None:
@@ -376,7 +395,9 @@ Respond with JSON:
 
         # Also write to database
         with get_db() as db:
+            import uuid
             log = AgentLog(
+                id=str(uuid.uuid4()),
                 session_id=self.session_id,
                 level=level,
                 component="egats",
