@@ -321,6 +321,7 @@ volumes:
   ctf-semaphore_postgres_data:
   ctf-semaphore_data:
   ctf-shared_playbooks:
+  ctf-ai-agent_data:
 
 networks:
   ctf-proxy:
