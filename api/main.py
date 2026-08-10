@@ -11,8 +11,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from api.database import get_db, init_db
-from api.models import Event, User, VM
-from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, vm, vm_goals
+from api.models import Event, User, VM, utcnow
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
 
 
@@ -25,6 +25,22 @@ async def lifespan(app: FastAPI):
     try:
         # Schema migrations — run before any ORM queries so new columns exist first
         inspector = inspect(db.bind)
+
+        if not inspector.has_table("service_credentials"):
+            db.execute(text("""
+                CREATE TABLE service_credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name VARCHAR(64) NOT NULL,
+                    credential_type VARCHAR(32) NOT NULL,
+                    username VARCHAR(256),
+                    password VARCHAR(256) NOT NULL,
+                    url VARCHAR(512),
+                    description TEXT,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    created_by INTEGER
+                )
+            """))
 
         if inspector.has_table("vms"):
             existing = {col["name"] for col in inspector.get_columns("vms")}
@@ -128,6 +144,85 @@ async def lifespan(app: FastAPI):
             )
             db.add(Event(name="Default CTF Event", quota=quota, status="open"))
             db.commit()
+
+        # Seed default service credentials if none exist
+        from api.services.secrets import encrypt_secret
+        from api.models import ServiceCredential
+        if not db.query(ServiceCredential).count():
+            domain = os.environ.get("DOMAIN", "example.com")
+            credentials = [
+                {
+                    "service_name": "Caldera Admin",
+                    "credential_type": "admin",
+                    "username": "admin",
+                    "password": os.environ.get("CALDERA_ADMIN_PASSWORD", "admin"),
+                    "url": f"https://caldera.{domain}",
+                    "description": "MITRE Caldera C2 admin credentials"
+                },
+                {
+                    "service_name": "Semaphore Admin",
+                    "credential_type": "admin",
+                    "username": os.environ.get("SEMAPHORE_ADMIN", "admin"),
+                    "password": os.environ.get("SEMAPHORE_ADMIN_PASSWORD", "admin"),
+                    "url": f"https://semaphore.{domain}",
+                    "description": "Ansible Semaphore admin credentials"
+                },
+                {
+                    "service_name": "Dockhand",
+                    "credential_type": "admin",
+                    "username": "admin",
+                    "password": os.environ.get("DOCKHAND_ADMIN_PASSWORD", "admin"),
+                    "url": f"https://dockhand.{domain}",
+                    "description": "Dockhand container management UI credentials"
+                },
+                {
+                    "service_name": "Traefik Dashboard",
+                    "credential_type": "admin",
+                    "username": "admin",
+                    "password": os.environ.get("TRAEFIK_DASHBOARD_AUTH", "admin"),
+                    "url": f"https://traefik.{domain}",
+                    "description": "Traefik reverse proxy dashboard"
+                },
+                {
+                    "service_name": "Vultr API",
+                    "credential_type": "token",
+                    "username": None,
+                    "password": os.environ.get("VULTR_API_KEY", ""),
+                    "url": "https://my.vultr.com/settings/#settingsapi",
+                    "description": "Vultr cloud API token"
+                },
+                {
+                    "service_name": "Cloudflare",
+                    "credential_type": "token",
+                    "username": os.environ.get("CLOUDFLARE_API_TOKEN", ""),
+                    "password": None,
+                    "url": "https://dash.cloudflare.com/profile/api-tokens",
+                    "description": "Cloudflare API token"
+                },
+                {
+                    "service_name": "AI Agent",
+                    "credential_type": "token",
+                    "username": os.environ.get("AGENT_API_KEY", ""),
+                    "password": None,
+                    "url": "https://platform.openai.com/api-keys",
+                    "description": "AI agent API key"
+                }
+            ]
+
+            admin_user = db.query(User).filter(User.is_admin == True).first()
+            for cred in credentials:
+                if cred["password"]:  # Only create credentials with actual values
+                    db.add(ServiceCredential(
+                        service_name=cred["service_name"],
+                        credential_type=cred["credential_type"],
+                        username=cred["username"],
+                        password=encrypt_secret(cred["password"]),
+                        url=cred["url"],
+                        description=cred["description"],
+                        created_by=admin_user.id if admin_user else None,
+                        created_at=utcnow()
+                    ))
+            db.commit()
     finally:
         db.close()
     async def enforce_event_deadlines():
@@ -179,6 +274,7 @@ app.include_router(caldera_setup.router)
 app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
 app.include_router(event_dashboard.router)
+app.include_router(service_credentials.router)
 app.include_router(vm.router)
 app.include_router(vm_goals.router)
 
@@ -206,6 +302,13 @@ async def list_open_events(db: Session = Depends(get_db)):
         for e in events
     ]
 
+
+@app.get("/debug-users")
+async def debug_users(db: Session = Depends(get_db)):
+    from api.models import User
+    count = db.query(User).count()
+    users = db.query(User).all()
+    return {"count": count, "users": [{"id": u.id, "username": u.username, "is_admin": u.is_admin} for u in users]}
 
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request, db: Session = Depends(get_db)):

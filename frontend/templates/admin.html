@@ -694,8 +694,26 @@
             <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Container Management</span>
         </a>
     </div>
+    </div>
 </div>
-{% endif %}
+
+<!-- Service Credentials -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3>Service Credentials</h3>
+        <a href="/admin/service-credentials" class="btn btn-sm btn-primary">Manage Credentials</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+        Encrypted credentials for deploying services. Click on any credential to copy it to the clipboard.
+    </p>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <a href="/admin/service-credentials" class="service-link"
+           style="display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; transition: all 0.25s; min-width: 180px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Credentials</span>
+            <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Manage & Copy</span>
+        </a>
+    </div>
+</div>
 
 <!-- Modules -->
 <div class="card">

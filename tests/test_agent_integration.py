@@ -59,12 +59,24 @@ class TestCalderaTool:
         """Create mock Caldera tool."""
         caldera = CalderaTool("test-session")
         caldera.client = AsyncMock()
-        caldera.client.get = AsyncMock(return_value=MagicMock(
-            json=MagicMock(return_value=[
-                {"name": "CTF Full Exploit Chain", "adversary_id": "adv-1"},
-                {"name": "atomic", "id": "planner-1"}
-            ])
-        ))
+
+        def get_side_effect(url, **kwargs):
+            if "/planners" in url:
+                return MagicMock(json=MagicMock(return_value=[
+                    {"name": "atomic", "id": "planner-1"}
+                ]))
+            if "/adversaries" in url:
+                return MagicMock(json=MagicMock(return_value=[
+                    {"name": "CTF Full Exploit Chain", "adversary_id": "adv-1"}
+                ]))
+            if "/operations/" in url and "/abilities" not in url:
+                return MagicMock(json=MagicMock(return_value={
+                    "state": "completed",
+                    "abilities": {"ability-456": "completed"}
+                }))
+            return MagicMock(json=MagicMock(return_value=[]))
+
+        caldera.client.get = AsyncMock(side_effect=get_side_effect)
         caldera.client.post = AsyncMock(return_value=MagicMock(
             json=MagicMock(return_value={"id": "op-123"}),
             raise_for_status=MagicMock()
@@ -86,7 +98,7 @@ class TestCalderaTool:
 
     @pytest.mark.asyncio
     async def test_execute_ability(self, mock_caldera):
-        """Test executing Caldera ability."""
+        """Test executing ability."""
         result = await mock_caldera.execute({
             "action_type": "caldera_ability",
             "operation_id": "op-123",
@@ -145,12 +157,19 @@ class TestCalderaBatchOperations:
         """Create mock Caldera tool."""
         caldera = CalderaTool("test-session")
         caldera.client = AsyncMock()
-        caldera.client.get = AsyncMock(return_value=MagicMock(
-            json=MagicMock(return_value=[
-                {"name": "CTF Full Exploit Chain", "adversary_id": "adv-1"},
-                {"name": "atomic", "id": "planner-1"}
-            ])
-        ))
+
+        def get_side_effect(url, **kwargs):
+            if "/planners" in url:
+                return MagicMock(json=MagicMock(return_value=[
+                    {"name": "atomic", "id": "planner-1"}
+                ]))
+            if "/adversaries" in url:
+                return MagicMock(json=MagicMock(return_value=[
+                    {"name": "CTF Full Exploit Chain", "adversary_id": "adv-1"}
+                ]))
+            return MagicMock(json=MagicMock(return_value=[]))
+
+        caldera.client.get = AsyncMock(side_effect=get_side_effect)
         caldera.client.post = AsyncMock(return_value=MagicMock(
             json=MagicMock(return_value={"id": "op-123"}),
             raise_for_status=MagicMock()
@@ -167,8 +186,8 @@ class TestCalderaBatchOperations:
 
         results = await mock_caldera.batch_execute_abilities(abilities)
 
-        assert len(results) == 2
-        assert "op-123" in results[2]  # Last result is operation confirmation
+        assert len(results) == 3
+        assert "op-123" in results[-1]  # Last result is operation confirmation
 
     @pytest.mark.asyncio
     async def test_batch_execute_with_invalid_adversary(self, mock_caldera):
@@ -190,12 +209,16 @@ class TestCalderaOperationMonitoring:
         """Create mock Caldera tool."""
         caldera = CalderaTool("test-session")
         caldera.client = AsyncMock()
-        caldera.client.get = AsyncMock(return_value=MagicMock(
-            json=MagicMock(return_value=[
-                {"name": "CTF Full Exploit Chain", "adversary_id": "adv-1"},
-                {"name": "atomic", "id": "planner-1"}
-            ])
-        ))
+
+        def get_side_effect(url, **kwargs):
+            if "/operations/" in url and "/abilities" not in url:
+                return MagicMock(json=MagicMock(return_value={
+                    "state": "running",
+                    "agents": [{"id": "agent-1"}]
+                }))
+            return MagicMock(json=MagicMock(return_value=[]))
+
+        caldera.client.get = AsyncMock(side_effect=get_side_effect)
         caldera.client.post = AsyncMock(return_value=MagicMock(
             json=MagicMock(return_value={"id": "op-123"}),
             raise_for_status=MagicMock()
@@ -206,7 +229,7 @@ class TestCalderaOperationMonitoring:
     async def test_get_operation_status(self, mock_caldera):
         """Test getting operation status."""
         mock_caldera.client.get = AsyncMock(return_value=MagicMock(
-            json=MagicMock(return_value={"state": "running"}),
+            json=MagicMock(return_value={"state": "running", "agents": [{"id": "agent-1"}]}),
             raise_for_status=MagicMock()
         ))
 
@@ -217,14 +240,17 @@ class TestCalderaOperationMonitoring:
     @pytest.mark.asyncio
     async def test_monitor_operation_running(self, mock_caldera):
         """Test monitoring running operation."""
-        mock_caldera.client.get = AsyncMock(return_value=MagicMock(
-            json=MagicMock(return_value={"state": "running"}),
-            raise_for_status=MagicMock()
-        ))
+        call_count = [0]
 
+        def get_side_effect(url, **kwargs):
+            call_count[0] += 1
+            if call_count[0] >= 3:
+                return MagicMock(json=MagicMock(return_value={"state": "completed"}), raise_for_status=MagicMock())
+            return MagicMock(json=MagicMock(return_value={"state": "running", "agents": [{"id": "agent-1"}]}), raise_for_status=MagicMock())
+
+        mock_caldera.client.get = AsyncMock(side_effect=get_side_effect)
         status = await mock_caldera.monitor_operation("op-123", timeout=5)
-
-        assert status["state"] == "running"
+        assert status["state"] == "completed"
 
     @pytest.mark.asyncio
     async def test_monitor_operation_completed(self, mock_caldera):
@@ -242,7 +268,7 @@ class TestCalderaOperationMonitoring:
     async def test_monitor_operation_timeout(self, mock_caldera):
         """Test monitoring operation with timeout."""
         mock_caldera.client.get = AsyncMock(return_value=MagicMock(
-            json=MagicMock(return_value={"state": "running"}),
+            json=MagicMock(return_value={"state": "running", "agents": [{"id": "agent-1"}]}),
             raise_for_status=MagicMock()
         ))
 

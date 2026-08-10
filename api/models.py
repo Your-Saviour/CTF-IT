@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database import Base
+from api.database import get_db
 
 
 def utcnow():
@@ -188,3 +189,20 @@ class VMGoal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     vm: Mapped["VM"] = relationship(back_populates="goals")
+
+
+class ServiceCredential(Base):
+    __tablename__ = "service_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    service_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    credential_type: Mapped[str] = mapped_column(String(32), nullable=False)  # admin/user/token
+    username: Mapped[str] = mapped_column(String(256), nullable=True)
+    password: Mapped[str] = mapped_column(String(256), nullable=False)  # encrypted
+    url: Mapped[str] = mapped_column(String(512), nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=True)
+
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+

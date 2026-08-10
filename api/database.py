@@ -26,7 +26,9 @@ def get_db():
 
 def init_db():
     from api.models import (  # noqa: F401
-        AccountToken, AdminAudit, Event, PlatformSettings, Team, User, VM,
+        AccountToken, AdminAudit, Event, PlatformSettings, ServiceCredential, Team, User, VM,
         VMGoal, VMModule,
     )
     Base.metadata.create_all(bind=engine)
+
+# Export models for use in other modules

@@ -106,7 +106,7 @@ class ContextManager:
         return count
 
     def _find_parent(self, tree: AttackTree, node: AttackNode) -> AttackNode | None:
-        if not node.parent_id or not tree.root:
+        if not node or not node.parent_id or not tree.root:
             return None
         return self._find_node(tree.root, node.parent_id)
 
@@ -118,6 +118,10 @@ class ContextManager:
             if result:
                 return result
         return None
+
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count from text length."""
+        return max(1, len(text) // 4)
 
     def estimate_load(self, tree: AttackTree) -> float:
         """Estimate context load based on actual token counts."""

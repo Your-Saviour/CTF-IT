@@ -12,9 +12,13 @@ from itsdangerous import URLSafeTimedSerializer
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import AccountToken, Event, User, utcnow
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Import models after database import to avoid circular imports
+User = None
+Event = None
+Session = None
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
@@ -27,7 +31,8 @@ _LOGIN_MAX_ATTEMPTS = 5
 _login_attempts: dict[str, deque[float]] = defaultdict(deque)
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    from api.models import User
     token = request.cookies.get("session")
     if not token:
         return None
@@ -59,10 +64,12 @@ def set_session_cookie(response, user: User):
 
 
 def _token_digest(raw_token: str) -> str:
+    from api.models import AccountToken
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
-def _valid_token(db: Session, raw_token: str, purpose: str) -> AccountToken | None:
+def _valid_token(db: Session, raw_token: str, purpose: str):
+    from api.models import AccountToken
     record = db.query(AccountToken).filter(
         AccountToken.token_hash == _token_digest(raw_token),
         AccountToken.purpose == purpose,
@@ -76,8 +83,9 @@ def _valid_token(db: Session, raw_token: str, purpose: str) -> AccountToken | No
     return record if expires_at > datetime.now(timezone.utc) else None
 
 
-def _claim_token(db: Session, record: AccountToken) -> bool:
+def _claim_token(db: Session, record) -> bool:
     """Atomically mark a token used so concurrent redemption cannot replay it."""
+    from api.models import AccountToken, utcnow
     claimed_at = utcnow()
     updated = db.query(AccountToken).filter(
         AccountToken.id == record.id,
@@ -139,6 +147,7 @@ async def login(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
+    from api.models import User
     remote = request.client.host if request.client else "unknown"
     client_id = f"{remote}:{username.casefold()}"
     now = time.monotonic()
@@ -196,6 +205,7 @@ async def redeem_invitation(
         return RedirectResponse("/invite/" + token + "?error=invalid_password", status_code=303)
     if record.intended_username and username.casefold() != record.intended_username.casefold():
         return RedirectResponse(generic, status_code=303)
+    from api.models import User
     if db.query(User).filter(User.username == username).first():
         return RedirectResponse(generic, status_code=303)
     if not _claim_token(db, record):
@@ -228,6 +238,7 @@ async def redeem_password_reset(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
+    from api.models import User, utcnow
     record = _valid_token(db, token, "password_reset")
     generic = "/reset/" + token + "?error=invalid_or_expired"
     if not record:
