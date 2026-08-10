@@ -114,7 +114,8 @@ async def register(
 
     first_user = db.query(User).count() == 0
     import sys
-    print(f"DBG-REGISTER: count={db.query(User).count()} first_user={first_user} token_set={bool(ADMIN_BOOTSTRAP_TOKEN)}", file=sys.stderr, flush=True)
+    db_path = db.bind.url.database if db.bind else "N/A"
+    print(f"DBG-REGISTER: count={db.query(User).count()} first_user={first_user} token_set={bool(ADMIN_BOOTSTRAP_TOKEN)} db_path={db_path}", file=sys.stderr, flush=True)
     if not first_user:
         return RedirectResponse("/?error=invitation_required", status_code=303)
     if not ADMIN_BOOTSTRAP_TOKEN:
