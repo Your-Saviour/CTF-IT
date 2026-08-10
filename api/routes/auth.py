@@ -113,14 +113,7 @@ async def register(
     if not 12 <= len(password_bytes) <= 72:
         return RedirectResponse("/?error=invalid_password", status_code=303)
 
-    import sys
-    db_path = db.bind.url.database if db.bind else "N/A"
-    raw_count = db.query(UserModel).count()
-    all_users = db.query(UserModel).all()
-    user_ids = [u.id for u in all_users]
-    user_names = [u.username for u in all_users]
-    print(f"DBG-REGISTER: count={raw_count} first_user={raw_count == 0} token_set={bool(ADMIN_BOOTSTRAP_TOKEN)} db_path={db_path} user_ids={user_ids} user_names={user_names}", file=sys.stderr, flush=True)
-    first_user = raw_count == 0
+    first_user = db.query(UserModel).count() == 0
     if not first_user:
         return RedirectResponse("/?error=invitation_required", status_code=303)
     if not ADMIN_BOOTSTRAP_TOKEN:
