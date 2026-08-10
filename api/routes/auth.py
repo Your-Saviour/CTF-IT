@@ -113,6 +113,8 @@ async def register(
         return RedirectResponse("/?error=invalid_password", status_code=303)
 
     first_user = db.query(User).count() == 0
+    import sys
+    print(f"DBG-REGISTER: count={db.query(User).count()} first_user={first_user} token_set={bool(ADMIN_BOOTSTRAP_TOKEN)}", file=sys.stderr, flush=True)
     if not first_user:
         return RedirectResponse("/?error=invitation_required", status_code=303)
     if not ADMIN_BOOTSTRAP_TOKEN:
