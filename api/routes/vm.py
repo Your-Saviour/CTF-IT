@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -1179,6 +1180,7 @@ async def vultr_os_list(request: Request, db: Session = Depends(get_db)):
 
 _VULTR_PROJECT_ID_KEY = "vultr_semaphore_project_id"
 _VULTR_KEY_ID_KEY = "vultr_semaphore_key_id"
+_VULTR_PROJECT_LOCK = threading.Lock()
 
 
 def _get_or_create_vultr_semaphore_project(db, client, private_key: str) -> tuple[int, int]:
@@ -1189,20 +1191,24 @@ def _get_or_create_vultr_semaphore_project(db, client, private_key: str) -> tupl
     """
     from api.models import PlatformSettings
 
-    proj_row = db.query(PlatformSettings).filter_by(key=_VULTR_PROJECT_ID_KEY).first()
-    key_row = db.query(PlatformSettings).filter_by(key=_VULTR_KEY_ID_KEY).first()
+    # Event provisioning creates several VMs concurrently. Serialize the
+    # shared Semaphore bootstrap so only one worker creates the project/key;
+    # later workers then reuse the committed settings.
+    with _VULTR_PROJECT_LOCK:
+        proj_row = db.query(PlatformSettings).filter_by(key=_VULTR_PROJECT_ID_KEY).first()
+        key_row = db.query(PlatformSettings).filter_by(key=_VULTR_KEY_ID_KEY).first()
 
-    if proj_row and key_row:
-        return int(proj_row.value), int(key_row.value)
+        if proj_row and key_row:
+            return int(proj_row.value), int(key_row.value)
 
-    project_id = client.create_project("CTF Vultr Operations")
-    key_id = client.create_key(project_id, "platform-key", private_key)
+        project_id = client.create_project("CTF Vultr Operations")
+        key_id = client.create_key(project_id, "platform-key", private_key)
 
-    db.add(PlatformSettings(key=_VULTR_PROJECT_ID_KEY, value=str(project_id)))
-    db.add(PlatformSettings(key=_VULTR_KEY_ID_KEY, value=str(key_id)))
-    db.commit()
+        db.add(PlatformSettings(key=_VULTR_PROJECT_ID_KEY, value=str(project_id)))
+        db.add(PlatformSettings(key=_VULTR_KEY_ID_KEY, value=str(key_id)))
+        db.commit()
 
-    return project_id, key_id
+        return project_id, key_id
 
 
 # ── VPC Creation ───────────────────────────────────────────────────────────────
@@ -2065,6 +2071,42 @@ async def create_status(vm_id: int, request: Request, db: Session = Depends(get_
         "ip_address": vm.ip_address,
         "vultr_id": vm.vultr_id,
     }
+
+
+@router.post("/vms/{vm_id}/retry-create")
+async def retry_vultr_create(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    """Retry cloud creation for a failed VM that never reached the provider."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not VULTR_API_KEY:
+        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
+
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+    if vm.status != "failed":
+        return JSONResponse(
+            {"error": f"VM is {vm.status}; only failed VM creation can be retried"},
+            status_code=409,
+        )
+    if vm.vultr_id or vm.ip_address:
+        return JSONResponse(
+            {"error": "VM already has cloud resources; inspect it before retrying"},
+            status_code=409,
+        )
+
+    from api.models import utcnow
+
+    vm.status = "creating"
+    vm.provision_step = "queued"
+    vm.provision_error = None
+    vm.semaphore_task_id = None
+    vm.updated_at = utcnow()
+    db.commit()
+
+    asyncio.create_task(asyncio.to_thread(_run_vultr_create, vm_id))
+    return {"status": "creating", "vm_id": vm_id}
 
 
 # ── Vultr VM Destruction ───────────────────────────────────────────────────────

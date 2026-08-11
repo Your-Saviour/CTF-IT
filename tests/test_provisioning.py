@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,12 +9,14 @@ from sqlalchemy.orm import sessionmaker
 from builder.ansible import _stage_files
 from builder.module_loader import CopyStep, Module
 from api.database import Base
-from api.models import Event, Team, User, VM, VMModule
+from api.models import Event, PlatformSettings, Team, User, VM, VMModule
 from api.routes.vm import (
+    _get_or_create_vultr_semaphore_project,
     _maybe_cleanup_team_vpc,
     _vultr_safe_hostname,
     _wait_for_tcp_port,
     provision_vm,
+    retry_vultr_create,
 )
 from api.services.caldera import CalderaClient
 from api.services.semaphore import SemaphoreClient
@@ -226,6 +229,69 @@ def test_provision_endpoint_rejects_duplicate_run():
         with patch("api.routes.vm.require_admin", return_value=MagicMock()):
             response = asyncio.run(provision_vm(vm.id, MagicMock(), db))
         assert response.status_code == 409
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+
+
+def test_shared_vultr_semaphore_project_creation_is_race_safe():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    client = MagicMock()
+    client.create_project.return_value = 17
+    client.create_key.return_value = 23
+
+    def create_or_get():
+        db = session_factory()
+        try:
+            return _get_or_create_vultr_semaphore_project(db, client, "private-key")
+        finally:
+            db.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _: create_or_get(), range(2)))
+
+        assert results == [(17, 23), (17, 23)]
+        client.create_project.assert_called_once_with("CTF Vultr Operations")
+        client.create_key.assert_called_once_with(17, "platform-key", "private-key")
+        db = session_factory()
+        assert db.query(PlatformSettings).count() == 2
+        db.close()
+    finally:
+        Base.metadata.drop_all(engine)
+
+
+def test_retry_vultr_create_resets_failed_vm_and_dispatches():
+    db, engine = _database()
+    vm, _ = _seed_vm(db, status="failed", with_module=False)
+    vm.ip_address = None
+    vm.provision_step = "failed"
+    vm.provision_error = "shared project race"
+    db.commit()
+    admin = User(username="admin", password_hash="x", is_admin=True)
+
+    def close_coroutine(coroutine):
+        coroutine.close()
+        return MagicMock()
+
+    try:
+        with patch("api.routes.vm.require_admin", return_value=admin), patch(
+            "api.routes.vm.VULTR_API_KEY", "test-key"
+        ), patch("api.routes.vm.asyncio.create_task", side_effect=close_coroutine) as create_task:
+            response = asyncio.run(retry_vultr_create(vm.id, MagicMock(), db))
+
+        assert response == {"status": "creating", "vm_id": vm.id}
+        db.refresh(vm)
+        assert vm.status == "creating"
+        assert vm.provision_step == "queued"
+        assert vm.provision_error is None
+        create_task.assert_called_once()
     finally:
         db.close()
         Base.metadata.drop_all(engine)

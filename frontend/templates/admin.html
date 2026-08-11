@@ -1249,7 +1249,7 @@ function retryFailedVMs() {
         .then(function(data) {
             var failedVMs = (data.vms || []).filter(function(vm) { return vm.status === 'failed'; });
             failedVMs.forEach(function(vm) {
-                fetch('/admin/api/vms/' + vm.id + '/provision', { method: 'POST' });
+                fetch('/admin/api/vms/' + vm.id + '/retry-create', { method: 'POST' });
             });
             if (failedVMs.length > 0) {
                 showToast('Retrying ' + failedVMs.length + ' failed VM(s)...');
