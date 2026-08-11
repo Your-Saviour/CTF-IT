@@ -63,7 +63,7 @@ def test_invitation_is_hashed_single_use_and_event_bound():
     admin = make_user(db, "owner", admin=True, event=event)
     try:
         client.cookies.set("session", login_cookie(admin))
-        created = client.post("/admin/invitations", json={"event_id": event.id, "role": "participant"})
+        created = client.post("/admin/api/invitations", json={"event_id": event.id, "role": "participant"})
         assert created.status_code == 200
         raw = created.json()["link"].rsplit("/", 1)[-1]
         stored = db.query(AccountToken).one()
@@ -121,15 +121,15 @@ def test_role_change_revokes_session_and_self_and_last_admin_are_protected():
     old_participant_cookie = login_cookie(participant)
     try:
         client.cookies.set("session", login_cookie(owner))
-        self_demote = client.patch(f"/admin/users/{owner.id}", json={"role": "participant"})
+        self_demote = client.patch(f"/admin/api/users/{owner.id}", json={"role": "participant"})
         assert self_demote.status_code == 409
-        self_deactivate = client.patch(f"/admin/users/{owner.id}/activation", json={"active": False})
+        self_deactivate = client.patch(f"/admin/api/users/{owner.id}/activation", json={"active": False})
         assert self_deactivate.status_code == 409
 
-        changed = client.patch(f"/admin/users/{participant.id}", json={"role": "administrator"})
+        changed = client.patch(f"/admin/api/users/{participant.id}", json={"role": "administrator"})
         assert changed.status_code == 200
         client.cookies.set("session", old_participant_cookie)
-        assert client.get("/admin/users").status_code == 403
+        assert client.get("/admin/api/users").status_code == 403
 
         db.refresh(participant)
         assert participant.event_id == event.id  # partial role update preserves event
@@ -147,7 +147,7 @@ def test_password_reset_and_deactivation_revoke_sessions():
     user_cookie = login_cookie(user)
     try:
         client.cookies.set("session", login_cookie(admin))
-        reset = client.post(f"/admin/users/{user.id}/reset-link")
+        reset = client.post(f"/admin/api/users/{user.id}/reset-link")
         raw = reset.json()["link"].rsplit("/", 1)[-1]
         result = client.post(
             f"/auth/password-resets/{raw}", data={"password": "new-secure-password"},
@@ -160,7 +160,7 @@ def test_password_reset_and_deactivation_revoke_sessions():
         db.refresh(user)
         fresh_cookie = login_cookie(user)
         client.cookies.set("session", login_cookie(admin))
-        assert client.patch(f"/admin/users/{user.id}/activation", json={"active": False}).status_code == 200
+        assert client.patch(f"/admin/api/users/{user.id}/activation", json={"active": False}).status_code == 200
         client.cookies.set("session", fresh_cookie)
         assert client.get("/").context["user"] is None
     finally:

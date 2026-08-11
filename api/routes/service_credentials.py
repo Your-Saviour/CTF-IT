@@ -7,7 +7,7 @@ from api.database import get_db
 from api.models import ServiceCredential, User, utcnow
 from api.routes.auth import get_current_user
 
-router = APIRouter(prefix="/service-credentials", tags=["service_credentials"])
+router = APIRouter(prefix="/admin/api/credentials", tags=["service_credentials"])
 
 
 class CredentialCreateRequest(BaseModel):
@@ -28,6 +28,22 @@ class CredentialUpdateRequest(BaseModel):
     description: str | None = None
 
 
+def _credential_payload(credential: ServiceCredential) -> dict:
+    """Return browser-safe metadata without encrypted or clear secret material."""
+    return {
+        "id": credential.id,
+        "service_name": credential.service_name,
+        "credential_type": credential.credential_type,
+        "username": credential.username,
+        "has_secret": bool(credential.password),
+        "masked_secret": "••••••••" if credential.password else None,
+        "url": credential.url,
+        "description": credential.description,
+        "created_at": credential.created_at.isoformat() if credential.created_at else None,
+        "created_by": credential.created_by,
+    }
+
+
 @router.get("")
 async def list_credentials(
     request: Request,
@@ -39,20 +55,25 @@ async def list_credentials(
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
     credentials = db.query(ServiceCredential).order_by(ServiceCredential.service_name).all()
-    return [
-        {
-            "id": cred.id,
-            "service_name": cred.service_name,
-            "credential_type": cred.credential_type,
-            "username": cred.username,
-            "password": cred.password,  # Encrypted, will be decrypted by frontend
-            "url": cred.url,
-            "description": cred.description,
-            "created_at": cred.created_at.isoformat() if cred.created_at else None,
-            "created_by": cred.created_by,
-        }
-        for cred in credentials
-    ]
+    return [_credential_payload(cred) for cred in credentials]
+
+
+@router.post("/{credential_id}/reveal")
+async def reveal_credential(
+    credential_id: int, request: Request, db: Session = Depends(get_db),
+):
+    """Decrypt one secret on demand and prevent storage by browser/proxy caches."""
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    credential = db.query(ServiceCredential).filter(ServiceCredential.id == credential_id).first()
+    if not credential:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    from api.services.secrets import decrypt_secret
+    return JSONResponse(
+        {"secret": decrypt_secret(credential.password)},
+        headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"},
+    )
 
 
 @router.post("")
@@ -82,15 +103,7 @@ async def create_credential(
     db.commit()
     db.refresh(credential)
 
-    return {
-        "id": credential.id,
-        "service_name": credential.service_name,
-        "credential_type": credential.credential_type,
-        "username": credential.username,
-        "password": credential.password,
-        "url": credential.url,
-        "description": credential.description,
-    }
+    return _credential_payload(credential)
 
 
 @router.put("/{credential_id}")
@@ -123,15 +136,7 @@ async def update_credential(
     db.commit()
     db.refresh(credential)
 
-    return {
-        "id": credential.id,
-        "service_name": credential.service_name,
-        "credential_type": credential.credential_type,
-        "username": credential.username,
-        "password": credential.password,
-        "url": credential.url,
-        "description": credential.description,
-    }
+    return _credential_payload(credential)
 
 
 @router.delete("/{credential_id}")

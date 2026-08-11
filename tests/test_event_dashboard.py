@@ -76,7 +76,7 @@ def request_dashboard(event_id, admin_id, caldera):
         "api.routes.event_dashboard._make_client", return_value=caldera
     ):
         with TestClient(app) as client:
-            response = client.get(f"/admin/events/{event_id}/dashboard-data")
+            response = client.get(f"/admin/api/events/{event_id}/dashboard-data")
     db.close()
     return response
 
@@ -85,7 +85,7 @@ def test_authorization_and_missing_event():
     event_id, admin_id = seed_event()
     with patch("api.routes.event_dashboard.require_admin", return_value=None):
         with TestClient(app) as client:
-            assert client.get(f"/admin/events/{event_id}/dashboard-data").status_code == 403
+            assert client.get(f"/admin/api/events/{event_id}/dashboard-data").status_code == 403
 
     response = request_dashboard(999999, admin_id, FakeCaldera())
     assert response.status_code == 404
@@ -107,8 +107,8 @@ def test_dashboard_page_auth_redirects_and_browser_contract():
             assert "Live event command centre" in response.text
             assert "window.setInterval(poll, 10000)" in response.text
             assert "Stale · " in response.text
-            assert 'href="/admin/vm/' in response.text
-            missing = client.get("/admin/events/999999/dashboard", follow_redirects=False)
+            assert 'href="/admin/infrastructure/vms/' in response.text
+            missing = client.get("/admin/events/99999/dashboard", follow_redirects=False)
             assert missing.status_code == 303
             assert missing.headers["location"] == "/admin"
     db.close()

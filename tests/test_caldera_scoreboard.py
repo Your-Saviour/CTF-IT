@@ -1,4 +1,4 @@
-"""Tests for GET /admin/caldera/scoreboard."""
+"""Tests for GET /admin/api/caldera/scoreboard."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -108,7 +108,7 @@ def test_scoreboard_no_vms(seeded_data):
 
     with patch("api.routes.caldera_ops.require_admin", return_value=admin_user):
         with TestClient(app, raise_server_exceptions=True) as c:
-            resp = c.get(f"/admin/caldera/scoreboard?event_id={empty_event_id}")
+            resp = c.get(f"/admin/api/caldera/scoreboard?event_id={empty_event_id}")
 
     app.dependency_overrides.clear()
 
@@ -196,7 +196,7 @@ def test_scoreboard_with_goals_and_modules(client, seeded_data):
     db.commit()
     db.close()
 
-    resp = c.get(f"/admin/caldera/scoreboard?event_id={event.id}")
+    resp = c.get(f"/admin/api/caldera/scoreboard?event_id={event.id}")
     assert resp.status_code == 200
     result = resp.json()
 
@@ -230,6 +230,6 @@ def test_scoreboard_with_goals_and_modules(client, seeded_data):
 def test_scoreboard_unknown_event(client):
     """Requesting a nonexistent event_id returns 404."""
     c, _ = client
-    resp = c.get("/admin/caldera/scoreboard?event_id=999999")
+    resp = c.get("/admin/api/caldera/scoreboard?event_id=999999")
     assert resp.status_code == 404
     assert resp.json()["error"] == "Event not found"

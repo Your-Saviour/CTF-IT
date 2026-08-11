@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -311,6 +312,11 @@ async def reject_cross_site_mutations(request: Request, call_next):
 templates = Jinja2Templates(
     directory=os.path.join(os.path.dirname(__file__), "..", "frontend", "templates")
 )
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "..", "frontend", "static")),
+    name="static",
+)
 
 app.include_router(auth.router)
 app.include_router(admin.router)
@@ -401,14 +407,63 @@ async def admin_page(request: Request, db: Session = Depends(get_db)):
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
 
-    return templates.TemplateResponse(request, "admin.html", {
-        "user": user,
-        "domain": os.environ.get("DOMAIN"),
+    return templates.TemplateResponse(request, "admin_overview.html", {
+        "user": user, "page_title": "Operations overview", "active_nav": "overview",
+        "page_description": "Event, infrastructure and offensive-tool health at a glance.",
+        "breadcrumbs": [],
     })
+
+
+async def _admin_resource_page(resource: str, request: Request, db: Session):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    config = {
+        "events": ("Events", "Configure event quotas, lifecycle and provisioning.", "Create event"),
+        "people": ("People & access", "Manage invitations, roles, event access and audit history.", "Invite person"),
+        "infrastructure": ("Infrastructure", "Manage teams, virtual machines and provisioning.", "Create resource"),
+        "modules": ("Module library", "Inspect training modules, dependencies and verification metadata.", ""),
+    }
+    title, description, action = config[resource]
+    infrastructure_tab = "teams"
+    if resource == "infrastructure":
+        infrastructure_tab = "vms" if request.query_params.get("tab") == "vms" else "teams"
+        action = "Register VM" if infrastructure_tab == "vms" else "Create team"
+    return templates.TemplateResponse(request, "admin_resource.html", {
+        "user": user, "resource": resource, "page_title": title,
+        "page_description": description, "action_label": action,
+        "infrastructure_tab": infrastructure_tab,
+        "active_nav": resource, "breadcrumbs": [{"label": title}],
+    })
+
+
+@app.get("/admin/events", response_class=HTMLResponse)
+async def events_page(request: Request, db: Session = Depends(get_db)):
+    return await _admin_resource_page("events", request, db)
+
+
+@app.get("/admin/people", response_class=HTMLResponse)
+async def people_page(request: Request, db: Session = Depends(get_db)):
+    return await _admin_resource_page("people", request, db)
+
+
+@app.get("/admin/infrastructure", response_class=HTMLResponse)
+async def infrastructure_page(request: Request, db: Session = Depends(get_db)):
+    return await _admin_resource_page("infrastructure", request, db)
+
+
+@app.get("/admin/modules", response_class=HTMLResponse)
+async def modules_page(request: Request, db: Session = Depends(get_db)):
+    return await _admin_resource_page("modules", request, db)
 
 
 @app.get("/admin/module/{module_id}", response_class=HTMLResponse)
 async def module_detail_page(module_id: str, request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse(f"/admin/modules/{module_id}", status_code=308)
+
+
+@app.get("/admin/modules/{module_id}", response_class=HTMLResponse)
+async def new_module_detail_page(module_id: str, request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
@@ -416,11 +471,18 @@ async def module_detail_page(module_id: str, request: Request, db: Session = Dep
     return templates.TemplateResponse(request, "module_detail.html", {
         "user": user,
         "module_id": module_id,
+        "active_nav": "modules",
+        "breadcrumbs": [{"label": "Modules", "href": "/admin/modules"}, {"label": module_id}],
     })
 
 
 @app.get("/admin/vm/{vm_id}", response_class=HTMLResponse)
 async def vm_detail_page(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse(f"/admin/infrastructure/vms/{vm_id}", status_code=308)
+
+
+@app.get("/admin/infrastructure/vms/{vm_id}", response_class=HTMLResponse)
+async def new_vm_detail_page(vm_id: int, request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
@@ -428,36 +490,60 @@ async def vm_detail_page(vm_id: int, request: Request, db: Session = Depends(get
     return templates.TemplateResponse(request, "vm_detail.html", {
         "user": user,
         "vm_id": vm_id,
+        "active_nav": "infrastructure",
+        "breadcrumbs": [{"label": "Infrastructure", "href": "/admin/infrastructure?tab=vms"}, {"label": f"VM {vm_id}"}],
     })
 
 
 @app.get("/admin/topology", response_class=HTMLResponse)
 async def topology_page(request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse("/admin/infrastructure/topology", status_code=308)
+
+
+@app.get("/admin/infrastructure/topology", response_class=HTMLResponse)
+async def new_topology_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
 
     return templates.TemplateResponse(request, "topology.html", {
         "user": user,
+        "active_nav": "topology",
+        "breadcrumbs": [{"label": "Infrastructure", "href": "/admin/infrastructure"}, {"label": "Topology"}],
     })
 
 
 @app.get("/admin/caldera", response_class=HTMLResponse)
 async def caldera_dashboard_page(request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse("/admin/red-team/operations", status_code=308)
+
+
+@app.get("/admin/red-team/operations", response_class=HTMLResponse)
+async def new_caldera_dashboard_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "caldera_dashboard.html", {"user": user})
+    return templates.TemplateResponse(request, "caldera_dashboard.html", {
+        "user": user, "active_nav": "operations",
+        "breadcrumbs": [{"label": "Red team"}, {"label": "Operations"}],
+    })
 
 
 @app.get("/admin/caldera/operation/{op_id}", response_class=HTMLResponse)
 async def caldera_operation_page(op_id: str, request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse(f"/admin/red-team/operations/{op_id}", status_code=308)
+
+
+@app.get("/admin/red-team/operations/{op_id}", response_class=HTMLResponse)
+async def new_caldera_operation_page(op_id: str, request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(request, "caldera_dashboard.html", {
         "user": user,
         "op_id": op_id,
+        "active_nav": "operations",
+        "breadcrumbs": [{"label": "Red team"}, {"label": "Operations", "href": "/admin/red-team/operations"}, {"label": op_id}],
     })
 
 
@@ -470,7 +556,9 @@ async def event_plan_page(event_id: int, request: Request, db: Session = Depends
     if not event:
         return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse(request, "event_plan.html", {
-        "user": user, "event_id": event_id, "event_name": event.name
+        "user": user, "event_id": event_id, "event_name": event.name,
+        "active_nav": "events",
+        "breadcrumbs": [{"label": "Events", "href": "/admin/events"}, {"label": event.name}, {"label": "Plan"}],
     })
 
 
@@ -483,21 +571,56 @@ async def event_dashboard_page(event_id: int, request: Request, db: Session = De
     if not event:
         return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse(request, "event_dashboard.html", {
-        "user": user, "event_id": event_id, "event_name": event.name
+        "user": user, "event_id": event_id, "event_name": event.name,
+        "active_nav": "events",
+        "breadcrumbs": [{"label": "Events", "href": "/admin/events"}, {"label": event.name}, {"label": "Dashboard"}],
     })
 
 
 @app.get("/admin/ai-agent", response_class=HTMLResponse)
 async def ai_agent_page(request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse("/admin/red-team/agent", status_code=308)
+
+
+@app.get("/admin/red-team/agent", response_class=HTMLResponse)
+async def new_ai_agent_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "ai_agent.html", {"user": user})
+    return templates.TemplateResponse(request, "ai_agent.html", {
+        "user": user, "active_nav": "agent",
+        "breadcrumbs": [{"label": "Red team"}, {"label": "AI Agent"}],
+    })
 
 
 @app.get("/admin/ai-agent/session/{session_id}", response_class=HTMLResponse)
 async def ai_agent_session_page(session_id: str, request: Request, db: Session = Depends(get_db)):
+    return RedirectResponse(f"/admin/red-team/agent/sessions/{session_id}", status_code=308)
+
+
+@app.get("/admin/red-team/agent/sessions/{session_id}", response_class=HTMLResponse)
+async def new_ai_agent_session_page(session_id: str, request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse(request, "ai_agent_session.html", {"user": user, "session_id": session_id})
+    return templates.TemplateResponse(request, "ai_agent_session.html", {
+        "user": user, "session_id": session_id, "active_nav": "agent",
+        "breadcrumbs": [{"label": "Red team"}, {"label": "AI Agent", "href": "/admin/red-team/agent"}, {"label": session_id[:8]}],
+    })
+
+
+@app.get("/admin/service-credentials")
+async def legacy_credentials_page():
+    return RedirectResponse("/admin/settings", status_code=308)
+
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "admin_settings.html", {
+        "user": user, "page_title": "Services & credentials", "active_nav": "settings",
+        "page_description": "External service links and encrypted platform credentials.",
+        "breadcrumbs": [{"label": "Settings"}],
+    })

@@ -1,0 +1,16 @@
+{% extends "admin_base.html" %}
+{% block admin_content %}
+<div class="metric-grid" id="metrics"><div class="metric-card"><div class="metric-value">—</div><div class="metric-label">Loading health</div></div></div>
+<div class="admin-grid"><section class="admin-card"><h2>Active events</h2><div id="active-events" class="empty-state">Loading…</div></section><section class="admin-card"><h2>Requires attention</h2><div id="attention" class="empty-state">Loading…</div></section><section class="admin-card"><h2>Provisioning & agents</h2><div id="health">Loading…</div></section><section class="admin-card"><h2>Recent activity</h2><div id="activity">Loading…</div></section></div>
+{% endblock %}
+{% block admin_script %}<script>
+const escOverview=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+fetch('/admin/api/overview').then(r=>{if(!r.ok)throw new Error('Overview request failed');return r.json()}).then(d=>{
+ const cards=[['Events',d.counts.events.total],['Active events',d.counts.events.open],['People',d.counts.users.total],['Virtual machines',d.counts.vms.total]];
+ document.getElementById('metrics').innerHTML=cards.map(x=>`<div class="metric-card"><div class="metric-value">${x[1]}</div><div class="metric-label">${x[0]}</div></div>`).join('');
+ document.getElementById('active-events').innerHTML=d.active_events.length?d.active_events.map(e=>`<p><a href="/admin/events/${e.id}/dashboard">${escOverview(e.name)}</a> · ${e.vm_count} VMs · ${e.user_count} people</p>`).join(''):'<div class="empty-state">No events are running.</div>';
+ document.getElementById('attention').innerHTML=d.attention.length?d.attention.map(a=>`<p><span class="status ${a.severity}">${a.severity}</span> <a href="${a.href}">${escOverview(a.message)}</a></p>`).join(''):'<div class="empty-state">All systems look healthy.</div>';
+ document.getElementById('health').innerHTML=`<p>Provisioning: ${escOverview(JSON.stringify(d.provisioning))}</p><p>Agents: ${escOverview(JSON.stringify(d.agents))}</p>`;
+ document.getElementById('activity').innerHTML=d.recent_activity.length?d.recent_activity.map(a=>`<p>${escOverview(a.actor)} · ${escOverview(a.action)}</p>`).join(''):'<div class="empty-state">No administrative activity yet.</div>';
+}).catch(()=>document.getElementById('metrics').innerHTML='<div class="admin-card status failed">Overview unavailable</div>');
+</script>{% endblock %}

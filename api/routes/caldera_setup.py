@@ -15,7 +15,7 @@ from api.models import Event, VM, VMModule
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 CALDERA_PLUGIN_DIR = os.environ.get("CALDERA_PLUGIN_DIR", "/caldera-plugin/ctf-exploit")
 CALDERA_CONFIG_PATH = os.environ.get("CALDERA_CONFIG_PATH", "/caldera-config/local.yml")

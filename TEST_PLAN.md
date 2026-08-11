@@ -1,5 +1,16 @@
 # Test Plan
 
+Run the suite from the repository root against a disposable SQLite database:
+
+```bash
+docker compose --profile test build tests
+docker compose --profile test run --rm \
+  -e DATABASE_URL=sqlite:////tmp/ctf-test.db tests
+```
+
+The explicit `/tmp` database keeps test startup independent of whether a local
+`data/` directory exists and prevents the suite from touching development data.
+
 CTF-IT uses team-scoped VMs, Ansible Semaphore, Vultr, and MITRE Caldera. The former per-user Docker-image and registry workflow has been removed.
 
 ## Automated suite

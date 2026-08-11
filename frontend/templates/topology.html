@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}Network Topology - CTF Platform{% endblock %}
 {% block extra_style %}
 .topology-container {
@@ -276,11 +276,12 @@
 }
 {% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <div class="topology-container">
     <div class="topology-toolbar">
         <div class="topology-toolbar-left">
-            <a href="/admin" class="topology-back">&larr; Admin</a>
+            <a href="/admin/infrastructure" class="topology-back">Infrastructure</a>
             <span class="topology-title">Network Topology</span>
             <select id="event-filter" class="topology-select">
                 <option value="">All Events</option>
@@ -444,7 +445,7 @@
 
     // ── Fetch topology data ───────────────────────────────────────────────────
     async function fetchData(eventId) {
-        let url = '/admin/topology-data';
+        let url = '/admin/infrastructure/topology-data';
         if (eventId) url += `?event_id=${eventId}`;
         const resp = await fetch(url);
         if (!resp.ok) return null;
@@ -453,7 +454,7 @@
 
     // ── Fetch events for filter ───────────────────────────────────────────────
     async function loadEventFilter() {
-        const resp = await fetch('/admin/events');
+        const resp = await fetch('/admin/api/events');
         if (!resp.ok) return;
         const events = await resp.json();
         events.forEach(e => {
@@ -547,7 +548,7 @@
             .on('contextmenu', showContextMenu)
             .on('dblclick', (event, d) => {
                 event.preventDefault();
-                if (d.type === 'vm') window.location = `/admin/vm/${d.id.replace('vm-', '')}`;
+                if (d.type === 'vm') window.location = `/admin/infrastructure/vms/${d.id.replace('vm-', '')}`;
                 else if (d.type === 'event') window.location = '/admin';
             });
 
@@ -800,7 +801,7 @@
             const vmId = d.id.replace('vm-', '');
             items = `
                 <div class="topo-context-header">${d.label} (${d.status})</div>
-                <div class="topo-context-item" onclick="location.href='/admin/vm/${vmId}'">&#9654; View Details</div>
+                <div class="topo-context-item" onclick="location.href='/admin/infrastructure/vms/${vmId}'">&#9654; View Details</div>
                 <div class="topo-context-item" data-action="provision" data-id="${vmId}">&#8635; Provision</div>
                 <div class="topo-context-item" data-action="assign-modules" data-id="${vmId}">&#128203; Assign Modules</div>
                 <div class="topo-context-item" data-action="export-playbook" data-id="${vmId}">&#128230; Export Playbook</div>
@@ -835,21 +836,21 @@
 
         switch (action) {
             case 'provision':
-                url = `/admin/vms/${id}/provision`;
+                url = `/admin/api/vms/${id}/provision`;
                 method = 'POST';
                 msg = 'Provision started';
                 break;
             case 'assign-modules':
-                url = `/admin/vms/${id}/assign-modules`;
+                url = `/admin/api/vms/${id}/assign-modules`;
                 method = 'POST';
                 msg = 'Modules assigned';
                 break;
             case 'export-playbook':
-                window.location = `/admin/vms/${id}/ansible-export`;
+                url = `/admin/api/vms/${id}/ansible-export`;
                 return;
             case 'destroy':
                 if (!confirm('Destroy this VM? This cannot be undone.')) return;
-                url = `/admin/vms/${id}/destroy-vultr`;
+                url = `/admin/api/vms/${id}/destroy-vultr`;
                 method = 'POST';
                 msg = 'Destroy initiated';
                 break;

@@ -78,7 +78,7 @@ class SessionManager:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 headers = {"X-API-Key": ctf_api_key}
                 try:
-                    url = f"{self.config.CTF_API_URL}/admin/caldera/attack-tree/{vm_id}"
+                    url = f"{self.config.CTF_API_URL}/admin/api/caldera/attack-tree/{vm_id}"
                     logger.info(f"Fetching attack tree from {url}")
                     resp = await client.get(url, headers=headers)
                     logger.info(f"Attack tree response: {resp.status_code}, body length: {len(resp.text)}")
@@ -126,7 +126,7 @@ class SessionManager:
                     headers = {"X-API-Key": ctf_api_key}
                     try:
                         resp = await client.get(
-                            f"{self.config.CTF_API_URL}/admin/caldera/attack-tree/{vm_id}",
+                            f"{self.config.CTF_API_URL}/admin/api/caldera/attack-tree/{vm_id}",
                             headers=headers,
                         )
                         if resp.status_code == 200:
@@ -416,7 +416,7 @@ class SessionManager:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 headers = {"X-API-Key": ctf_api_key}
                 resp = await client.get(
-                    f"{self.config.CTF_API_URL}/admin/vms/{vm_id}",
+                    f"{self.config.CTF_API_URL}/admin/api/vms/{vm_id}",
                     headers=headers,
                 )
                 if resp.status_code == 200:

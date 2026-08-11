@@ -1,8 +1,9 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
 {% block title %}AI Red Team Agent{% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <div class="page-header">
     <h1>AI Red Team Agent</h1>
     <p class="subtitle">Autonomous penetration testing powered by AI</p>
@@ -70,7 +71,7 @@
 </div>
 
 <script>
-const API_BASE = '/admin/ai-agent';
+const API_BASE = '/admin/api/ai-agent';
 
 document.addEventListener('DOMContentLoaded', () => {
     loadEvents();
@@ -80,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadEvents() {
     try {
-        const resp = await fetch('/admin/events');
+        const resp = await fetch('/admin/api/events');
         const events = await resp.json();
         const select = document.getElementById('event-select');
         events.forEach(e => {
@@ -100,7 +101,7 @@ async function loadVms(eventId) {
     select.innerHTML = '<option value="">Any VM in event</option>';
     if (!eventId) return;
     try {
-        const resp = await fetch(`/admin/vms?event_id=${eventId}`);
+        const resp = await fetch(`/admin/api/vms?event_id=${eventId}`);
         if (!resp.ok) return;
         const vms = await resp.json();
         vms.forEach(vm => {
@@ -134,7 +135,7 @@ async function loadSessions() {
             const errorCount = s.error_count || 0;
 
             return `<tr>
-                <td><a href="/admin/ai-agent/session/${s.id}" class="link">${s.id.slice(0,8)}</a></td>
+                <td><a href="/admin/red-team/agent/sessions/${s.id}" class="link">${s.id.slice(0,8)}</a></td>
                 <td>Event ${s.ctf_event_id}</td>
                 <td>${target}</td>
                 <td><span class="status-badge ${statusClass}">${s.status}</span></td>
@@ -171,7 +172,7 @@ document.getElementById('new-session-form').addEventListener('submit', async (e)
         });
         const session = await resp.json();
         if (session.id) {
-            window.location.href = `/admin/ai-agent/session/${session.id}`;
+            window.location.href = `/admin/red-team/agent/sessions/${session.id}`;
         }
     } catch (err) {
         alert('Failed to create session: ' + err.message);

@@ -11,7 +11,7 @@ from api.database import get_db
 from api.models import VM, VMModule
 from api.routes.admin import require_admin
 
-router = APIRouter(prefix="/admin/caldera", tags=["admin"])
+router = APIRouter(prefix="/admin/api/caldera", tags=["admin"])
 
 API_KEY = os.environ.get("CTF_API_KEY", "")
 

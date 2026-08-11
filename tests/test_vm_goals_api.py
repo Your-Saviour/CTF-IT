@@ -1,5 +1,5 @@
-"""Tests for vm_goals API: GET /admin/vms/{vm_id}/goals and
-POST /admin/vms/{vm_id}/goals/{goal_id}/check."""
+"""Tests for vm_goals API: GET /admin/api/vms/{vm_id}/goals and
+POST /admin/api/vms/{vm_id}/goals/{goal_id}/check."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -97,7 +97,7 @@ def test_get_goals_empty(client, seeded_data):
     db.commit()
     db.close()
 
-    resp = c.get(f"/admin/vms/{vm.id}/goals")
+    resp = c.get(f"/admin/api/vms/{vm.id}/goals")
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -122,7 +122,7 @@ def test_get_goals_returns_records(client, seeded_data):
     goal_id = goal.id
     db.close()
 
-    resp = c.get(f"/admin/vms/{vm.id}/goals")
+    resp = c.get(f"/admin/api/vms/{vm.id}/goals")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -140,7 +140,7 @@ def test_get_goals_returns_records(client, seeded_data):
 
 def test_get_goals_unknown_vm(client):
     c, vm = client
-    resp = c.get("/admin/vms/99999/goals")
+    resp = c.get("/admin/api/vms/99999/goals")
     assert resp.status_code == 404
 
 
@@ -148,7 +148,7 @@ def test_get_goals_unknown_vm(client):
 
 def test_check_goal_unknown_vm(client):
     c, vm = client
-    resp = c.post("/admin/vms/99999/goals/1/check")
+    resp = c.post("/admin/api/vms/99999/goals/1/check")
     assert resp.status_code == 404
 
 
@@ -205,7 +205,7 @@ def test_check_goal_http_response_achieved(client, seeded_data):
 
     with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
         with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
-            resp = c.post(f"/admin/vms/{vm.id}/goals/{goal_id}/check")
+            resp = c.post(f"/admin/api/vms/{vm.id}/goals/{goal_id}/check")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -281,7 +281,7 @@ def test_check_goal_revert_to_defended(client, seeded_data):
 
     with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
         with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
-            resp = c.post(f"/admin/vms/{vm.id}/goals/{goal_id}/check")
+            resp = c.post(f"/admin/api/vms/{vm.id}/goals/{goal_id}/check")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -334,7 +334,7 @@ def test_check_goal_reexploit_from_defended(client, seeded_data):
 
     with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
         with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
-            resp = c.post(f"/admin/vms/{vm.id}/goals/{goal_id}/check")
+            resp = c.post(f"/admin/api/vms/{vm.id}/goals/{goal_id}/check")
 
     assert resp.status_code == 200
     data = resp.json()

@@ -12,7 +12,7 @@ from api.database import get_db
 from api.models import Event
 from api.routes.admin import require_admin
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 
 @router.post("/ansible-export")

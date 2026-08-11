@@ -13,10 +13,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import AccountToken, AdminAudit, Event, User, utcnow
+from api.models import AccountToken, AdminAudit, Event, User, VM, utcnow
 from api.routes.auth import _token_digest, get_current_user
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 
 class PlanPreviewRequest(BaseModel):
@@ -72,6 +72,72 @@ def _user_payload(user: User, audit_summary=None):
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
         "deactivated_at": user.deactivated_at.isoformat() if user.deactivated_at else None,
         "audit_summary": audit_summary,
+    }
+
+
+@router.get("/overview")
+async def overview(request: Request, db: Session = Depends(get_db)):
+    """Aggregate stored operational health without blocking on external services."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    events = db.query(Event).order_by(Event.created_at.desc()).all()
+    vms = db.query(VM).all()
+    users = db.query(User).all()
+    event_counts = {state: sum(e.status == state for e in events) for state in ("draft", "open", "stopped")}
+    vm_states = sorted({vm.status or "unknown" for vm in vms})
+    agent_states = sorted({vm.agent_status or "not_deployed" for vm in vms})
+    attention = []
+    for vm in vms:
+        if vm.status == "failed" or vm.provision_error:
+            attention.append({
+                "severity": "critical", "kind": "provisioning",
+                "message": f"{vm.hostname or 'VM ' + str(vm.id)} requires provisioning attention",
+                "href": f"/admin/infrastructure/vms/{vm.id}",
+            })
+        elif vm.agent_status == "failed":
+            attention.append({
+                "severity": "warning", "kind": "agent",
+                "message": f"Agent is unhealthy on {vm.hostname or 'VM ' + str(vm.id)}",
+                "href": f"/admin/infrastructure/vms/{vm.id}",
+            })
+    now = utcnow()
+    active_events = []
+    for event in events:
+        if event.status == "open":
+            if event.ends_at and event.ends_at <= now:
+                attention.append({
+                    "severity": "critical", "kind": "deadline",
+                    "message": f"{event.name} has passed its deadline",
+                    "href": f"/admin/events/{event.id}/dashboard",
+                })
+            active_events.append({
+                "id": event.id, "name": event.name, "status": event.status,
+                "started_at": event.started_at.isoformat() if event.started_at else None,
+                "ends_at": event.ends_at.isoformat() if event.ends_at else None,
+                "team_count": len(event.teams), "vm_count": len(event.vms),
+                "user_count": len(event.users),
+            })
+    recent = db.query(AdminAudit).order_by(AdminAudit.created_at.desc()).limit(12).all()
+    actor_ids = {entry.actor_id for entry in recent if entry.actor_id}
+    actors = {u.id: u.username for u in db.query(User).filter(User.id.in_(actor_ids)).all()} if actor_ids else {}
+    return {
+        "counts": {
+            "events": {"total": len(events), **event_counts},
+            "users": {"total": len(users), "active": sum(u.active for u in users),
+                      "administrators": sum(u.is_admin for u in users)},
+            "vms": {"total": len(vms), **{state: sum((vm.status or "unknown") == state for vm in vms) for state in vm_states}},
+        },
+        "active_events": active_events,
+        "provisioning": {state: sum((vm.status or "unknown") == state for vm in vms) for state in vm_states},
+        "agents": {state: sum((vm.agent_status or "not_deployed") == state for vm in vms) for state in agent_states},
+        "attention": attention,
+        "recent_activity": [{
+            "id": entry.id, "action": entry.action,
+            "actor": actors.get(entry.actor_id, "system"),
+            "created_at": entry.created_at.isoformat(),
+        } for entry in recent],
     }
 
 

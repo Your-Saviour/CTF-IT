@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}Command Centre — {{ event_name }}{% endblock %}
 
 {% block extra_style %}
@@ -50,12 +50,13 @@
 @media (max-width:760px) { .summary-grid { grid-template-columns:repeat(2,1fr); } .vm-grid { grid-template-columns:1fr; } .dash-header { display:block; } .header-meta { margin-top:.8rem; } }
 {% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <div class="dash-header">
     <div>
         <div class="eyebrow">Live event command centre</div>
         <h1 id="event-name">{{ event_name }}</h1>
-        <a class="back-link" href="/admin">← Back to administration</a>
+        <a class="back-link" href="/admin/events">Back to events</a>
     </div>
     <div class="header-meta">
         <span class="pill" id="event-status">Loading</span>
@@ -95,7 +96,7 @@
 </section>
 {% endblock %}
 
-{% block extra_script %}
+{% block admin_script %}
 <script>
 (function () {
     'use strict';
@@ -139,7 +140,7 @@
     function renderAlerts(alerts) {
         document.getElementById('alert-count').textContent = alerts.length ? alerts.length + ' active' : '';
         document.getElementById('alerts').innerHTML = alerts.length ? alerts.map(function(a) {
-            var link = a.vm_id ? '<a class="drill-link" href="/admin/vm/' + encodeURIComponent(a.vm_id) + '">Open VM →</a>' : '';
+            var link = a.vm_id ? '<a class="drill-link" href="/admin/infrastructure/vms/' + encodeURIComponent(a.vm_id) + '">Open VM</a>' : '';
             return '<div class="alert ' + esc(a.severity) + '"><strong>' + esc(a.message) + '</strong>' +
                 (a.team_name ? '<div class="alert-detail">' + esc(a.team_name) + '</div>' : '') +
                 (a.detail ? '<div class="alert-detail">' + esc(a.detail) + '</div>' : '') + link + '</div>';
@@ -153,7 +154,7 @@
         document.getElementById('vm-grid').innerHTML = vms.length ? vms.map(function(vm) {
             var agent = vm.caldera_agent;
             var agentText = !agent.available ? 'agent: unknown' : agent.alive ? 'agent: alive' : agent.present ? 'agent: not alive' : 'agent: missing';
-            return '<a class="vm-card ' + esc(vm.health) + '" href="/admin/vm/' + encodeURIComponent(vm.id) + '"><div class="vm-head"><span class="vm-name">' + esc(vm.hostname || 'VM ' + vm.id) + '</span><span class="health-' + esc(vm.health) + '">' + esc(vm.health.toUpperCase()) + '</span></div>' +
+            return '<a class="vm-card ' + esc(vm.health) + '" href="/admin/infrastructure/vms/' + encodeURIComponent(vm.id) + '"><div class="vm-head"><span class="vm-name">' + esc(vm.hostname || 'VM ' + vm.id) + '</span><span class="health-' + esc(vm.health) + '">' + esc(vm.health.toUpperCase()) + '</span></div>' +
                 '<div class="vm-meta">' + esc(vm.team_name) + ' · ' + esc(vm.ip_address || 'no IP') + '</div><div class="vm-meta">' + esc(vm.status || 'registered') + (vm.provision_step ? ' / ' + esc(vm.provision_step) : '') + ' · ' + esc(agentText) + '</div>' +
                 '<div class="vm-meta">Modules ' + vm.module_progress.completed + '/' + vm.module_progress.assigned + ' (' + percent(vm.module_progress.percentage) + ')</div>' + progress(vm.module_progress.percentage) + '</a>';
         }).join('') : '<div class="empty">No VMs in this event</div>';
@@ -204,7 +205,7 @@
         if (polling) return;
         polling = true;
         try {
-            var response = await fetch('/admin/events/' + EVENT_ID + '/dashboard-data', {headers:{'Accept':'application/json'}});
+            var response = await fetch('/admin/api/events/' + EVENT_ID + '/dashboard-data', {headers:{'Accept':'application/json'}});
             if (!response.ok) throw new Error('Dashboard request failed (' + response.status + ')');
             var data = await response.json();
             lastSuccess = new Date(data.refreshed_at);

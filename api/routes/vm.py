@@ -36,7 +36,7 @@ _HERE = Path(__file__).parent.parent.parent
 PLAYBOOKS_DIR = _HERE / "playbooks"
 TEMPLATES_DIR = _HERE / "templates"
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 
 def _record_vm_failure(vm_id: int, error: str, *, agent: bool = False) -> None:

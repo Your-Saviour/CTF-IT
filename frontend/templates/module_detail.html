@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}Module Detail - CTF Platform{% endblock %}
 {% block extra_style %}
 .mod-grid {
@@ -195,9 +195,10 @@
 .card h3 { margin-bottom: 1rem; }
 {% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <div class="mod-header">
-    <a href="/admin" class="mod-back">&#8592; Admin</a>
+    <a href="/admin/modules" class="mod-back">Back to modules</a>
     <h1 class="mod-title" id="mod-name">Loading...</h1>
     <span id="mod-difficulty-badge"></span>
     <span id="mod-disabled-badge"></span>
@@ -289,7 +290,7 @@
 </div>
 {% endblock %}
 
-{% block extra_script %}
+{% block admin_script %}
 <script>
 var MODULE_ID = {{ module_id | tojson }};
 var moduleData = null;
@@ -302,7 +303,7 @@ function esc(s) {
 }
 
 function loadModule() {
-    fetch('/admin/modules/' + encodeURIComponent(MODULE_ID))
+    fetch('/admin/api/modules/' + encodeURIComponent(MODULE_ID))
         .then(function(r) {
             if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error || 'Not found'); }); }
             return r.json();
@@ -361,7 +362,7 @@ function renderModule(m) {
     var reqEl = document.getElementById('dep-requires');
     if (m.requires && m.requires.length) {
         reqEl.innerHTML = m.requires.map(function(id) {
-            return '<a href="/admin/module/' + encodeURIComponent(id) + '" class="module-id-link">' + esc(id) + '</a>';
+            return '<a href="/admin/modules/' + encodeURIComponent(id) + '" class="module-id-link">' + esc(id) + '</a>';
         }).join('<br>');
     } else {
         reqEl.innerHTML = '<span class="empty-list">None</span>';
@@ -370,7 +371,7 @@ function renderModule(m) {
     var confEl = document.getElementById('dep-conflicts');
     if (m.conflicts && m.conflicts.length) {
         confEl.innerHTML = m.conflicts.map(function(id) {
-            return '<a href="/admin/module/' + encodeURIComponent(id) + '" class="module-id-link">' + esc(id) + '</a>';
+            return '<a href="/admin/modules/' + encodeURIComponent(id) + '" class="module-id-link">' + esc(id) + '</a>';
         }).join('<br>');
     } else {
         confEl.innerHTML = '<span class="empty-list">None</span>';
@@ -452,7 +453,6 @@ function renderModule(m) {
     if (m.steps && m.steps.length) {
         stepsEl.innerHTML = m.steps.map(function(step, idx) {
             var typeClass = 'step-type-' + esc(step.type);
-            var filename = step.type === 'run' ? step.script : step.src;
             var detail = '';
             if (step.type === 'run') {
                 detail = '<span class="step-detail">' + esc(step.script) + '</span>';
@@ -466,35 +466,44 @@ function renderModule(m) {
                     '<span class="step-num">' + (idx + 1) + '.</span>' +
                     '<span class="step-type ' + typeClass + '">' + esc(step.type) + '</span>' +
                     detail +
-                    '<button class="copy-btn" style="margin-left: auto; flex-shrink: 0;" onclick="toggleStepFile(' + idx + ', ' + JSON.stringify(filename) + ')">View</button>' +
+                    '<button type="button" class="copy-btn step-view-button" data-step-index="' + idx + '" aria-expanded="false" style="margin-left: auto; flex-shrink: 0;">View</button>' +
                 '</div>' +
                 '<div id="step-file-' + idx + '" style="display: none; width: 100%; padding-bottom: 0.5rem;">' +
                     '<div class="code-block" id="step-file-content-' + idx + '" style="max-height: 400px; overflow-y: auto; color: var(--text-primary); white-space: pre;">Loading...</div>' +
                 '</div>' +
             '</div>';
         }).join('');
+        stepsEl.querySelectorAll('.step-view-button').forEach(function(button) {
+            button.addEventListener('click', function() {
+                var idx = Number(button.dataset.stepIndex);
+                var step = m.steps[idx];
+                var filename = step.type === 'run' ? step.script : step.src;
+                toggleStepFile(idx, filename, button);
+            });
+        });
     } else {
         stepsEl.innerHTML = '<span class="empty-list">No build steps defined.</span>';
     }
 }
 
-function toggleStepFile(idx, filename) {
+function toggleStepFile(idx, filename, btn) {
     var wrap = document.getElementById('step-file-' + idx);
     var contentEl = document.getElementById('step-file-content-' + idx);
-    var btn = wrap.previousElementSibling.querySelector('button');
 
     if (wrap.style.display !== 'none') {
         wrap.style.display = 'none';
         btn.textContent = 'View';
+        btn.setAttribute('aria-expanded', 'false');
         return;
     }
 
     wrap.style.display = 'block';
     btn.textContent = 'Hide';
+    btn.setAttribute('aria-expanded', 'true');
 
     if (contentEl.dataset.loaded) return;
 
-    fetch('/admin/modules/' + encodeURIComponent(MODULE_ID) + '/file?filename=' + encodeURIComponent(filename))
+    fetch('/admin/api/modules/' + encodeURIComponent(MODULE_ID) + '/file?filename=' + encodeURIComponent(filename))
         .then(function(r) {
             if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error); }); }
             return r.json();
@@ -530,7 +539,7 @@ function toggleDisable() {
     if (!confirm((newDisabled ? 'Disable' : 'Enable') + ' module "' + moduleData.id + '"?' +
         (newDisabled ? ' It will be excluded from all new image builds.' : ''))) return;
 
-    fetch('/admin/modules/' + encodeURIComponent(MODULE_ID) + '/disable', {
+    fetch('/admin/api/modules/' + encodeURIComponent(MODULE_ID) + '/disable', {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({disabled: newDisabled})

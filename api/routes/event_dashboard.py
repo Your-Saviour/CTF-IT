@@ -14,7 +14,7 @@ from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient, get_caldera_api_key
 
 
-router = APIRouter(prefix="/admin/events", tags=["admin"])
+router = APIRouter(prefix="/admin/api/events", tags=["admin"])
 
 
 def _iso(value: datetime | None) -> str | None:

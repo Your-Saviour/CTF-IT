@@ -504,7 +504,7 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <h3 style="margin-bottom: 0;">Teams &amp; VMs</h3>
         <div style="display: flex; gap: 0.5rem;">
-            <a href="/admin/topology" class="btn btn-sm" style="border: 1px solid var(--cyan); color: var(--cyan); text-decoration: none;">⬡ Network Topology</a>
+            <a href="/admin/infrastructure/topology" class="btn btn-sm" style="border: 1px solid var(--cyan); color: var(--cyan); text-decoration: none;">⬡ Network Topology</a>
             <button class="btn btn-sm btn-primary" onclick="showTeamForm()">+ New Team</button>
             <button class="btn btn-sm btn-primary" onclick="showVMForm()">+ Register VM</button>
         </div>
@@ -681,8 +681,8 @@
             <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Caldera</span>
             <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Adversary Emulation</span>
         </a>
-        <a href="/admin/caldera" class="btn btn-outline-danger btn-sm">Red Team Operations</a>
-        <a href="/admin/ai-agent" class="btn btn-outline btn-sm" style="border-color: var(--purple); color: var(--purple);">AI Red Team Agent</a>
+        <a href="/admin/red-team/operations" class="btn btn-outline-danger btn-sm">Red Team Operations</a>
+        <a href="/admin/red-team/agent" class="btn btn-outline btn-sm" style="border-color: var(--purple); color: var(--purple);">AI Red Team Agent</a>
         <a href="https://semaphore.{{ domain }}" target="_blank" rel="noopener noreferrer" class="service-link"
            style="display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; transition: all 0.25s; min-width: 160px;">
             <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Semaphore</span>
@@ -701,13 +701,13 @@
 <div class="card">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <h3>Service Credentials</h3>
-        <a href="/admin/service-credentials" class="btn btn-sm btn-primary">Manage Credentials</a>
+        <a href="/admin/settings" class="btn btn-sm btn-primary">Manage Credentials</a>
     </div>
     <p style="color: var(--text-secondary); margin-bottom: 1rem;">
         Encrypted credentials for deploying services. Click on any credential to copy it to the clipboard.
     </p>
     <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-        <a href="/admin/service-credentials" class="service-link"
+        <a href="/admin/settings" class="service-link"
            style="display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; text-decoration: none; transition: all 0.25s; min-width: 180px;">
             <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--cyan); font-weight: 600;">Credentials</span>
             <span style="font-size: 0.72rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Manage & Copy</span>
@@ -1012,9 +1012,9 @@ var cachedBaseTypes = null;
 function fetchVultrOptions() {
     if (cachedVultrOS && cachedVultrPlans && cachedBaseTypes) return Promise.resolve();
     return Promise.all([
-        fetch('/admin/vultr/os').then(function(r) { return r.ok ? r.json() : {os: []}; }),
-        fetch('/admin/vultr/plans').then(function(r) { return r.ok ? r.json() : {plans: []}; }),
-        fetch('/admin/base-types').then(function(r) { return r.ok ? r.json() : []; })
+        fetch('/admin/api/vultr/os').then(function(r) { return r.ok ? r.json() : {os: []}; }),
+        fetch('/admin/api/vultr/plans').then(function(r) { return r.ok ? r.json() : {plans: []}; }),
+        fetch('/admin/api/base-types').then(function(r) { return r.ok ? r.json() : []; })
     ]).then(function(results) {
         cachedVultrOS = results[0].os || [];
         cachedVultrPlans = results[1].plans || [];
@@ -1206,7 +1206,7 @@ function stopProvisionPoll() {
 
 function pollProvisionStatus() {
     if (!provisionEventId) return;
-    fetch('/admin/events/' + provisionEventId + '/provision-status')
+    fetch('/admin/api/events/' + provisionEventId + '/provision-status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             updateProvisionDashboard(data);
@@ -1244,12 +1244,12 @@ function updateProvisionDashboard(data) {
 
 function retryFailedVMs() {
     if (!provisionEventId) return;
-    fetch('/admin/events/' + provisionEventId + '/provision-status')
+    fetch('/admin/api/events/' + provisionEventId + '/provision-status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var failedVMs = (data.vms || []).filter(function(vm) { return vm.status === 'failed'; });
             failedVMs.forEach(function(vm) {
-                fetch('/admin/vms/' + vm.id + '/provision', { method: 'POST' });
+                fetch('/admin/api/vms/' + vm.id + '/provision', { method: 'POST' });
             });
             if (failedVMs.length > 0) {
                 showToast('Retrying ' + failedVMs.length + ' failed VM(s)...');
@@ -1337,7 +1337,7 @@ function setupCaldera(eventId) {
     loadEvents();
     showToast('Caldera setup started. This may take up to 2 minutes...', 10000);
 
-    fetch('/admin/caldera-setup', {
+    fetch('/admin/api/caldera-setup', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({event_id: eventId})
@@ -1364,12 +1364,12 @@ function setupCaldera(eventId) {
 
 function startEvent(id) {
     // Fetch event details to check for vm_quota
-    fetch('/admin/events/' + id)
+    fetch('/admin/api/events/' + id)
         .then(function(r) { return r.json(); })
         .then(function(event) {
             if (event.vm_quota && Object.keys(event.vm_quota).length > 0) {
                 // Calculate total VMs and estimated cost
-                fetch('/admin/teams').then(function(r) { return r.json(); }).then(function(teams) {
+                fetch('/admin/api/teams').then(function(r) { return r.json(); }).then(function(teams) {
                     var eventTeams = teams.filter(function(t) { return t.event_id === id; });
                     if (eventTeams.length === 0) {
                         showToast('Error: No teams defined for this event. Create teams before starting.');
@@ -1405,7 +1405,7 @@ function startEvent(id) {
 }
 
 function doStartEvent(id) {
-    fetch('/admin/events/' + id + '/start', { method: 'POST' })
+    fetch('/admin/api/events/' + id + '/start', { method: 'POST' })
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok) {
@@ -1424,7 +1424,7 @@ function doStartEvent(id) {
 
 function stopEvent(id) {
     if (!confirm('Stop this event? Users will no longer be able to submit verifications.')) return;
-    fetch('/admin/events/' + id + '/stop', { method: 'POST' })
+    fetch('/admin/api/events/' + id + '/stop', { method: 'POST' })
         .then(function(r) {
             if (r.ok) { showToast('Event stopped'); loadEvents(); }
             else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
@@ -1432,14 +1432,14 @@ function stopEvent(id) {
 }
 
 function editEvent(id) {
-    fetch('/admin/events/' + id)
+    fetch('/admin/api/events/' + id)
         .then(function(r) { return r.json(); })
         .then(function(data) { showEventForm(data); });
 }
 
 function deleteEvent(id) {
     if (!confirm('Delete this event? This cannot be undone.')) return;
-    fetch('/admin/events/' + id, { method: 'DELETE' })
+    fetch('/admin/api/events/' + id, { method: 'DELETE' })
         .then(function(r) {
             if (r.ok) { showToast('Event deleted'); loadEvents(); }
             else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
@@ -1449,7 +1449,7 @@ function deleteEvent(id) {
 // ── Load Events ──
 
 function loadEvents() {
-    fetch('/admin/events')
+    fetch('/admin/api/events')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var body = document.getElementById('events-body');
@@ -1523,7 +1523,7 @@ function loadVultrData() {
     if (_vultrDataLoaded) return;
     _vultrDataLoaded = true;
     // Load OS options
-    fetch('/admin/vultr/os').then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/admin/api/vultr/os').then(function(r) { return r.json(); }).then(function(data) {
         var sel = document.getElementById('vf-vos');
         if (data.error) {
             sel.innerHTML = '<option value="">' + esc(data.error) + '</option>';
@@ -1537,7 +1537,7 @@ function loadVultrData() {
         document.getElementById('vf-vos').innerHTML = '<option value="">Failed to load OS list</option>';
     });
     // Load plan options
-    fetch('/admin/vultr/plans').then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/admin/api/vultr/plans').then(function(r) { return r.json(); }).then(function(data) {
         var sel = document.getElementById('vf-vplan');
         if (data.error) {
             sel.innerHTML = '<option value="">' + esc(data.error) + '</option>';
@@ -1588,7 +1588,7 @@ function createVMOnVultr() {
         ssh_user: document.getElementById('vf-vsshuser').value.trim() || 'root',
         notes: document.getElementById('vf-vnotes').value.trim() || null,
     };
-    fetch('/admin/vms/create-vultr', {
+    fetch('/admin/api/vms/create-vultr', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
@@ -1597,7 +1597,7 @@ function createVMOnVultr() {
             r.json().then(function(d) {
                 showToast('VM creation started');
                 hideVMForm();
-                window.location.href = '/admin/vm/' + d.id;
+                window.location.href = '/admin/infrastructure/vms/' + d.id;
             });
         } else {
             r.json().then(function(d) { showToast('Error: ' + (d.error || 'Unknown error')); });
@@ -1606,7 +1606,7 @@ function createVMOnVultr() {
 }
 
 function loadTeams() {
-    fetch('/admin/teams')
+    fetch('/admin/api/teams')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             teamsData = data;
@@ -1631,7 +1631,7 @@ function createTeam() {
     var event_id = parseInt(document.getElementById('tf-event').value);
     if (!name) { showToast('Team name is required'); return; }
     if (!event_id) { showToast('Select an event'); return; }
-    fetch('/admin/teams', {
+    fetch('/admin/api/teams', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({name: name, event_id: event_id})
@@ -1649,7 +1649,7 @@ function createTeam() {
 
 function deleteTeam(id) {
     if (!confirm('Delete this team?')) return;
-    fetch('/admin/teams/' + id, {method: 'DELETE'})
+    fetch('/admin/api/teams/' + id, {method: 'DELETE'})
         .then(function(r) {
             if (r.ok) { showToast('Team deleted'); loadTeams(); loadVMs(); }
             else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
@@ -1657,7 +1657,7 @@ function deleteTeam(id) {
 }
 
 function loadVMs() {
-    fetch('/admin/vms')
+    fetch('/admin/api/vms')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var body = document.getElementById('vms-body');
@@ -1678,7 +1678,7 @@ function loadVMs() {
                     '<td style="white-space: nowrap;"><span class="' + statusClass + '" style="font-weight: 600; text-transform: uppercase; font-size: 0.8rem;">' + esc(v.status) + '</span></td>' +
                     '<td style="white-space: nowrap;">' + progress + '</td>' +
                     '<td><div style="display: flex; gap: 0.35rem;">' +
-                        '<a href="/admin/vm/' + v.id + '" class="btn btn-sm" style="text-decoration: none; white-space: nowrap;">View</a>' +
+                        '<a href="/admin/infrastructure/vms/' + v.id + '" class="btn btn-sm" style="text-decoration: none; white-space: nowrap;">View</a>' +
                         '<button class="btn btn-sm btn-danger" onclick="deleteVM(' + v.id + ')" style="white-space: nowrap;">Delete</button>' +
                     '</div></td>' +
                 '</tr>';
@@ -1698,7 +1698,7 @@ function createVM() {
         ssh_port: parseInt(document.getElementById('vf-sshport').value) || 22,
         notes: document.getElementById('vf-notes').value.trim() || null,
     };
-    fetch('/admin/vms', {
+    fetch('/admin/api/vms', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
@@ -1709,7 +1709,7 @@ function createVM() {
                 hideVMForm();
                 loadVMs();
                 // Navigate to detail page
-                window.location.href = '/admin/vm/' + d.id;
+                window.location.href = '/admin/infrastructure/vms/' + d.id;
             });
         } else {
             r.json().then(function(d) { showToast('Error: ' + d.error); });
@@ -1719,7 +1719,7 @@ function createVM() {
 
 function deleteVM(id) {
     if (!confirm('Delete this VM? This will remove all its assigned modules.')) return;
-    fetch('/admin/vms/' + id, {method: 'DELETE'})
+    fetch('/admin/api/vms/' + id, {method: 'DELETE'})
         .then(function(r) {
             if (r.ok) { showToast('VM deleted'); loadVMs(); }
             else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
@@ -1727,7 +1727,7 @@ function deleteVM(id) {
 }
 
 // Load teams and VMs on page load; also capture events list for team form
-fetch('/admin/events')
+fetch('/admin/api/events')
     .then(function(r) { return r.json(); })
     .then(function(data) {
         eventsForSelect = data;
@@ -1758,7 +1758,7 @@ function loadUsers() {
     if (q) params.set('q', q);
     if (role) params.set('role', role);
     if (active) params.set('active', active);
-    fetch('/admin/users?' + params.toString()).then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/admin/api/users?' + params.toString()).then(function(r) { return r.json(); }).then(function(data) {
         var body = document.getElementById('users-body');
         if (!data.length) { body.innerHTML = '<tr><td colspan="5">No users match this filter.</td></tr>'; return; }
         body.innerHTML = data.map(function(u) {
@@ -1778,12 +1778,12 @@ function updateUser(id, role, eventId) {
     var payload = {};
     if (role !== undefined) payload.role = role;
     if (eventId !== undefined) payload.event_id = eventId ? Number(eventId) : null;
-    fetch('/admin/users/' + id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    fetch('/admin/api/users/' + id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
         .then(handleUserMutation);
 }
 
 function setActivation(id, active) {
-    fetch('/admin/users/' + id + '/activation', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:active})})
+    fetch('/admin/api/users/' + id + '/activation', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({active:active})})
         .then(handleUserMutation);
 }
 
@@ -1797,7 +1797,7 @@ function createInvitation() {
     var eventId = document.getElementById('invite-event').value;
     var intended = document.getElementById('invite-username').value.trim();
     var role = document.getElementById('invite-role').value;
-    fetch('/admin/invitations', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event_id:Number(eventId), intended_username:intended || null, role:role})})
+    fetch('/admin/api/invitations', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event_id:Number(eventId), intended_username:intended || null, role:role})})
         .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error); return d; }); })
         .then(function(d) { showAccountLink('Invitation link', d); hideInvitationForm(); loadAudit(); })
         .catch(function(e) { showToast(e.message || 'Unable to create invitation', 3500); });
@@ -1818,7 +1818,7 @@ function hideInvitationForm() {
 }
 
 function createResetLink(id) {
-    fetch('/admin/users/' + id + '/reset-link', {method:'POST'})
+    fetch('/admin/api/users/' + id + '/reset-link', {method:'POST'})
         .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error); return d; }); })
         .then(function(d) { showAccountLink('Password-reset link', d); loadAudit(id); })
         .catch(function(e) { showToast(e.message || 'Unable to create reset link', 3500); });
@@ -1843,7 +1843,7 @@ function copyAccountLink() {
 }
 
 function loadAudit(userId) {
-    fetch('/admin/audit?limit=12' + (userId ? '&user_id=' + userId : '')).then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/admin/api/audit?limit=12' + (userId ? '&user_id=' + userId : '')).then(function(r) { return r.json(); }).then(function(data) {
         var el = document.getElementById('user-audit');
         el.innerHTML = data.length ? data.map(function(a) {
             return '<div style="padding:.35rem 0; border-bottom:1px solid var(--border);"><span style="color:var(--text-primary)">' + esc(a.actor) + '</span> ' + esc(a.action.replaceAll('_', ' ')) + (a.target ? ' for <span style="color:var(--cyan)">' + esc(a.target) + '</span>' : '') + ' · ' + new Date(a.created_at).toLocaleString() + '</div>';
@@ -1873,7 +1873,7 @@ function renderModulesTable(data) {
         var typeShort = esc(m.type).replace('application_external', 'app/ext').replace('application_internal', 'app/int');
         return '<tr' + disabledStyle + '>' +
             '<td style="color: var(--text-secondary); font-size: 0.78rem; font-family: \'JetBrains Mono\', monospace; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;">' + esc(m.id) + '</td>' +
-            '<td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;"><a href="/admin/module/' + encodeURIComponent(m.id) + '" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" onmouseover="this.style.color=\'var(--cyan)\'" onmouseout="this.style.color=\'var(--text-primary)\'">' + esc(m.name) + '</a>' + disabledBadge + '</td>' +
+            '<td style="white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis;"><a href="/admin/modules/' + encodeURIComponent(m.id) + '" style="color: var(--text-primary); text-decoration: none; font-weight: 600;" onmouseover="this.style.color=\'var(--cyan)\'" onmouseout="this.style.color=\'var(--text-primary)\'">' + esc(m.name) + '</a>' + disabledBadge + '</td>' +
             '<td style="font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary);">' + typeShort + '</td>' +
             '<td style="white-space: nowrap;"><span class="badge badge-' + esc(m.difficulty) + '">' + esc(m.difficulty) + '</span></td>' +
             '<td style="white-space: nowrap;">' + m.points + '</td>' +
@@ -1904,7 +1904,7 @@ function filterModules() {
     renderModulesTable(filtered);
 }
 
-fetch('/admin/modules')
+fetch('/admin/api/modules')
     .then(r => r.json())
     .then(data => {
         modulesData = data;

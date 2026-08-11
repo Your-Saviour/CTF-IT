@@ -174,7 +174,7 @@ Valid type keys: `vulnerability`, `hardening`, `payload`, `application_external`
 ### Scoreboards
 
 - `GET /api/scoreboard?event_id=N` — blue team per-event rankings (public)
-- `GET /admin/caldera/scoreboard?event_id=N` — red vs blue combined view (admin only)
+- `GET /admin/api/caldera/scoreboard?event_id=N` — red vs blue combined view (admin only)
 - `GET /api/scoreboard/events` — lists all non-draft events for the selector dropdown
 
 Leaderboards are frozen when event status transitions to `stopped`.
@@ -245,7 +245,7 @@ Before using Caldera features:
 Download the Caldera plugin zip for inspection or manual upload:
 
 ```bash
-curl -X POST https://ctf.example.com/admin/caldera-export \
+curl -X POST https://ctf.example.com/admin/api/ \
   -H "Cookie: session=<admin_session>" \
   -H "Content-Type: application/json" \
   -d '{"event_id": 1}' \
@@ -258,7 +258,7 @@ Or use `{"quota": {...}}` instead of `{"event_id": N}` to export from an arbitra
 
 The recommended path — does everything automatically:
 
-**Admin panel → Caldera → Setup** (or `POST /admin/caldera-setup` with `{"event_id": N}`)
+**Admin panel → Caldera → Setup** (or `POST /admin/api/` with `{"event_id": N}`)
 
 This:
 1. Generates the plugin from the event's modules
@@ -290,17 +290,17 @@ Node colours in the visualisation: green = exploited, red = defended, gray = ski
 Attack trees are rendered on the VM detail page and the Caldera operation detail page.
 
 **API:**
-- `GET /admin/caldera/attack-tree/{vm_id}` — raw tree JSON
-- `GET /admin/caldera/operations/{op_id}?include_tree=true` — tree annotated with operation results
+- `GET /admin/api/caldera/attack-tree/{vm_id}` — raw tree JSON
+- `GET /admin/api/caldera/operations/{op_id}?include_tree=true` — tree annotated with operation results
 
 ### Operations
 
 ```
-GET    /admin/caldera/operations            # List operations
-POST   /admin/caldera/operations            # Create operation {"event_id": N}
-DELETE /admin/caldera/operations/{op_id}    # Delete operation
-GET    /admin/caldera/vm-summary            # Per-VM attack aggregates
-GET    /admin/caldera/vm/{vm_id}/results    # VM-specific operation results
+GET    /admin/api/caldera/operations            # List operations
+POST   /admin/api/caldera/operations            # Create operation {"event_id": N}
+DELETE /admin/api/caldera/operations/{op_id}    # Delete operation
+GET    /admin/api/caldera/vm-summary            # Per-VM attack aggregates
+GET    /admin/api/caldera/vm/{vm_id}/results    # VM-specific operation results
 ```
 
 ### Goal state machine
@@ -308,7 +308,7 @@ GET    /admin/caldera/vm/{vm_id}/results    # VM-specific operation results
 Run a check cycle against a VM's goal:
 
 ```
-POST /admin/vms/{vm_id}/goals/{goal_id}/check
+POST /admin/api/vms/{vm_id}/goals/{goal_id}/check
 ```
 
 CTF-IT runs `verification` (did red team achieve the goal?) and `revert_verification` (did blue team revert it?) against the VM, transitions the state, and awards points accordingly.
@@ -318,7 +318,7 @@ Remote goal checks support HTTP responses, systemd service state, and file exist
 ### Red vs blue scoreboard
 
 ```
-GET /admin/caldera/scoreboard?event_id=N
+GET /admin/api/caldera/scoreboard?event_id=N
 ```
 
 Returns per-team `blue_defensive` (completed preapplied module points), `blue_reactive` (goal reverts × defend_points), and `red_offensive` (goal achievements × red_points).
@@ -354,22 +354,22 @@ The AI Agent provides autonomous penetration testing capabilities with human-in-
 **API Endpoints:**
 ```
 # Session management
-POST   /admin/ai-agent/sessions             # Create new session
-GET    /admin/ai-agent/sessions             # List sessions
-GET    /admin/ai-agent/sessions/{id}        # Session details
-POST   /admin/ai-agent/sessions/{id}/start  # Start session
-POST   /admin/ai-agent/sessions/{id}/stop   # Stop session
-POST   /admin/ai-agent/sessions/{id}/step   # Plan next action
-POST   /admin/ai-agent/sessions/{id}/approve/{action_id}  # Approve action
-POST   /admin/ai-agent/sessions/{id}/reject/{action_id}    # Reject action
+POST   /admin/api/ai-agent/sessions             # Create new session
+GET    /admin/api/ai-agent/sessions             # List sessions
+GET    /admin/api/ai-agent/sessions/{id}        # Session details
+POST   /admin/api/ai-agent/sessions/{id}/start  # Start session
+POST   /admin/api/ai-agent/sessions/{id}/stop   # Stop session
+POST   /admin/api/ai-agent/sessions/{id}/step   # Plan next action
+POST   /admin/api/ai-agent/sessions/{id}/approve/{action_id}  # Approve action
+POST   /admin/api/ai-agent/sessions/{id}/reject/{action_id}    # Reject action
 
 # Real-time data
-GET    /admin/ai-agent/sessions/{id}/actions         # Stream recent actions
-GET    /admin/ai-agent/sessions/{id}/health          # Operation health status
-GET    /admin/ai-agent/sessions/{id}/errors          # Recent errors with context
+GET    /admin/api/ai-agent/sessions/{id}/actions         # Stream recent actions
+GET    /admin/api/ai-agent/sessions/{id}/health          # Operation health status
+GET    /admin/api/ai-agent/sessions/{id}/errors          # Recent errors with context
 
 # WebSocket for real-time updates
-ws://<host>/admin/ai-agent/sessions/{id}/ws
+ws://<host>/admin/api/ai-agent/sessions/{id}/ws
 ```
 
 **Configuration:**
@@ -435,11 +435,11 @@ Define a `vm_quota` JSON on an event to automatically provision all VMs when the
 | `target` | Modules assigned, Ansible playbook deployed after VM creation. Plan auto-sized from module `min_ram_mb`/`min_vcpu` requirements. |
 | `attacker` | Bare OS only, no modules. Goes directly to `active` after Vultr creation. |
 
-`POST /admin/events/{id}/start` triggers auto-provisioning when `vm_quota` is present.
+`POST /admin/api/events/{id}/start` triggers auto-provisioning when `vm_quota` is present.
 
 **Provisioning status:**
 
-`GET /admin/events/{id}/provision-status` — returns aggregate progress (`total`, `creating`, `registered`, `provisioning`, `active`, `failed`) and a per-VM status list. The admin UI polls this every 5 seconds and shows a real-time progress bar and "Retry Failed" button.
+`GET /admin/api/events/{id}/provision-status` — returns aggregate progress (`total`, `creating`, `registered`, `provisioning`, `active`, `failed`) and a per-VM status list. The admin UI polls this every 5 seconds and shows a real-time progress bar and "Retry Failed" button.
 
 ### Network topology
 
@@ -460,14 +460,14 @@ As an alternative to Docker containers, administrators can export modules as Ans
 
 ```bash
 # Export from an event's quota
-curl -X POST https://ctf.example.com/admin/ansible-export \
+curl -X POST https://ctf.example.com/admin/api/ \
   -H "Cookie: session=<admin_session>" \
   -H "Content-Type: application/json" \
   -d '{"event_id": 1}' \
   -o ctf-playbook.zip
 
 # Export from an explicit quota
-curl -X POST https://ctf.example.com/admin/ansible-export \
+curl -X POST https://ctf.example.com/admin/api/ \
   -H "Cookie: session=<admin_session>" \
   -H "Content-Type: application/json" \
   -d '{"quota": {"vulnerability": {"easy": 2, "medium": 1, "hard": 0}}}' \

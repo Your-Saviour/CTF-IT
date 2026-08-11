@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}Plan Preview — {{ event_name }}{% endblock %}
 {% block extra_style %}
 /* Preview badge */
@@ -159,7 +159,8 @@
 }
 {% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <!-- Page header -->
 <div class="plan-header">
     <div class="plan-header-left">
@@ -167,9 +168,9 @@
         <div class="plan-header-sub">Dry-run preview. Nothing is deployed.</div>
     </div>
     <div class="plan-header-actions">
-        <a href="/admin" class="btn-outline">&larr; Back to Admin</a>
-        <button class="btn-outline" id="reroll-all-btn" onclick="loadPreview()">&#127922; Re-roll All</button>
-        <button class="btn btn-primary btn-sm" onclick="startEventFromPlan()">&#9654; Start Event</button>
+        <a href="/admin/events" class="btn-outline">Back to events</a>
+        <button class="btn-outline" id="reroll-all-btn" onclick="loadPreview()">Re-roll all</button>
+        <button class="btn btn-primary btn-sm" onclick="startEventFromPlan()">Start event</button>
     </div>
 </div>
 
@@ -294,7 +295,7 @@
         if (vmQuotaOverride) body.vm_quota = vmQuotaOverride;
 
         try {
-            const resp = await fetch(`/admin/events/${EVENT_ID}/plan-preview`, {
+            const resp = await fetch(`/admin/api/events/${EVENT_ID}/plan-preview`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
@@ -937,7 +938,7 @@
             if (window._currentQuota) body.quota = window._currentQuota;
             if (window._currentVmQuota) body.vm_quota = window._currentVmQuota;
 
-            const resp = await fetch(`/admin/events/${EVENT_ID}/plan-preview`, {
+            const resp = await fetch(`/admin/api/events/${EVENT_ID}/plan-preview`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
@@ -980,7 +981,7 @@
         const msg = `Start event and provision ${vmCount} VMs${cost ? ' (est. ' + cost + ')' : ''}?\n\nThis will begin actual deployment. Continue?`;
         if (!confirm(msg)) return;
 
-        const resp = await fetch(`/admin/events/${EVENT_ID}/start`, { method: 'POST' });
+        const resp = await fetch(`/admin/api/events/${EVENT_ID}/start`, { method: 'POST' });
         const data = await resp.json();
         if (resp.ok) {
             window.location = '/admin';

@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Rajdhani:wght@600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    {% block extra_head %}{% endblock %}
     <style>
         :root {
             --bg-deep:       #08090d;
@@ -745,8 +746,8 @@
         {% block extra_style %}{% endblock %}
     </style>
 </head>
-<body>
-    <nav>
+<body class="{% block body_class %}{% endblock %}">
+    {% block site_nav %}<nav>
         <a href="/" class="brand">&gt;_ CTF Platform</a>
         <div class="links">
             {% if user %}
@@ -758,8 +759,8 @@
                 </form>
             {% endif %}
         </div>
-    </nav>
-    <div class="container">
+    </nav>{% endblock %}
+    <div class="{% block container_class %}container{% endblock %}">
         {% block content %}{% endblock %}
     </div>
     <div class="toast-container" id="toast-container"></div>

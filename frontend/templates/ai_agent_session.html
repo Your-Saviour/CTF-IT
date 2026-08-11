@@ -1,11 +1,12 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
 {% block title %}AI Agent Session - {{ session_id[:8] }}{% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <div class="page-header">
     <div>
-        <a href="/admin/ai-agent" class="link">← Back to Sessions</a>
+        <a href="/admin/red-team/agent" class="link">Back to sessions</a>
         <h1>AI Agent Session <span class="mono">{{ session_id[:8] }}</span></h1>
     </div>
     <div class="header-actions">
@@ -97,7 +98,7 @@
 
 <script>
 const SESSION_ID = '{{ session_id }}';
-const API_BASE = '/admin/ai-agent';
+const API_BASE = '/admin/api/ai-agent';
 
 let sessionData = null;
 let healthData = null;
@@ -377,7 +378,7 @@ function updateConnectionStatus(status) {
 
 function connectWebSocket() {
     try {
-        ws = new WebSocket(`ws://${window.location.host}/admin/ai-agent/sessions/${SESSION_ID}/ws`);
+        ws = new WebSocket(`ws://${window.location.host}/admin/red-team/agent/sessions/${SESSION_ID}/ws`);
 
         ws.onopen = () => {
             console.log('WebSocket connected');
@@ -464,7 +465,7 @@ async function loadLogs() {
 
 function connectWebSocket() {
     try {
-        ws = new WebSocket(`ws://${window.location.host}/admin/ai-agent/sessions/${SESSION_ID}/ws`);
+        ws = new WebSocket(`ws://${window.location.host}/admin/red-team/agent/sessions/${SESSION_ID}/ws`);
 
         ws.onopen = () => {
             console.log('WebSocket connected');

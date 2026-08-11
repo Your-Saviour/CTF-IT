@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}Red Team Operations - CTF Platform{% endblock %}
 {% block extra_style %}
 .page-header {
@@ -194,12 +194,13 @@
 .modal-footer { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.25rem; }
 {% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 
 {% if op_id %}
 <!-- ===== DETAIL VIEW ===== -->
 <div class="page-header">
-    <a href="/admin/caldera" class="back-link">&#8592; Operations</a>
+    <a href="/admin/red-team/operations" class="back-link">Back to operations</a>
     <h1 class="page-title" id="op-name">Loading...</h1>
     <span id="op-state-badge"></span>
 </div>
@@ -356,7 +357,7 @@
 
 {% endblock %}
 
-{% block extra_script %}
+{% block admin_script %}
 <script>
 (function () {
     var AUTO_REFRESH_INTERVAL = 10000;
@@ -414,7 +415,7 @@
 
     function loadOpDetail() {
         if (!OP_ID) return;
-        apiFetch('/admin/caldera/operations/' + OP_ID + '?include_tree=true')
+        apiFetch('/admin/api/caldera/operations/' + OP_ID + '?include_tree=true')
             .then(function (op) {
                 document.getElementById('op-name').textContent = op.name || ('Operation ' + OP_ID);
                 document.getElementById('op-state-badge').innerHTML = stateBadgeHtml(op.state);
@@ -462,7 +463,7 @@
         }
         tbody.innerHTML = agents.map(function (a) {
             var vmLink = a.vm_id
-                ? '<a href="/admin/vm/' + escHtml(a.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(a.vm_hostname || a.paw) + '</a>'
+                ? '<a href="/admin/infrastructure/vms/' + escHtml(a.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(a.vm_hostname || a.paw) + '</a>'
                 : escHtml(a.vm_hostname || a.paw);
             return '<tr>' +
                 '<td>' + vmLink + '</td>' +
@@ -481,7 +482,7 @@
         }
         tbody.innerHTML = chain.map(function (c, idx) {
             var vmLink = c.vm_id
-                ? '<a href="/admin/vm/' + escHtml(c.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(c.vm_hostname || c.paw) + '</a>'
+                ? '<a href="/admin/infrastructure/vms/' + escHtml(c.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(c.vm_hostname || c.paw) + '</a>'
                 : escHtml(c.vm_hostname || c.paw);
             var outId = 'out-' + idx;
             var hasOutput = c.output && c.output.length > 0;
@@ -518,7 +519,7 @@
     // ── List view ─────────────────────────────────────────────────────────────
 
     function loadOpsList() {
-        apiFetch('/admin/caldera/operations')
+        apiFetch('/admin/api/caldera/operations')
             .then(function (ops) {
                 renderOpsList(ops);
                 var hasRunning = ops.some(function (o) { return o.state === 'running'; });
@@ -533,7 +534,7 @@
                 document.getElementById('ops-body').innerHTML =
                     '<tr><td colspan="5" style="color:var(--red);">Failed to load operations</td></tr>';
             });
-        apiFetch('/admin/caldera/vm-summary')
+        apiFetch('/admin/api/caldera/vm-summary')
             .then(renderVmSummary)
             .catch(function (e) {
                 console.error('Failed to load VM summary:', e);
@@ -550,7 +551,7 @@
         }
         tbody.innerHTML = ops.map(function (op) {
             return '<tr>' +
-                '<td><a href="/admin/caldera/operation/' + escHtml(op.id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(op.name) + '</a></td>' +
+                '<td><a href="/admin/red-team/operations/' + escHtml(op.id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(op.name) + '</a></td>' +
                 '<td>' + stateBadgeHtml(op.state) + '</td>' +
                 '<td><code style="font-size:0.75rem;">' + escHtml(op.group || '—') + '</code></td>' +
                 '<td style="font-size:0.8rem;color:var(--text-secondary);">' + fmtTime(op.start) + '</td>' +
@@ -575,7 +576,7 @@
                 statusHtml = '<span class="op-state-badge vm-unknown">Unknown</span>';
             }
             var vmLink = v.vm_id
-                ? '<a href="/admin/vm/' + escHtml(v.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(v.hostname) + '</a>'
+                ? '<a href="/admin/infrastructure/vms/' + escHtml(v.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(v.hostname) + '</a>'
                 : escHtml(v.hostname);
             return '<tr>' +
                 '<td>' + vmLink + '</td>' +
@@ -591,7 +592,7 @@
 
     function deleteOp(opId) {
         if (!confirm('Delete operation ' + opId + '? This cannot be undone.')) return;
-        fetch('/admin/caldera/operations/' + opId, { method: 'DELETE' })
+        fetch('/admin/api/caldera/operations/' + opId, { method: 'DELETE' })
             .then(function (r) {
                 if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
                 showToast('Operation deleted');
@@ -652,7 +653,7 @@
             body.vm_id = vid;
         }
 
-        fetch('/admin/caldera/operations', {
+        fetch('/admin/api/caldera/operations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -665,7 +666,7 @@
             closeCreateModal();
             showToast('Operation created');
             if (op && op.id) {
-                window.location.href = '/admin/caldera/operation/' + op.id;
+                window.location.href = '/admin/red-team/operations/' + op.id;
             } else {
                 loadOpsList();
             }

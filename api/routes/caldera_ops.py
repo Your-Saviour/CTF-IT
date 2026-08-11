@@ -10,7 +10,7 @@ from api.models import Event, Team, VM, VMModule
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient, get_caldera_api_key
 
-router = APIRouter(prefix="/admin/caldera", tags=["admin"])
+router = APIRouter(prefix="/admin/api/caldera", tags=["admin"])
 
 
 def _make_client() -> CalderaClient:

@@ -14,7 +14,7 @@ from api.database import get_db
 from api.routes.admin import require_admin
 from api.routes.auth import get_current_user
 
-router = APIRouter(prefix="/admin/ai-agent", tags=["ai-agent"])
+router = APIRouter(prefix="/admin/api/ai-agent", tags=["ai-agent"])
 
 AGENT_API_URL = os.environ.get("AGENT_API_URL", "http://ai-agent:8000/api/agent")
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "")

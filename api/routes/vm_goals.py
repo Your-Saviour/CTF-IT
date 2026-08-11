@@ -12,7 +12,7 @@ from api.models import VM, VMGoal
 from api.routes.admin import require_admin
 from builder.module_loader import load_all_modules
 
-router = APIRouter(prefix="/admin", tags=["vm_goals"])
+router = APIRouter(prefix="/admin/api", tags=["vm_goals"])
 
 
 def _goal_dict(goal: VMGoal) -> dict:

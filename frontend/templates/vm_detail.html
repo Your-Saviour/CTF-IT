@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 {% block title %}VM Detail - CTF Platform{% endblock %}
 {% block extra_style %}
 .vm-grid {
@@ -164,9 +164,10 @@
 .rt-result-pending   { color: var(--text-muted); }
 {% endblock %}
 
-{% block content %}
+{% block page_header %}{% endblock %}
+{% block admin_content %}
 <div class="vm-header">
-    <a href="/admin" class="vm-back">&#8592; Admin</a>
+    <a href="/admin/infrastructure?tab=vms" class="vm-back">Back to infrastructure</a>
     <h1 class="vm-title" id="vm-hostname">Loading...</h1>
     <span id="vm-status-badge"></span>
 </div>
@@ -388,7 +389,7 @@
 </div>
 {% endblock %}
 
-{% block extra_script %}
+{% block admin_script %}
 <script>
 var VM_ID = {{ vm_id }};
 var vmData = null;
@@ -409,7 +410,7 @@ function fmtDate(iso) {
 }
 
 function loadVM() {
-    fetch('/admin/vms/' + VM_ID)
+    fetch('/admin/api/vms/' + VM_ID)
         .then(function(r) {
             if (!r.ok) { return r.json().then(function(d) { throw new Error(d.error); }); }
             return r.json();
@@ -575,7 +576,7 @@ function copyFWPassword() {
 
 function updateStatus() {
     var status = document.getElementById('as-status-select').value;
-    fetch('/admin/vms/' + VM_ID, {
+    fetch('/admin/api/vms/' + VM_ID, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({status: status})
@@ -594,7 +595,7 @@ function updateStatus() {
 
 function saveNotes() {
     var notes = document.getElementById('as-notes').value.trim() || null;
-    fetch('/admin/vms/' + VM_ID, {
+    fetch('/admin/api/vms/' + VM_ID, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({notes: notes})
@@ -606,7 +607,7 @@ function saveNotes() {
 
 function assignModules() {
     if (!confirm('Auto-assign modules from the event quota? This will replace any existing module assignments.')) return;
-    fetch('/admin/vms/' + VM_ID + '/assign-modules', {method: 'POST'})
+    fetch('/admin/api/vms/' + VM_ID + '/assign-modules', {method: 'POST'})
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok) {
@@ -624,7 +625,7 @@ function toggleAddModule() {
 }
 
 function loadModuleOptions() {
-    fetch('/admin/modules')
+    fetch('/admin/api/modules')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             allModules = data;
@@ -641,7 +642,7 @@ function loadModuleOptions() {
 function addModule() {
     var module_id = document.getElementById('add-module-select').value;
     if (!module_id) { showToast('Select a module'); return; }
-    fetch('/admin/vms/' + VM_ID + '/add-module', {
+    fetch('/admin/api/vms/' + VM_ID + '/add-module', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({module_id: module_id})
@@ -658,7 +659,7 @@ function addModule() {
 
 function removeModule(module_id) {
     if (!confirm('Remove module "' + module_id + '" from this VM?')) return;
-    fetch('/admin/vms/' + VM_ID + '/modules/' + encodeURIComponent(module_id), {method: 'DELETE'})
+    fetch('/admin/api/vms/' + VM_ID + '/modules/' + encodeURIComponent(module_id), {method: 'DELETE'})
         .then(function(r) {
             if (r.ok) { showToast('Module removed'); loadVM(); }
             else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
@@ -667,7 +668,7 @@ function removeModule(module_id) {
 
 function exportAnsible() {
     showToast('Generating playbook...');
-    fetch('/admin/vms/' + VM_ID + '/ansible-export', {method: 'POST'})
+    fetch('/admin/api/vms/' + VM_ID + '/ansible-export', {method: 'POST'})
         .then(function(r) {
             if (!r.ok) {
                 return r.json().then(function(d) { throw new Error(d.error); });
@@ -690,7 +691,7 @@ function exportAnsible() {
 
 function deleteVM() {
     if (!confirm('Delete this VM? This cannot be undone.')) return;
-    fetch('/admin/vms/' + VM_ID, {method: 'DELETE'})
+    fetch('/admin/api/vms/' + VM_ID, {method: 'DELETE'})
         .then(function(r) {
             if (r.ok) {
                 showToast('VM deleted');
@@ -729,7 +730,7 @@ function stopCreatePoll() {
 }
 
 function pollCreateStatus() {
-    fetch('/admin/vms/' + VM_ID + '/create-status')
+    fetch('/admin/api/vms/' + VM_ID + '/create-status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             renderCreateSteps(data.provision_step, data.status);
@@ -779,7 +780,7 @@ function renderCreateSteps(currentStep, vmStatus) {
 
 function destroyVultrVM() {
     if (!confirm('Destroy this VM on Vultr? This will permanently delete the VPS and remove the VM record. This cannot be undone.')) return;
-    fetch('/admin/vms/' + VM_ID + '/destroy-vultr', {method: 'POST'})
+    fetch('/admin/api/vms/' + VM_ID + '/destroy-vultr', {method: 'POST'})
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok) {
@@ -787,7 +788,7 @@ function destroyVultrVM() {
                 document.getElementById('btn-destroy-vultr').disabled = true;
                 // Poll loadVM until VM is gone (will get 404 and redirect)
                 var pollDestroy = setInterval(function() {
-                    fetch('/admin/vms/' + VM_ID)
+                    fetch('/admin/api/vms/' + VM_ID)
                         .then(function(r) {
                             if (r.status === 404) {
                                 clearInterval(pollDestroy);
@@ -827,7 +828,7 @@ function buildProvisionSteps() {
 
 function startProvision() {
     if (!confirm('Provision this VM? Assigned modules will be deployed via Ansible.')) return;
-    fetch('/admin/vms/' + VM_ID + '/provision', {method: 'POST'})
+    fetch('/admin/api/vms/' + VM_ID + '/provision', {method: 'POST'})
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok) {
@@ -859,7 +860,7 @@ function stopProvisionPoll() {
 }
 
 function pollProvisionStatus() {
-    fetch('/admin/vms/' + VM_ID + '/provision-status')
+    fetch('/admin/api/vms/' + VM_ID + '/provision-status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             renderProvisionSteps(data.provision_step, data.status);
@@ -921,7 +922,7 @@ function renderProvisionSteps(currentStep, vmStatus) {
 
 function deployAgent() {
     if (!confirm('Deploy Caldera Sandcat agent to this VM?')) return;
-    fetch('/admin/vms/' + VM_ID + '/deploy-agent', {method: 'POST'})
+    fetch('/admin/api/vms/' + VM_ID + '/deploy-agent', {method: 'POST'})
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok) {
@@ -935,7 +936,7 @@ function deployAgent() {
 }
 
 function pollAgentStatus() {
-    fetch('/admin/vms/' + VM_ID + '/agent-status')
+    fetch('/admin/api/vms/' + VM_ID + '/agent-status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var agentEl = document.getElementById('ci-agent');
@@ -972,7 +973,7 @@ function toggleKeySection() {
 }
 
 function loadPlatformKey() {
-    fetch('/admin/platform/ssh-key')
+    fetch('/admin/api/platform/ssh-key')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             keyLoaded = true;
@@ -1001,7 +1002,7 @@ function testConnection() {
     result.textContent = 'Testing…';
     output.style.display = 'none';
 
-    fetch('/admin/vms/' + VM_ID + '/test-connection', {method: 'POST'})
+    fetch('/admin/api/vms/' + VM_ID + '/test-connection', {method: 'POST'})
         .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.disabled = false;
@@ -1032,7 +1033,7 @@ function testConnection() {
 
 function loadRedTeamStatus() {
     var vmId = VM_ID;
-    fetch('/admin/caldera/vm/' + vmId + '/results')
+    fetch('/admin/api/caldera/vm/' + vmId + '/results')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             renderRedTeamStatus(data);
@@ -1060,7 +1061,7 @@ function renderRedTeamStatus(data) {
     if (data.operation_id) {
         opLink = '<div style="margin-bottom: 0.75rem; font-size: 0.82rem;">' +
             '<span style="color: var(--text-secondary);">Operation: </span>' +
-            '<a href="/admin/caldera/operation/' + esc(data.operation_id) + '" ' +
+            '<a href="/admin/red-team/operations/' + esc(data.operation_id) + '" ' +
             'style="color: var(--cyan);">' + esc(data.operation_name || data.operation_id) + '</a>' +
             '</div>';
     }
@@ -1097,7 +1098,7 @@ function renderRedTeamStatus(data) {
 function runAttack() {
     var vmId = VM_ID;
     if (!confirm('Launch a Caldera red team attack against this VM?')) return;
-    fetch('/admin/caldera/operations', {
+    fetch('/admin/api/caldera/operations', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({vm_id: parseInt(vmId, 10)})
@@ -1119,7 +1120,7 @@ function runAttack() {
 // ── Attack Tree ──────────────────────────────────────────────────────────────
 
 function loadAttackTree() {
-    fetch('/admin/caldera/attack-tree/' + VM_ID)
+    fetch('/admin/api/caldera/attack-tree/' + VM_ID)
         .then(function(r) {
             if (!r.ok) throw new Error('HTTP ' + r.status);
             return r.json();
