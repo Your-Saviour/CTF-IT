@@ -37,8 +37,12 @@ def _load_caldera_config() -> dict:
 
 def _ensure_plugin_in_config(config: dict) -> bool:
     """Add required plugins to the plugins list if not already present. Returns True if modified."""
-    plugins = config.setdefault("plugins", [])
     modified = False
+    # Handle both Caldera config formats: plugins as list or plugins.active as list
+    if isinstance(config.get("plugins"), list):
+        plugins = config["plugins"]
+    else:
+        plugins = config.setdefault("plugins", {}).setdefault("active", [])
     # stockpile provides the plain-text obfuscator required by the atomic planner
     for plugin in ("stockpile", "ctf-exploit"):
         if plugin not in plugins:
