@@ -528,8 +528,9 @@ class SessionManager:
         if session.approval_required:
             logger.info(f"Action pending approval: {action.id}")
             ACTION_COUNTER.labels(
-                type=action_data.get("action_type"),
-                status="pending"
+                type=action_data.get("action_type", "unknown"),
+                status="pending",
+                risk_level=action_data.get("risk_level", "medium")
             ).inc()
             ACTION_LATENCY.observe(time.time() - start_time)
             return {"action_id": action.id, "status": "pending", "action": self._action_to_dict(action)}
