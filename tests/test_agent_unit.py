@@ -6,6 +6,7 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/app/ai_agent')
 
 import pytest
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ai_agent.memory.context import ContextManager
@@ -13,6 +14,24 @@ from ai_agent.memory.state_store import StateStore
 from ai_agent.planner.attack_tree import AttackNode, AttackTree
 from ai_agent.planner.tda import compute_tdi, select_mode, should_prune, assess_risk
 from ai_agent.db import get_engine, init_db
+from ai_agent.routes.sessions import RateLimiter
+
+
+def test_rate_limiter_persists_datetime_values():
+    record = MagicMock()
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = record
+    context = MagicMock()
+    context.__enter__.return_value = db
+
+    limiter = RateLimiter()
+    limiter.requests["agent_api"] = [1.0]
+
+    with patch("ai_agent.routes.sessions.get_db", return_value=context):
+        limiter._persist_to_db("agent_api")
+
+    assert isinstance(record.last_request_at, datetime)
+    assert isinstance(record.updated_at, datetime)
 
 
 class TestTDAScore:

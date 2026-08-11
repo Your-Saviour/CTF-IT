@@ -4,6 +4,7 @@ import os
 import time
 import logging
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from pydantic import BaseModel
@@ -47,6 +48,7 @@ class RateLimiter:
     def _persist_to_db(self, key: str) -> None:
         """Persist rate limit data to database."""
         try:
+            now = datetime.now(timezone.utc)
             with get_db() as db:
                 record = db.query(RateLimitRecord).filter(
                     RateLimitRecord.key == key
@@ -54,14 +56,14 @@ class RateLimiter:
 
                 if record:
                     record.request_count = len(self.requests[key])
-                    record.last_request_at = time.time()
-                    record.updated_at = time.time()
+                    record.last_request_at = now
+                    record.updated_at = now
                 else:
                     record = RateLimitRecord(
                         id=key[:36],
                         key=key,
                         request_count=len(self.requests[key]),
-                        last_request_at=time.time(),
+                        last_request_at=now,
                     )
                     db.add(record)
 
@@ -74,7 +76,7 @@ class RateLimiter:
         """Clean up expired rate limit records from database."""
         try:
             with get_db() as db:
-                cutoff = time.time() - seconds
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
                 expired = db.query(RateLimitRecord).filter(
                     RateLimitRecord.last_request_at < cutoff
                 ).delete()
