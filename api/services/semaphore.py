@@ -44,6 +44,7 @@ class SemaphoreClient:
             base_url=SEMAPHORE_URL,
             timeout=30.0,
             follow_redirects=True,
+            transport=httpx.HTTPTransport(retries=3),
         )
 
     def __enter__(self):

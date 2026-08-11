@@ -39,6 +39,31 @@ TEMPLATES_DIR = _HERE / "templates"
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _record_vm_failure(vm_id: int, error: str, *, agent: bool = False) -> None:
+    """Persist background-worker failure using a clean transaction."""
+    from api.database import SessionLocal
+    from api.models import utcnow
+
+    failure_db = SessionLocal()
+    try:
+        failed_vm = failure_db.query(VM).filter(VM.id == vm_id).first()
+        if not failed_vm:
+            return
+        if agent:
+            failed_vm.agent_status = "failed"
+        else:
+            failed_vm.status = "failed"
+            failed_vm.provision_step = "failed"
+            failed_vm.provision_error = error[:4000]
+        failed_vm.updated_at = utcnow()
+        failure_db.commit()
+    except Exception:
+        failure_db.rollback()
+        _log.exception("Could not persist failure state for VM %d", vm_id)
+    finally:
+        failure_db.close()
+
+
 def _vultr_safe_hostname(value: str, fallback: str) -> str:
     """Return a hostname that is also safe to use as a DNS record label.
 
@@ -784,16 +809,9 @@ def _run_provision(vm_id: int) -> None:
             ).start()
 
     except Exception as exc:
-        from api.models import utcnow as _utcnow
         _log.exception("Provision failed for VM %d", vm_id)
-        try:
-            vm.status = "failed"
-            vm.provision_step = "failed"
-            vm.provision_error = str(exc)
-            vm.updated_at = _utcnow()
-            db.commit()
-        except Exception:
-            pass
+        db.rollback()
+        _record_vm_failure(vm_id, str(exc))
     finally:
         db.close()
         # Clean up playbook files after completion (success or failure)
@@ -1005,13 +1023,8 @@ def _run_deploy_agent(vm_id: int) -> None:
 
     except Exception as exc:
         _log.exception("Agent deploy failed for VM %d", vm_id)
-        try:
-            from api.models import utcnow as _utcnow
-            vm.agent_status = "failed"
-            vm.updated_at = _utcnow()
-            db.commit()
-        except Exception:
-            pass
+        db.rollback()
+        _record_vm_failure(vm_id, str(exc), agent=True)
     finally:
         db.close()
         if playbook_dir and playbook_dir.exists():
@@ -1460,17 +1473,9 @@ def _run_firewall_create(vm_id: int) -> None:
         _log.info("Firewall VM %d (%s) provisioned and active at %s", vm_id, vm.hostname, vm.ip_address)
 
     except Exception as exc:
-        from api.models import utcnow as _utcnow
         _log.exception("Firewall VM creation failed for VM %d", vm_id)
-        try:
-            if vm is not None:
-                vm.status = "failed"
-                vm.provision_step = "failed"
-                vm.provision_error = str(exc)
-                vm.updated_at = _utcnow()
-                db.commit()
-        except Exception:
-            pass
+        db.rollback()
+        _record_vm_failure(vm_id, str(exc))
     finally:
         db.close()
         if playbook_dir and playbook_dir.exists():
@@ -1736,32 +1741,20 @@ def _run_vultr_create(vm_id: int) -> None:
                 db.commit()
 
     except Exception as exc:
-        from api.models import utcnow as _utcnow
         _log.exception("Vultr VM creation failed for VM %d", vm_id)
-        try:
-            vm.status = "failed"
-            vm.provision_step = "failed"
-            # Semaphore output can contain provider response headers and account
-            # metadata. Keep the admin UI actionable without reflecting that raw
-            # output back to the browser.
-            detail = str(exc)
-            minimum_memory = _re.search(
-                r"requires a plan with at least\s+(\d+)\s+MB memory", detail,
-                _re.IGNORECASE,
-            )
-            if minimum_memory:
-                vm.provision_error = (
-                    "Vultr rejected this OS and plan combination. Choose a plan with at least "
-                    f"{minimum_memory.group(1)} MB of memory and try again."
-                )
-            else:
-                vm.provision_error = (
-                    "Vultr rejected the instance request. Review the Semaphore task logs for details."
-                )
-            vm.updated_at = _utcnow()
-            db.commit()
-        except Exception:
-            pass
+        db.rollback()
+        detail = str(exc)
+        minimum_memory = _re.search(
+            r"requires a plan with at least\s+(\d+)\s+MB memory", detail,
+            _re.IGNORECASE,
+        )
+        safe_error = (
+            "Vultr rejected this OS and plan combination. Choose a plan with at least "
+            f"{minimum_memory.group(1)} MB of memory and try again."
+            if minimum_memory else
+            "Vultr rejected the instance request. Review the Semaphore task logs for details."
+        )
+        _record_vm_failure(vm_id, safe_error)
     finally:
         db.close()
         if playbook_dir and playbook_dir.exists():
@@ -1778,7 +1771,7 @@ def _provision_event_vms(event_id: int) -> None:
 
     Without a firewall role, all VMs are spawned concurrently as before.
     """
-    import threading
+    from concurrent.futures import ThreadPoolExecutor
 
     import httpx as _httpx
 
@@ -1969,23 +1962,38 @@ def _provision_event_vms(event_id: int) -> None:
         if has_firewall and firewall_vm_ids:
             # ── Phase 2: Create and bootstrap firewall VMs, then wait ────────
             _log.info("Event %d: starting firewall provisioning (%d VMs)", event_id, len(firewall_vm_ids))
-            firewall_threads = [
-                threading.Thread(target=_run_firewall_create, args=(vid,), daemon=True)
-                for vid in firewall_vm_ids
-            ]
-            for t in firewall_threads:
-                t.start()
-            for t in firewall_threads:
-                t.join()
+            with ThreadPoolExecutor(max_workers=min(4, len(firewall_vm_ids))) as executor:
+                list(executor.map(_run_firewall_create, firewall_vm_ids))
             _log.info("Event %d: all firewall VMs provisioned, starting target/attacker VMs", event_id)
 
         # ── Phase 3 (or only phase without firewall): target + attacker VMs ──
-        for vid in other_vm_ids:
-            t = threading.Thread(target=_run_vultr_create, args=(vid,), daemon=True)
-            t.start()
+        if other_vm_ids:
+            with ThreadPoolExecutor(max_workers=min(8, len(other_vm_ids))) as executor:
+                list(executor.map(_run_vultr_create, other_vm_ids))
 
     except Exception as exc:
         _log.exception("Event VM provisioning failed for event %d", event_id)
+        db.rollback()
+        failure_db = SessionLocal()
+        try:
+            unfinished = failure_db.query(VM).filter(
+                VM.event_id == event_id,
+                VM.status.in_(("creating", "provisioning")),
+            ).all()
+            for unfinished_vm in unfinished:
+                unfinished_vm.status = "failed"
+                unfinished_vm.provision_step = "failed"
+                unfinished_vm.provision_error = (
+                    "Event provisioning stopped before this VM completed. "
+                    "Review the API logs and retry the VM operation."
+                )
+                unfinished_vm.updated_at = utcnow()
+            failure_db.commit()
+        except Exception:
+            failure_db.rollback()
+            _log.exception("Could not persist event provisioning failure state")
+        finally:
+            failure_db.close()
     finally:
         db.close()
 
@@ -2184,15 +2192,9 @@ def _run_vultr_destroy(vm_id: int) -> None:
             _maybe_cleanup_team_vpc(db, team_id)
 
     except Exception as exc:
-        from api.models import utcnow as _utcnow
         _log.exception("Vultr VM destruction failed for VM %d", vm_id)
-        try:
-            vm.status = "failed"
-            vm.provision_error = str(exc)
-            vm.updated_at = _utcnow()
-            db.commit()
-        except Exception:
-            pass
+        db.rollback()
+        _record_vm_failure(vm_id, str(exc))
     finally:
         db.close()
         if playbook_dir and playbook_dir.exists():

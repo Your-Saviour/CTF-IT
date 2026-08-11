@@ -57,7 +57,19 @@ cp .env.example .env
 cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
 ```
 
-Replace all example credentials and `REPLACE_ME` values. The important deployment variables are:
+Replace all example credentials and `REPLACE_ME` values. Caldera also requires
+an encrypted SSH tunnel host key. Generate it, mount it at the path already
+declared by the production Compose file, and put the same passphrase in
+`app.contact.tunnel.ssh.host_key_passphrase`:
+
+```bash
+openssl genpkey -algorithm RSA -aes-256-cbc \
+  -pass pass:<KEY_PASSPHRASE> -pkeyopt rsa_keygen_bits:3072 \
+  -out deploy/caldera/config/ssh_host_key
+```
+
+Set `app.contact.tunnel.ssh.host_key_file` to
+`/usr/src/app/conf/ssh_host_key`. The important deployment variables are:
 
 | Variable | Description | How to generate |
 |---|---|---|
@@ -66,6 +78,7 @@ Replace all example credentials and `REPLACE_ME` values. The important deploymen
 | `TRAEFIK_DASHBOARD_AUTH` | Basic auth for Traefik dashboard | `echo "$(htpasswd -nB admin)" \| sed 's/\$/\$\$/g'` |
 | `SEMAPHORE_ADMIN_PASSWORD` | Semaphore admin password | `openssl rand -base64 32` |
 | `SEMAPHORE_POSTGRES_PASSWORD` | Semaphore database password | `openssl rand -base64 32` |
+| `CTF_POSTGRES_PASSWORD` | CTF API PostgreSQL password (URL-safe) | `openssl rand -hex 32` |
 | `SEMAPHORE_ACCESS_KEY_ENCRYPTION` | Semaphore secrets encryption key | `openssl rand -base64 32` |
 | `CALDERA_AGENT_URL` | Public address agents beacon to | `http://<SERVER_IP>:8888` — use the server's **public IP**, not the domain. Port 8888 is published directly, not reverse-proxied. |
 
@@ -78,7 +91,9 @@ CLOUDFLARE_API_TOKEN=your-token   # Auto-creates DNS A records on VM creation
 CLOUDFLARE_DOMAIN=example.com
 ```
 
-The root `.env` configures the API:
+The root `.env` configures API secrets and integrations. The production stack
+uses its dedicated PostgreSQL service; root `DATABASE_URL` is only used by the
+local development Compose stack.
 
 | Variable | Description | How to generate |
 |---|---|---|
@@ -88,7 +103,7 @@ The root `.env` configures the API:
 Set all generated files to owner-only access, then start the stack:
 
 ```bash
-chmod 600 .env deploy/.env deploy/caldera/config/local.yml
+chmod 600 .env deploy/.env deploy/caldera/config/local.yml deploy/caldera/config/ssh_host_key
 docker compose --file deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
 

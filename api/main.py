@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from contextlib import suppress
@@ -10,10 +11,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from api.database import get_db, init_db
+from api.database import engine, get_db, init_db
 from api.models import Event, User, VM, utcnow
 from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
+
+_log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -150,12 +153,23 @@ async def lifespan(app: FastAPI):
         from api.models import ServiceCredential
         if not db.query(ServiceCredential).count():
             domain = os.environ.get("DOMAIN", "example.com")
+            caldera_admin_password = os.environ.get("CALDERA_ADMIN_PASSWORD", "")
+            if not caldera_admin_password:
+                try:
+                    import yaml
+                    with open(os.environ.get("CALDERA_CONFIG_PATH", "/caldera-config/local.yml")) as handle:
+                        caldera_config = yaml.safe_load(handle) or {}
+                    caldera_admin_password = (
+                        caldera_config.get("users", {}).get("red", {}).get("admin", "")
+                    )
+                except (OSError, TypeError, AttributeError):
+                    _log.warning("Could not read Caldera admin credentials for initial service catalog")
             credentials = [
                 {
                     "service_name": "Caldera Admin",
                     "credential_type": "admin",
                     "username": "admin",
-                    "password": os.environ.get("CALDERA_ADMIN_PASSWORD", "admin"),
+                    "password": caldera_admin_password,
                     "url": f"https://caldera.{domain}",
                     "description": "MITRE Caldera C2 admin credentials"
                 },
@@ -163,7 +177,7 @@ async def lifespan(app: FastAPI):
                     "service_name": "Semaphore Admin",
                     "credential_type": "admin",
                     "username": os.environ.get("SEMAPHORE_ADMIN", "admin"),
-                    "password": os.environ.get("SEMAPHORE_ADMIN_PASSWORD", "admin"),
+                    "password": os.environ.get("SEMAPHORE_ADMIN_PASSWORD", ""),
                     "url": f"https://semaphore.{domain}",
                     "description": "Ansible Semaphore admin credentials"
                 },
@@ -171,7 +185,7 @@ async def lifespan(app: FastAPI):
                     "service_name": "Dockhand",
                     "credential_type": "admin",
                     "username": "admin",
-                    "password": os.environ.get("DOCKHAND_ADMIN_PASSWORD", "admin"),
+                    "password": os.environ.get("DOCKHAND_ADMIN_PASSWORD", ""),
                     "url": f"https://dockhand.{domain}",
                     "description": "Dockhand container management UI credentials"
                 },
@@ -179,7 +193,7 @@ async def lifespan(app: FastAPI):
                     "service_name": "Traefik Dashboard",
                     "credential_type": "admin",
                     "username": "admin",
-                    "password": os.environ.get("TRAEFIK_DASHBOARD_AUTH", "admin"),
+                    "password": "",
                     "url": f"https://traefik.{domain}",
                     "description": "Traefik reverse proxy dashboard"
                 },
@@ -223,6 +237,34 @@ async def lifespan(app: FastAPI):
                         created_at=utcnow()
                     ))
             db.commit()
+
+        # In-process provisioning workers cannot survive a container restart.
+        # Reconcile their durable state so operators can safely retry instead
+        # of seeing VMs stuck in an in-progress state forever.
+        interrupted = db.query(VM).filter(
+            VM.status.in_(("creating", "provisioning", "destroying"))
+        ).all()
+        for stored_vm in interrupted:
+            stored_vm.status = "failed"
+            stored_vm.provision_step = "failed"
+            stored_vm.provision_error = (
+                "The API restarted while this operation was running. "
+                "Inspect the cloud provider and Semaphore state, then retry."
+            )
+            stored_vm.updated_at = utcnow()
+        deploying_agents = db.query(VM).filter(VM.agent_status == "deploying").all()
+        for stored_vm in deploying_agents:
+            stored_vm.agent_status = "failed"
+            stored_vm.updated_at = utcnow()
+        if interrupted or deploying_agents:
+            db.commit()
+            _log.warning(
+                "Recovered %d interrupted VM operations and %d agent deployments",
+                len(interrupted), len(deploying_agents),
+            )
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
     async def enforce_event_deadlines():
@@ -233,6 +275,9 @@ async def lifespan(app: FastAPI):
             deadline_db = SessionLocal()
             try:
                 expire_due_events(deadline_db)
+            except Exception:
+                deadline_db.rollback()
+                _log.exception("Event deadline monitor failed; retrying next cycle")
             finally:
                 deadline_db.close()
 
@@ -243,6 +288,8 @@ async def lifespan(app: FastAPI):
         deadline_task.cancel()
         with suppress(asyncio.CancelledError):
             await deadline_task
+        await ai_agent.close_agent_client()
+        engine.dispose()
 
 
 app = FastAPI(title="CTF Training Platform", lifespan=lifespan)

@@ -17,7 +17,7 @@ Do not run this procedure as part of ordinary unit tests.
 1. Clone a clean checkout.
 2. Set `DOMAIN`, `ACME_EMAIL`, `SERVER_IP`, and optional cloud variables.
 3. Run `./quickstart.sh --non-interactive`.
-4. Confirm `.env`, `deploy/.env`, and `deploy/caldera/config/local.yml` are mode `0600` and contain no placeholder values.
+4. Confirm `.env`, `deploy/.env`, `deploy/caldera/config/local.yml`, and `deploy/caldera/config/ssh_host_key` are mode `0600` and contain no placeholder values.
 5. Create the documented DNS A records.
 6. Wait for Traefik, API, Caldera, Semaphore, Semaphore Postgres, and Dockhand to become healthy.
 

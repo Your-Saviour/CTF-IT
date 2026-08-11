@@ -32,10 +32,12 @@ bash -n quickstart.sh
 cp .env.example .env
 cp deploy/.env.example deploy/.env
 cp deploy/caldera/config/local.yml.example deploy/caldera/config/local.yml
+openssl genpkey -algorithm RSA -aes-256-cbc -pass pass:test-only \
+  -pkeyopt rsa_keygen_bits:3072 -out deploy/caldera/config/ssh_host_key
 docker compose --file deploy/docker-compose.yml config --quiet
 ```
 
-Do not commit the generated files. They are ignored and must be mode `0600` when they contain real credentials.
+Do not commit the generated files. They are ignored and must be mode `0600` when they contain real credentials. Replace the Caldera host-key path and passphrase placeholders before starting services.
 
 ## Integration boundaries
 
@@ -64,6 +66,8 @@ The live smoke test is intentionally a separate release gate because it creates 
 The smoke test must confirm:
 
 - quickstart creates owner-readable configuration without placeholders;
+- the CTF API starts against its dedicated PostgreSQL database;
+- API, Semaphore, Caldera, and AI-agent communicate through Docker service names;
 - all production services become healthy;
 - TLS and authentication work for every routed administration service;
 - a test event provisions firewall, target, and attacker VMs;

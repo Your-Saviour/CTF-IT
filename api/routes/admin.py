@@ -417,7 +417,6 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         return JSONResponse({"error": "Event not found"}, status_code=404)
-
     user_count = db.query(User).filter(User.event_id == event.id).count()
     return {
         "id": event.id,
@@ -557,6 +556,11 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse(
+            {"error": f"Event is already {event.status}; only draft events can be started"},
+            status_code=409,
+        )
 
     # If vm_quota is defined, kick off auto-provisioning for all teams
     if event.vm_quota:

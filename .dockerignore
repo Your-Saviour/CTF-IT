@@ -15,3 +15,4 @@ build_contexts
 dist
 deploy/.env
 deploy/caldera/config/local.yml
+deploy/caldera/config/ssh_host_key

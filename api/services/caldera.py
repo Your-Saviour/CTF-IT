@@ -46,6 +46,7 @@ class CalderaClient:
             base_url=CALDERA_INTERNAL_URL,
             headers={"KEY": self._api_key},
             timeout=30.0,
+            transport=httpx.AsyncHTTPTransport(retries=3),
         )
 
     async def __aenter__(self):

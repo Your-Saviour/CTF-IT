@@ -17,6 +17,7 @@ ROOT_ENV="$REPO_ROOT/.env"
 DEPLOY_ENV="$REPO_ROOT/deploy/.env"
 CALDERA_CFG="$REPO_ROOT/deploy/caldera/config/local.yml"
 CALDERA_CFG_EXAMPLE="$REPO_ROOT/deploy/caldera/config/local.yml.example"
+CALDERA_SSH_KEY="$REPO_ROOT/deploy/caldera/config/ssh_host_key"
 
 NON_INTERACTIVE=false
 FORCE=false
@@ -30,6 +31,9 @@ TRAEFIK_USER="${TRAEFIK_USER:-}"
 VULTR_API_KEY="${VULTR_API_KEY:-}"
 CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 CLOUDFLARE_DOMAIN="${CLOUDFLARE_DOMAIN:-}"
+AI_API_BASE="${AI_API_BASE:-}"
+AI_API_KEY="${AI_API_KEY:-}"
+AI_MODEL="${AI_MODEL:-}"
 
 # Generated plaintext (printed in summary)
 TRAEFIK_PASSWORD=""
@@ -42,6 +46,11 @@ warn() { printf 'WARN: %s\n' "$*" >&2; }
 err()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Required command not found: $1"; }
 read_env_value() { awk -F= -v key="$2" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$1"; }
+require_env_value() {
+  local file="$1" key="$2"
+  [[ -n "$(read_env_value "$file" "$key")" ]] \
+    || err "Missing required $key in $file. Re-run with --force or add the value."
+}
 
 # Double every '$' so docker-compose does not interpolate bcrypt hashes.
 escape_for_compose() { printf '%s' "$1" | sed 's/\$/\$\$/g'; }
@@ -82,6 +91,14 @@ backup_if_exists() {
   fi
 }
 
+set_yaml_scalar() {
+  local file="$1" key="$2" value="$3"
+  awk -v key="$key" -v value="$value" '
+    index($0, key ":") == 1 { print key ": " value; next }
+    { print }
+  ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
 usage() {
   cat <<'EOF'
 Usage: ./quickstart.sh [options]
@@ -95,7 +112,8 @@ Options:
   -h, --help          Show this help and exit.
 
 Non-interactive env vars: DOMAIN, ACME_EMAIL, SERVER_IP, TRAEFIK_USER,
-  VULTR_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_DOMAIN.
+  VULTR_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_DOMAIN, AI_API_BASE,
+  AI_API_KEY, AI_MODEL.
 EOF
 }
 
@@ -170,9 +188,16 @@ collect_inputs() {
   prompt_var VULTR_API_KEY "Vultr API key (optional, blank to skip)" "" false
   prompt_var CLOUDFLARE_API_TOKEN "Cloudflare API token (optional, blank to skip)" "" false
   prompt_var CLOUDFLARE_DOMAIN "Cloudflare domain (optional, blank to skip)" "" false
+  prompt_var AI_API_BASE "OpenAI-compatible API URL (optional, blank to configure later)" "" false
+  prompt_var AI_API_KEY "AI provider API key (optional, blank to configure later)" "" false
+  prompt_var AI_MODEL "AI model ID" "gpt-4o" false
 }
 gen_root_env() {
   if [[ -f "$ROOT_ENV" && "$FORCE" != true ]]; then
+    if ! grep -q '^SECRET_KEY=' "$ROOT_ENV"; then
+      echo "SECRET_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
+      log "Added missing SECRET_KEY to $ROOT_ENV"
+    fi
     if ! grep -q '^ADMIN_BOOTSTRAP_TOKEN=' "$ROOT_ENV"; then
       ADMIN_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
       echo "ADMIN_BOOTSTRAP_TOKEN=$ADMIN_BOOTSTRAP_TOKEN" >> "$ROOT_ENV"
@@ -182,31 +207,85 @@ gen_root_env() {
       echo "DATA_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
       log "Added missing DATA_ENCRYPTION_KEY to $ROOT_ENV"
     fi
+    if ! grep -q '^AGENT_API_KEY=' "$ROOT_ENV"; then
+      echo "AGENT_API_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
+      log "Added missing AGENT_API_KEY to $ROOT_ENV"
+    fi
+    if ! grep -q '^CTF_API_KEY=' "$ROOT_ENV"; then
+      echo "CTF_API_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
+      log "Added missing CTF_API_KEY to $ROOT_ENV"
+    fi
+    if [[ -n "$AI_API_BASE" ]] && ! grep -q '^AI_API_BASE=' "$ROOT_ENV"; then
+      echo "AI_API_BASE=$AI_API_BASE" >> "$ROOT_ENV"
+    fi
+    if [[ -n "$AI_API_KEY" ]] && ! grep -q '^AI_API_KEY=' "$ROOT_ENV"; then
+      echo "AI_API_KEY=$AI_API_KEY" >> "$ROOT_ENV"
+    fi
+    if [[ -n "$AI_MODEL" ]] && ! grep -q '^AI_MODEL=' "$ROOT_ENV"; then
+      echo "AI_MODEL=$AI_MODEL" >> "$ROOT_ENV"
+    fi
     chmod 600 "$ROOT_ENV"
     log "$ROOT_ENV exists — skipping"
     return
   fi
   backup_if_exists "$ROOT_ENV"
-  local secret_key data_encryption_key quota
+  local secret_key data_encryption_key agent_api_key ctf_api_key quota
   secret_key="$(openssl rand -hex 32)"
   data_encryption_key="$(openssl rand -hex 32)"
   ADMIN_BOOTSTRAP_TOKEN="$(openssl rand -hex 32)"
+  agent_api_key="$(openssl rand -hex 32)"
+  ctf_api_key="$(openssl rand -hex 32)"
   quota="$(grep -E '^EVENT_QUOTA=' "$REPO_ROOT/.env.example" | head -n1 | cut -d= -f2-)"
   {
     echo "SECRET_KEY=$secret_key"
     echo "ADMIN_BOOTSTRAP_TOKEN=$ADMIN_BOOTSTRAP_TOKEN"
     echo "DATA_ENCRYPTION_KEY=$data_encryption_key"
-    echo "DATABASE_URL=sqlite:///data/ctf.db"
+    echo "AGENT_API_KEY=$agent_api_key"
+    echo "CTF_API_KEY=$ctf_api_key"
     echo "EVENT_QUOTA=$quota"
     [[ -n "$VULTR_API_KEY" ]]        && echo "VULTR_API_KEY=$VULTR_API_KEY"
     [[ -n "$CLOUDFLARE_API_TOKEN" ]] && echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
     [[ -n "$CLOUDFLARE_DOMAIN" ]]    && echo "CLOUDFLARE_DOMAIN=$CLOUDFLARE_DOMAIN"
+    [[ -n "$AI_API_BASE" ]]          && echo "AI_API_BASE=$AI_API_BASE"
+    [[ -n "$AI_API_KEY" ]]           && echo "AI_API_KEY=$AI_API_KEY"
+    [[ -n "$AI_MODEL" ]]             && echo "AI_MODEL=$AI_MODEL"
   } > "$ROOT_ENV"
   chmod 600 "$ROOT_ENV"
   log "Wrote $ROOT_ENV"
 }
+validate_configuration() {
+  local key
+  log "Validating generated configuration"
+  for key in SECRET_KEY ADMIN_BOOTSTRAP_TOKEN DATA_ENCRYPTION_KEY AGENT_API_KEY CTF_API_KEY; do
+    require_env_value "$ROOT_ENV" "$key"
+  done
+  for key in DOMAIN ACME_EMAIL CALDERA_AGENT_URL TRAEFIK_DASHBOARD_AUTH \
+      SEMAPHORE_ADMIN_PASSWORD SEMAPHORE_ACCESS_KEY_ENCRYPTION \
+      SEMAPHORE_POSTGRES_PASSWORD CTF_POSTGRES_PASSWORD; do
+    require_env_value "$DEPLOY_ENV" "$key"
+  done
+  [[ -s "$CALDERA_SSH_KEY" ]] || err "Caldera SSH host key was not generated."
+  if grep -q 'REPLACE_' "$CALDERA_CFG"; then
+    err "Caldera configuration still contains unresolved REPLACE_ placeholders."
+  fi
+  if [[ -n "$(read_env_value "$ROOT_ENV" CLOUDFLARE_API_TOKEN)" ]] \
+      && [[ -z "$(read_env_value "$ROOT_ENV" CLOUDFLARE_DOMAIN)" ]]; then
+    err "CLOUDFLARE_API_TOKEN is set but CLOUDFLARE_DOMAIN is missing in $ROOT_ENV."
+  fi
+  (cd "$REPO_ROOT/deploy" && $SUDO docker compose config --quiet) \
+    || err "Generated Docker Compose configuration is invalid."
+  [[ -n "$(read_env_value "$ROOT_ENV" AI_API_BASE)" ]] \
+    || warn "AI_API_BASE is not configured; the AI-agent UI will run, but LLM actions will be unavailable."
+  [[ -n "$(read_env_value "$ROOT_ENV" VULTR_API_KEY)" ]] \
+    || warn "VULTR_API_KEY is not configured; automatic cloud VM provisioning will be unavailable."
+}
 gen_deploy_env() {
   if [[ -f "$DEPLOY_ENV" && "$FORCE" != true ]]; then
+    if ! grep -q '^CTF_POSTGRES_PASSWORD=' "$DEPLOY_ENV"; then
+      echo "CTF_POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> "$DEPLOY_ENV"
+      log "Added missing CTF_POSTGRES_PASSWORD to $DEPLOY_ENV"
+    fi
+    chmod 600 "$DEPLOY_ENV"
     log "$DEPLOY_ENV exists — skipping"
     return
   fi
@@ -214,9 +293,10 @@ gen_deploy_env() {
 
   TRAEFIK_PASSWORD="$(openssl rand -base64 18)"
   SEMAPHORE_ADMIN_PASSWORD="$(openssl rand -base64 18)"
-  local enc pgpw traefik_auth
+  local enc pgpw ctfpgpw traefik_auth
   enc="$(openssl rand -base64 32)"
   pgpw="$(openssl rand -base64 32)"
+  ctfpgpw="$(openssl rand -hex 32)"
   traefik_auth="$(bcrypt_htpasswd "${TRAEFIK_USER:-admin}" "$TRAEFIK_PASSWORD")"
 
   {
@@ -230,23 +310,37 @@ gen_deploy_env() {
     echo "SEMAPHORE_ADMIN_EMAIL=$ACME_EMAIL"
     echo "SEMAPHORE_ACCESS_KEY_ENCRYPTION=$enc"
     echo "SEMAPHORE_POSTGRES_PASSWORD=$pgpw"
+    echo "CTF_POSTGRES_PASSWORD=$ctfpgpw"
     [[ -n "$VULTR_API_KEY" ]] && echo "VULTR_API_KEY=$VULTR_API_KEY"
   } > "$DEPLOY_ENV"
   chmod 600 "$DEPLOY_ENV"
   log "Wrote $DEPLOY_ENV"
 }
 gen_caldera_config() {
-  if [[ -f "$CALDERA_CFG" && "$FORCE" != true ]]; then
+  if [[ -f "$CALDERA_CFG" && -f "$CALDERA_SSH_KEY" && "$FORCE" != true ]] \
+      && ! grep -q 'REPLACE_' "$CALDERA_CFG"; then
     log "$CALDERA_CFG exists — skipping"
     return
   fi
   backup_if_exists "$CALDERA_CFG"
-  cp "$CALDERA_CFG_EXAMPLE" "$CALDERA_CFG"
+  backup_if_exists "$CALDERA_SSH_KEY"
+  if [[ ! -f "$CALDERA_CFG" || "$FORCE" == true ]]; then
+    cp "$CALDERA_CFG_EXAMPLE" "$CALDERA_CFG"
+  fi
+
+  local ssh_key_passphrase
+  ssh_key_passphrase="$(openssl rand -hex 32)"
+  openssl genpkey -algorithm RSA -aes-256-cbc \
+    -pass "pass:$ssh_key_passphrase" -pkeyopt rsa_keygen_bits:3072 \
+    -out "$CALDERA_SSH_KEY" >/dev/null 2>&1 \
+    || err "Failed to generate the Caldera SSH tunnel host key."
+  set_yaml_scalar "$CALDERA_CFG" "app.contact.tunnel.ssh.host_key_file" "/usr/src/app/conf/ssh_host_key"
+  set_yaml_scalar "$CALDERA_CFG" "app.contact.tunnel.ssh.host_key_passphrase" "$ssh_key_passphrase"
 
   # Replace each placeholder occurrence with its own freshly generated secret.
   # Hex avoids YAML-quoting edge cases for unquoted scalar values.
   local ph secret
-  for ph in REPLACE_ME REPLACE_WITH_KEY_FILE_PASSPHRASE; do
+  for ph in REPLACE_ME; do
     while grep -q "$ph" "$CALDERA_CFG"; do
       secret="$(openssl rand -hex 32)"
       awk -v ph="$ph" -v val="$secret" '
@@ -263,8 +357,8 @@ gen_caldera_config() {
         }' "$CALDERA_CFG" > "$CALDERA_CFG.tmp" && mv "$CALDERA_CFG.tmp" "$CALDERA_CFG"
     done
   done
-  chmod 600 "$CALDERA_CFG"
-  log "Wrote $CALDERA_CFG"
+  chmod 600 "$CALDERA_CFG" "$CALDERA_SSH_KEY"
+  log "Wrote $CALDERA_CFG and $CALDERA_SSH_KEY"
 }
 launch_stack() {
   log "Launching stack: docker compose up -d --build (from deploy/)"
@@ -272,6 +366,25 @@ launch_stack() {
   # API service's `env_file: ../.env` resolves to the repo-root .env.
   ( cd "$REPO_ROOT/deploy" && $SUDO docker compose up -d --build ) \
     || err "docker compose up failed — check the output above."
+}
+
+wait_for_stack() {
+  local timeout=600 deadline output unhealthy expected_count actual_count
+  deadline=$((SECONDS + timeout))
+  expected_count="$(cd "$REPO_ROOT/deploy" && $SUDO docker compose config --services | wc -l | tr -d ' ')"
+  log "Waiting for production services to become healthy (up to ${timeout}s)"
+  while (( SECONDS < deadline )); do
+    output="$(cd "$REPO_ROOT/deploy" && $SUDO docker compose ps --format '{{.Service}} {{.State}} {{.Health}}')"
+    actual_count="$(printf '%s\n' "$output" | awk 'NF {count++} END {print count+0}')"
+    unhealthy="$(printf '%s\n' "$output" | awk '$2 != "running" || ($3 != "" && $3 != "-" && $3 != "healthy") {print}')"
+    if [[ "$actual_count" == "$expected_count" && -z "$unhealthy" ]]; then
+      log "All production services are running and healthy"
+      return
+    fi
+    sleep 5
+  done
+  (cd "$REPO_ROOT/deploy" && $SUDO docker compose ps) || true
+  err "The production stack did not become healthy within ${timeout}s. Run 'cd deploy && docker compose logs --tail=200' for details."
 }
 
 print_summary() {
@@ -324,8 +437,10 @@ main() {
   gen_root_env
   gen_deploy_env
   gen_caldera_config
-  chmod 600 "$ROOT_ENV" "$DEPLOY_ENV" "$CALDERA_CFG"
+  chmod 600 "$ROOT_ENV" "$DEPLOY_ENV" "$CALDERA_CFG" "$CALDERA_SSH_KEY"
+  validate_configuration
   launch_stack
+  wait_for_stack
   print_summary
 }
 

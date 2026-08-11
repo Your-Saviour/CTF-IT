@@ -24,6 +24,7 @@ _agent_client = httpx.AsyncClient(
     base_url=AGENT_API_URL,
     headers={"X-API-Key": AGENT_API_KEY} if AGENT_API_KEY else {},
     timeout=60.0,
+    transport=httpx.AsyncHTTPTransport(retries=3),
 )
 
 
@@ -34,6 +35,10 @@ async def _agent_request(method: str, path: str, **kwargs):
         return resp.json()
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Agent service unavailable: {e}")
+
+
+async def close_agent_client() -> None:
+    await _agent_client.aclose()
 
 
 @router.get("/sessions")
@@ -113,6 +118,16 @@ async def get_logs(session_id: str, request: Request, db: Session = Depends(get_
 @router.websocket("/sessions/{session_id}/ws")
 async def session_websocket(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time session updates."""
+    from api.database import SessionLocal
+
+    auth_db = SessionLocal()
+    try:
+        user = get_current_user(websocket, auth_db)
+        if not user or not user.is_admin:
+            await websocket.close(code=4403)
+            return
+    finally:
+        auth_db.close()
     await websocket.accept()
     connected_clients = {}
 
@@ -157,27 +172,35 @@ async def get_session_data(session_id: str):
 
 
 @router.get("/sessions/{session_id}/actions")
-async def get_session_actions(session_id: str, request: Request, limit: int = 10):
+async def get_session_actions(
+    session_id: str, request: Request, limit: int = 10,
+    db: Session = Depends(get_db),
+):
     """Get recent actions with filter."""
-    admin = require_admin(request, db=None)
+    admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     return await _agent_request("GET", f"/sessions/{session_id}/actions", params={"limit": limit})
 
 
 @router.get("/sessions/{session_id}/health")
-async def get_session_health(session_id: str, request: Request):
+async def get_session_health(
+    session_id: str, request: Request, db: Session = Depends(get_db),
+):
     """Get operation health status."""
-    admin = require_admin(request, db=None)
+    admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     return await _agent_request("GET", f"/sessions/{session_id}/health")
 
 
 @router.get("/sessions/{session_id}/errors")
-async def get_session_errors(session_id: str, request: Request, limit: int = 20):
+async def get_session_errors(
+    session_id: str, request: Request, limit: int = 20,
+    db: Session = Depends(get_db),
+):
     """Get recent errors with context."""
-    admin = require_admin(request, db=None)
+    admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     return await _agent_request("GET", f"/sessions/{session_id}/errors", params={"limit": limit})

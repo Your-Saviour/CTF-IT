@@ -20,11 +20,13 @@ def test_generated_configuration_is_private_and_complete(tmp_path):
     root_env = tmp_path / ".env"
     deploy_env = tmp_path / "deploy.env"
     caldera = tmp_path / "local.yml"
+    caldera_ssh_key = tmp_path / "ssh_host_key"
     script = f"""
 source ./quickstart.sh
 ROOT_ENV={root_env!s}
 DEPLOY_ENV={deploy_env!s}
 CALDERA_CFG={caldera!s}
+CALDERA_SSH_KEY={caldera_ssh_key!s}
 DOMAIN=ctf.example
 ACME_EMAIL=admin@example.com
 SERVER_IP=192.0.2.30
@@ -36,22 +38,49 @@ gen_caldera_config
 """
     _run_bash(script)
 
-    for path in (root_env, deploy_env, caldera):
+    for path in (root_env, deploy_env, caldera, caldera_ssh_key):
         assert path.stat().st_mode & 0o777 == 0o600
 
     root_text = root_env.read_text()
     assert "SECRET_KEY=" in root_text
     assert "ADMIN_BOOTSTRAP_TOKEN=" in root_text
     assert "DATA_ENCRYPTION_KEY=" in root_text
+    assert "AGENT_API_KEY=" in root_text
+    assert "CTF_API_KEY=" in root_text
     assert "change-me" not in root_text
 
     deploy_text = deploy_env.read_text()
     assert "DOMAIN=ctf.example" in deploy_text
+    assert "CTF_POSTGRES_PASSWORD=" in deploy_text
     assert "REGISTRY_AUTH" not in deploy_text
 
     caldera_text = caldera.read_text()
     assert "REPLACE_ME" not in caldera_text
     assert "REPLACE_WITH_KEY_FILE_PASSPHRASE" not in caldera_text
+    assert "REPLACE_WITH_KEY_FILE_PATH" not in caldera_text
+    assert "app.contact.tunnel.ssh.host_key_file: /usr/src/app/conf/ssh_host_key" in caldera_text
+
+
+def test_caldera_upgrade_preserves_existing_secrets(tmp_path):
+    caldera = tmp_path / "local.yml"
+    caldera_ssh_key = tmp_path / "ssh_host_key"
+    caldera.write_text(
+        "api_key_red: keep-this-secret\n"
+        "app.contact.tunnel.ssh.host_key_file: REPLACE_WITH_KEY_FILE_PATH\n"
+        "app.contact.tunnel.ssh.host_key_passphrase: old-passphrase\n"
+    )
+    script = f"""
+source ./quickstart.sh
+CALDERA_CFG={caldera!s}
+CALDERA_SSH_KEY={caldera_ssh_key!s}
+gen_caldera_config
+"""
+    _run_bash(script)
+
+    upgraded = caldera.read_text()
+    assert "api_key_red: keep-this-secret" in upgraded
+    assert "REPLACE_" not in upgraded
+    assert caldera_ssh_key.is_file()
 
 
 def test_existing_deploy_environment_is_loaded_for_summary(tmp_path):

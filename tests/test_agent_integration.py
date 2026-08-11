@@ -81,6 +81,9 @@ class TestCalderaTool:
             json=MagicMock(return_value={"id": "op-123"}),
             raise_for_status=MagicMock()
         ))
+        caldera.client.patch = AsyncMock(return_value=MagicMock(
+            raise_for_status=MagicMock()
+        ))
         return caldera
 
     @pytest.mark.asyncio

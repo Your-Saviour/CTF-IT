@@ -137,6 +137,24 @@ services:
       - ctf-internal
 
   # ─── CTF API — FastAPI Application ─────────────────────────────────────────
+  api-postgres:
+    image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    container_name: ctf-api-postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d ctf -U ctf"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ctf-api_postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ctf
+      POSTGRES_USER: ctf
+      POSTGRES_PASSWORD: ${CTF_POSTGRES_PASSWORD:?Please set CTF_POSTGRES_PASSWORD in your .env file}
+    networks: [ctf-internal]
+
   api:
     build:
       context: ..
@@ -145,7 +163,6 @@ services:
     container_name: ctf-api
     restart: unless-stopped
     volumes:
-      - ctf-api_data:/app/data
       # Caldera integration: allows the API to install the exported plugin and update config
       - ./caldera/plugins/ctf-exploit:/caldera-plugin/ctf-exploit
       - ./caldera/config/local.yml:/caldera-config/local.yml
@@ -153,9 +170,10 @@ services:
       - ctf-shared_playbooks:/shared/playbooks
     env_file: ../.env
     environment:
-      - DATABASE_URL=sqlite:///data/ctf.db
+      - DATABASE_URL=postgresql+psycopg://ctf:${CTF_POSTGRES_PASSWORD}@api-postgres:5432/ctf
       - DOCKER_HOST=tcp://api-docker-proxy:2375
       - COOKIE_SECURE=true
+      - DOMAIN=${DOMAIN}
       # Semaphore integration for automated VM provisioning
       - SEMAPHORE_URL=http://ctf-semaphore:3000
       - SEMAPHORE_ADMIN=${SEMAPHORE_ADMIN:-admin}
@@ -163,6 +181,8 @@ services:
       - SHARED_PLAYBOOK_DIR=/shared/playbooks
       # External address Caldera agents use to beacon back (set to server's public IP/domain)
       - CALDERA_AGENT_URL=${CALDERA_AGENT_URL:-http://localhost:8888}
+      - CALDERA_INTERNAL_URL=http://caldera:8888
+      - AGENT_API_URL=http://ai-agent:8000/api/agent
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
       start_period: 15s
@@ -181,6 +201,12 @@ services:
     depends_on:
       api-docker-proxy:
         condition: service_started
+      api-postgres:
+        condition: service_healthy
+      semaphore:
+        condition: service_healthy
+      caldera:
+        condition: service_healthy
 
   # ─── MITRE Caldera — Adversary Emulation ───────────────────────────────────
   caldera:
@@ -203,6 +229,7 @@ services:
       timeout: 10s
     volumes:
       - ./caldera/config/local.yml:/usr/src/app/conf/local.yml:ro
+      - ./caldera/config/ssh_host_key:/usr/src/app/conf/ssh_host_key:ro
       - ctf-caldera_data:/usr/src/app/data
       # Mount exported CTF plugin — unzip caldera export into caldera/plugins/ctf-exploit/
       - ./caldera/plugins/ctf-exploit:/usr/src/app/plugins/ctf-exploit:ro
@@ -224,6 +251,7 @@ services:
       - "traefik.http.services.ctf-caldera.loadbalancer.server.port=8888"
     networks:
       - ctf-proxy
+      - ctf-internal
 
   # ─── Semaphore Postgres — Database for Semaphore ───────────────────────────
   semaphore-postgres:
@@ -294,29 +322,38 @@ services:
       dockerfile: Dockerfile.agent
     container_name: ctf-ai-agent
     restart: unless-stopped
-    network_mode: host
     env_file: ../.env
     volumes:
       - ctf-ai-agent_data:/app/data
       - ctf-shared_playbooks:/shared/playbooks:ro
       - ./caldera/config/local.yml:/caldera-config/local.yml:ro
     environment:
-      - CTF_API_URL=http://172.19.0.6:8000
-      - CALDERA_INTERNAL_URL=http://172.18.0.5:8888
+      - CTF_API_URL=http://api:8000
+      - CALDERA_INTERNAL_URL=http://caldera:8888
       - CALDERA_CONFIG_PATH=/caldera-config/local.yml
       - AGENT_MAX_STEPS=100
       - AGENT_APPROVAL_REQUIRED=true
       - AGENT_AUTO_STEP=false
       - AGENT_DATABASE_URL=sqlite:///data/agent.db
-      - AI_API_VERIFY_SSL=false
     depends_on:
-      - api
-      - caldera
+      api:
+        condition: service_healthy
+      caldera:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
+      start_period: 15s
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ctf-proxy
+      - ctf-internal
 
 volumes:
   ctf-letsencrypt:
   ctf-dockhand_data:
-  ctf-api_data:
+  ctf-api_postgres_data:
   ctf-caldera_data:
   ctf-semaphore_postgres_data:
   ctf-semaphore_data:

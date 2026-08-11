@@ -10,6 +10,7 @@ dist/
 .venv/
 deploy/.env
 deploy/caldera/config/local.yml
+deploy/caldera/config/ssh_host_key
 deploy/caldera/plugins/ctf-exploit/*
 !deploy/caldera/plugins/ctf-exploit/.gitkeep
 !deploy/caldera/plugins/ctf-exploit/hook.py
