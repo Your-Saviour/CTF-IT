@@ -1,0 +1,22 @@
+id: privileged_container
+name: Privileged Container
+description: Identify and remove a privileged training container, then replace it with a non-privileged equivalent.
+type: vulnerability
+difficulty: medium
+points: 200
+category: containers
+tags: [docker, privileged, runtime]
+conflicts: []
+requires: [docker_service_lab]
+script: setup.sh
+verification:
+  type: docker_container_not_privileged
+  container: training-maintenance
+hints: [Inspect container HostConfig.Privileged values., Find the container named training-maintenance., Remove the privileged instance and then delete its marker file.]
+learning_objectives: [Identify unsafe container privilege configuration, Replace privileged workloads with least-privilege settings]
+estimated_minutes: 45
+debrief:
+  root_cause: A workload ran with the privileged flag, effectively removing the container security boundary.
+  remediation: Recreate the workload without privileged mode and grant only explicitly required capabilities.
+  attack_mapping: T1611 — Escape to Host
+suggested_fix: Remove training-maintenance and recreate it without --privileged, granting only the specific capabilities it requires.

@@ -1,0 +1,30 @@
+id: tampered_sshd_configuration
+name: Tampered SSH Configuration
+description: Investigate an unauthorized SSH configuration drop-in that enables TCP forwarding, remove it, and prove the effective daemon configuration is contained.
+type: payload
+difficulty: hard
+points: 300
+category: incident-response
+tags: [ssh, tampering, persistence, investigation]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_absent
+      path: /etc/ssh/sshd_config.d/90-remote-maintenance.conf
+    - type: service_running
+      service: ssh
+      expected: active
+hints:
+  - Inspect recently changed configuration under /etc/ssh.
+  - Review drop-ins that alter forwarding behavior.
+  - Remove the unauthorized drop-in, validate with sshd -t, and reload SSH.
+learning_objectives: [Identify configuration tampering through provenance and effective state, Contain forwarding while preserving SSH access]
+estimated_minutes: 70
+debrief:
+  root_cause: An unauthorized late-loading SSH drop-in weakened forwarding controls.
+  remediation: Remove the drop-in, validate the complete configuration, reload SSH, and confirm administrative access remains available.
+  attack_mapping: T1098 — Account Manipulation
+suggested_fix: rm /etc/ssh/sshd_config.d/90-remote-maintenance.conf; sshd -t && systemctl reload ssh

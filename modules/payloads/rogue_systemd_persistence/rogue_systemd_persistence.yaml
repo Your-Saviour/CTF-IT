@@ -1,0 +1,30 @@
+id: rogue_systemd_persistence
+name: Rogue systemd Persistence
+description: Investigate and remove a disguised systemd service that repeatedly writes a persistence marker while preserving legitimate services.
+type: payload
+difficulty: medium
+points: 200
+category: incident-response
+tags: [persistence, systemd, investigation]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_absent
+      path: /etc/systemd/system/system-health-sync.service
+    - type: service_running
+      service: system-health-sync
+      expected: inactive
+hints:
+  - Compare locally installed service units with the expected base system.
+  - Inspect system-health-sync.service and its executable.
+  - Stop and disable the unit, remove both artifacts, then run systemctl daemon-reload.
+learning_objectives: [Trace systemd persistence from unit to executable, Remove persistence without disrupting unrelated units]
+estimated_minutes: 40
+debrief:
+  root_cause: A root-owned custom service provided automatic restart persistence.
+  remediation: Disable and stop the rogue unit, remove its unit and payload, reload systemd, and verify it remains inactive.
+  attack_mapping: "T1543.002 — Create or Modify System Process: Systemd Service"
+suggested_fix: systemctl disable --now system-health-sync; rm /etc/systemd/system/system-health-sync.service /usr/local/bin/system-health-sync; systemctl daemon-reload

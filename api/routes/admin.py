@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import AccountToken, AdminAudit, Event, User, VM, utcnow
+from api.models import AccountToken, AdminAudit, Event, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
 from api.routes.auth import _token_digest, get_current_user
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
@@ -27,6 +27,7 @@ class PlanPreviewRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     role: Optional[str] = None
     event_id: Optional[int] = None
+    team_id: Optional[int] = None
 
 
 class ActivationRequest(BaseModel):
@@ -35,8 +36,18 @@ class ActivationRequest(BaseModel):
 
 class InvitationRequest(BaseModel):
     event_id: int
+    team_id: Optional[int] = None
     intended_username: Optional[str] = None
     role: str = "participant"
+
+
+class TeamAssignmentRequest(BaseModel):
+    user_id: int
+
+
+class BulkVerificationRequest(BaseModel):
+    event_id: int
+    team_id: Optional[int] = None
 
 
 def require_admin(request: Request, db: Session = Depends(get_db)):
@@ -68,6 +79,8 @@ def _user_payload(user: User, audit_summary=None):
         "active": user.active,
         "event_id": user.event_id,
         "event_name": user.event.name if user.event else None,
+        "team_id": user.team_id,
+        "team_name": user.team.name if user.team else None,
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
         "deactivated_at": user.deactivated_at.isoformat() if user.deactivated_at else None,
@@ -195,6 +208,7 @@ async def update_user(
     if body.role not in {None, "participant", "administrator"}:
         return JSONResponse({"error": "invalid role"}, status_code=422)
     event_was_supplied = "event_id" in body.model_fields_set
+    team_was_supplied = "team_id" in body.model_fields_set
     if event_was_supplied and body.event_id is not None and not db.query(Event).filter(Event.id == body.event_id).first():
         return JSONResponse({"error": "event not found"}, status_code=404)
 
@@ -207,16 +221,29 @@ async def update_user(
     old_role = "administrator" if target.is_admin else "participant"
     old_event_id = target.event_id
     new_event_id = body.event_id if event_was_supplied else target.event_id
-    changed = new_admin != target.is_admin or new_event_id != target.event_id
+    new_team_id = body.team_id if team_was_supplied else target.team_id
+    if event_was_supplied and new_event_id != target.event_id and not team_was_supplied:
+        new_team_id = None
+    if new_team_id is not None:
+        team = db.query(Team).filter(Team.id == new_team_id).first()
+        if not team:
+            return JSONResponse({"error": "team not found"}, status_code=404)
+        if team.event_id != new_event_id:
+            return JSONResponse({"error": "team does not belong to the selected event"}, status_code=422)
+    clearing_for_event_change = event_was_supplied and new_event_id != target.event_id and not team_was_supplied
+    if not new_admin and new_team_id is None and not clearing_for_event_change:
+        return JSONResponse({"error": "participants must belong to a team"}, status_code=422)
+    changed = new_admin != target.is_admin or new_event_id != target.event_id or new_team_id != target.team_id
     target.is_admin = new_admin
     target.event_id = new_event_id
+    target.team_id = None if new_admin else new_team_id
     if changed:
         target.session_version += 1
         target.updated_at = utcnow()
         _audit(
             db, admin, "user_access_updated", target,
             old_role=old_role, new_role=body.role or old_role,
-            old_event_id=old_event_id, new_event_id=new_event_id,
+            old_event_id=old_event_id, new_event_id=new_event_id, new_team_id=target.team_id,
         )
         db.commit()
     return _user_payload(target)
@@ -258,17 +285,28 @@ async def create_invitation(
         return JSONResponse({"error": "event not found"}, status_code=404)
     if body.role not in {"participant", "administrator"}:
         return JSONResponse({"error": "invalid role"}, status_code=422)
+    team = None
+    if body.role == "participant":
+        training_enabled = os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}
+        if body.team_id is None and training_enabled:
+            return JSONResponse({"error": "team_id is required for participant invitations"}, status_code=422)
+        if body.team_id is not None:
+            team = db.query(Team).filter(Team.id == body.team_id).first()
+            if not team:
+                return JSONResponse({"error": "team not found"}, status_code=404)
+            if team.event_id != event.id:
+                return JSONResponse({"error": "team does not belong to event"}, status_code=422)
     intended = body.intended_username.strip() if body.intended_username else None
     if intended and not 3 <= len(intended) <= 64:
         return JSONResponse({"error": "invalid intended username"}, status_code=422)
     raw = secrets.token_urlsafe(32)
     expires = utcnow() + timedelta(days=7)
     db.add(AccountToken(
-        token_hash=_token_digest(raw), purpose="invitation", event_id=event.id,
+        token_hash=_token_digest(raw), purpose="invitation", event_id=event.id, team_id=team.id if team else None,
         created_by_id=admin.id, intended_username=intended,
         intended_is_admin=body.role == "administrator", expires_at=expires,
     ))
-    _audit(db, admin, "invitation_created", event_id=event.id, role=body.role,
+    _audit(db, admin, "invitation_created", event_id=event.id, team_id=team.id if team else None, role=body.role,
            intended_username=intended, expires_at=expires.isoformat())
     db.commit()
     link = urljoin(str(request.base_url), "invite/" + raw)
@@ -337,6 +375,9 @@ async def list_modules(request: Request, db: Session = Depends(get_db)):
             "points": m.points,
             "category": m.category,
             "tags": m.tags,
+            "stage": m.stage,
+            "learning_objectives": m.learning_objectives,
+            "estimated_minutes": m.estimated_minutes,
             "disabled": m.disabled,
         }
         for m in modules
@@ -376,6 +417,12 @@ async def get_module(module_id: str, request: Request, db: Session = Depends(get
         "verification": module.verification,
         "hints": module.hints,
         "suggested_fix": module.suggested_fix,
+        "learning_objectives": module.learning_objectives,
+        "estimated_minutes": module.estimated_minutes,
+        "prerequisites": module.prerequisites,
+        "references": module.references,
+        "debrief": module.debrief,
+        "stage": module.stage,
         "caldera": module.caldera,
         "steps": steps,
         "disabled": module.disabled,
@@ -1008,3 +1055,145 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
         "status": "deleted",
         "caldera_operations_cleaned": caldera_cleanup["deleted"],
     }
+
+
+@router.post("/teams/{team_id}/participants")
+async def assign_participant(team_id: int, body: TeamAssignmentRequest, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    team = db.query(Team).filter(Team.id == team_id).first()
+    user = db.query(User).filter(User.id == body.user_id).first()
+    if not team or not user:
+        return JSONResponse({"error": "team or user not found"}, status_code=404)
+    if user.is_admin:
+        return JSONResponse({"error": "administrators cannot be assigned to teams"}, status_code=422)
+    old = user.team_id
+    user.event_id = team.event_id
+    user.team_id = team.id
+    user.updated_at = utcnow()
+    user.session_version += 1
+    _audit(db, admin, "participant_team_assigned", user, old_team_id=old, team_id=team.id, event_id=team.event_id)
+    db.commit()
+    return _user_payload(user)
+
+
+@router.post("/teams/{team_id}/training-credential/rotate")
+async def rotate_training_credential(team_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        return JSONResponse({"error": "team not found"}, status_code=404)
+    from api.services.training_credentials import rotate_team_credential
+    credential, report = rotate_team_credential(db, team)
+    _audit(db, admin, "team_credential_rotated" if report["rotated"] else "team_credential_rotation_failed",
+           team_id=team.id, succeeded_vm_ids=report["succeeded_vm_ids"], failed_vm_ids=report["failed_vm_ids"],
+           rollback_failed_vm_ids=report.get("rollback_failed_vm_ids", []))
+    db.commit()
+    status = 200 if report["rotated"] else 409
+    return JSONResponse({**report, "credential_status": credential.status if credential else "missing"}, status_code=status,
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.get("/events/{event_id}/readiness")
+async def event_readiness(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "event not found"}, status_code=404)
+    from builder.catalogue_validation import validate_catalogue
+    from builder.module_loader import load_all_modules
+    unassigned = db.query(User).filter(User.event_id == event.id, User.is_admin.is_(False), User.team_id.is_(None)).all()
+    missing_credentials = [team.id for team in event.teams if not team.training_credential or team.training_credential.status != "active"]
+    async def reachable(vm):
+        if vm.status != "active" or not vm.ip_address:
+            return False
+        try:
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(vm.ip_address, vm.ssh_port or 22), timeout=1.0
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except Exception:
+            return False
+    reachability = await asyncio.gather(*(reachable(vm) for vm in event.vms))
+    unreachable = [vm.id for vm, is_reachable in zip(event.vms, reachability) if not is_reachable]
+    verifier_missing = [vm.id for vm in event.vms if not db.query(PlatformSettings).filter_by(key=f"verifier_vm_{vm.id}", value="provisioned").first()]
+    catalogue = load_all_modules()
+    invalid = validate_catalogue(catalogue)
+    from builder.preset_loader import validate_presets
+    invalid_presets = validate_presets({module.id for module in catalogue}, catalogue)
+    checks = {
+        "unassigned_participants": [{"id": user.id, "username": user.username} for user in unassigned],
+        "missing_team_credentials": missing_credentials,
+        "unprovisioned_verifier_vms": verifier_missing,
+        "invalid_modules": invalid,
+        "invalid_presets": invalid_presets,
+        "unreachable_vms": unreachable,
+    }
+    return {"event_id": event.id, "ready": not any(checks.values()), "learner_training_enabled": os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}, **checks}
+
+
+@router.get("/verification-health")
+async def verification_health(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    from api.services.verification_scheduler import health_metrics
+    invalid_count = db.query(VMModule).filter(VMModule.verification_error_code == "invalid_specification").count()
+    unavailable_vms = db.query(VM).filter(VM.status != "active").count()
+    return {**health_metrics(), "invalid_assignments": invalid_count, "unavailable_vms": unavailable_vms}
+
+
+@router.get("/event-presets")
+async def event_presets(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    from builder.preset_loader import load_presets
+    return [{"id": preset.id, "name": preset.name, "description": preset.description,
+             "modules": preset.modules} for preset in load_presets()]
+
+
+@router.get("/events/{event_id}/verification-history")
+async def verification_history(event_id: int, request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    attempts = db.query(VerificationAttempt).join(VMModule).join(VM).filter(VM.event_id == event_id).order_by(
+        VerificationAttempt.created_at.desc()).limit(min(max(limit, 1), 500)).all()
+    return [{"id": item.id, "module_assignment_id": item.module_assignment_id, "user_id": item.user_id,
+             "trigger": item.trigger_type, "result": item.result, "summary": item.safe_summary,
+             "error_code": item.error_code, "duration_ms": item.duration_ms,
+             "created_at": item.created_at.isoformat()} for item in attempts]
+
+
+@router.post("/verifications/bulk")
+async def bulk_verification(body: BulkVerificationRequest, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == body.event_id).first()
+    if not event:
+        return JSONResponse({"error": "event not found"}, status_code=404)
+    if event.status == "stopped":
+        return JSONResponse({"error": "stopped events are read-only"}, status_code=409)
+    query = db.query(VMModule).join(VM).filter(VM.event_id == event.id, VMModule.stage == "preapplied")
+    if body.team_id is not None:
+        query = query.filter(VM.team_id == body.team_id)
+    from builder.module_loader import load_all_modules
+    definitions = {module.id: module for module in load_all_modules()}
+    results = []
+    from api.services.verification import verify_assignment
+    for assignment in query.all():
+        definition = definitions.get(assignment.module_id)
+        if not definition:
+            continue
+        result = await verify_assignment(db, assignment, definition.verification, "admin", admin)
+        results.append({"assignment_id": assignment.id, "result": result.result, "error_code": result.error_code})
+    return {"checked": len(results), "results": results}

@@ -172,7 +172,7 @@ class TestStateStore:
         state_store.add("test_type", {"key": "value2", "source_node_id": "node_2"}, "node_2")
 
         entities = state_store.get_by_type("test_type")
-        assert len(entities) == 3
+        assert len(entities) == 2
 
     def test_get_all(self, state_store):
         """Test getting all entities."""

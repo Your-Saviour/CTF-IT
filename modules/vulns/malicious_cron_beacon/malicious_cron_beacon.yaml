@@ -1,7 +1,7 @@
 id: malicious_cron_beacon
 name: Malicious Cron Job (C2 Beacon)
 description: A cron entry runs /opt/.hidden/beacon.sh every 5 minutes from root's crontab. The script simulates a C2 beacon — in a real attack this would exfiltrate data or maintain persistence by phoning home.
-type: vulnerability
+type: payload
 difficulty: medium
 points: 200
 category: persistence
@@ -31,4 +31,4 @@ caldera:
     command: |
       crontab -l | grep beacon
       cat /opt/.hidden/beacon.sh 2>/dev/null
-      bash /opt/.hidden/beacon.sh 2>/dev/null && echo "Beacon executed successfully"
+      test -x /opt/.hidden/beacon.sh

@@ -1,0 +1,4 @@
+id: compromised_web_server
+name: Compromised web server
+description: Investigate a planted web shell, repair stored XSS, and harden the exposed service.
+modules: [inventory_dashboard, inventory_unrestricted_upload, php_guestbook, guestbook_xss, guestbook_apache_root]

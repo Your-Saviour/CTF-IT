@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, event, inspect, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database import Base
@@ -25,8 +25,10 @@ class User(Base):
     deactivated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     password_changed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=True)
 
     event: Mapped["Event"] = relationship(back_populates="users")
+    team: Mapped["Team"] = relationship(back_populates="users")
 
 
 class AccountToken(Base):
@@ -42,6 +44,7 @@ class AccountToken(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     purpose: Mapped[str] = mapped_column(String(24), nullable=False)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=True)
     target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
     intended_username: Mapped[str] = mapped_column(String(64), nullable=True)
@@ -101,6 +104,28 @@ class Team(Base):
 
     event: Mapped["Event"] = relationship(back_populates="teams")
     vms: Mapped[list["VM"]] = relationship(back_populates="team")
+    users: Mapped[list["User"]] = relationship(back_populates="team")
+    training_credential: Mapped["TeamTrainingCredential"] = relationship(
+        back_populates="team", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class TeamTrainingCredential(Base):
+    __tablename__ = "team_training_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False, unique=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, default="ctf-trainee")
+    private_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    sudo_password_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    provisioned_vm_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    last_error_code: Mapped[str] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    rotated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    team: Mapped["Team"] = relationship(back_populates="training_credential")
 
 
 class VM(Base):
@@ -165,12 +190,82 @@ class VMModule(Base):
     difficulty: Mapped[str] = mapped_column(String(8), nullable=False)
     points: Mapped[int] = mapped_column(Integer, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    last_verified_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    first_completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    completed_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    verification_error_code: Mapped[str] = mapped_column(String(64), nullable=True)
+    verification_baseline_json: Mapped[str] = mapped_column(Text, nullable=True)
     # "preapplied" = blue team sees+fixes, "caldera" = red team exploits.
     # None for types where stage doesn't apply (hardening, application_*, goal).
     stage: Mapped[str] = mapped_column(String(16), nullable=True)
 
     vm: Mapped["VM"] = relationship(back_populates="modules")
+    attempts: Mapped[list["VerificationAttempt"]] = relationship(
+        back_populates="module_assignment", cascade="all, delete-orphan"
+    )
+    hint_reveals: Mapped[list["HintReveal"]] = relationship(
+        back_populates="module_assignment", cascade="all, delete-orphan"
+    )
+
+
+class VerificationAttempt(Base):
+    __tablename__ = "verification_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    module_assignment_id: Mapped[int] = mapped_column(ForeignKey("vm_modules.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    trigger_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    result: Mapped[str] = mapped_column(String(24), nullable=False)
+    safe_summary: Mapped[str] = mapped_column(String(256), nullable=False)
+    error_code: Mapped[str] = mapped_column(String(64), nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    module_assignment: Mapped["VMModule"] = relationship(back_populates="attempts")
+
+
+class HintReveal(Base):
+    __tablename__ = "hint_reveals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "module_assignment_id", "hint_index", name="uq_hint_reveal"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    module_assignment_id: Mapped[int] = mapped_column(ForeignKey("vm_modules.id"), nullable=False)
+    hint_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    revealed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    module_assignment: Mapped["VMModule"] = relationship(back_populates="hint_reveals")
+
+
+@event.listens_for(VMModule, "before_insert")
+def _initial_module_status(_mapper, _connection, target: VMModule):
+    if target.completed and target.status in {None, "open"}:
+        target.status = "completed"
+    target.completed = target.status == "completed"
+
+
+@event.listens_for(VMModule, "before_update")
+def _synchronise_module_status(_mapper, _connection, target: VMModule):
+    state = inspect(target)
+    if state.attrs.status.history.has_changes():
+        target.completed = target.status == "completed"
+    elif state.attrs.completed.history.has_changes():
+        target.status = "completed" if target.completed else "open"
+
+
+@event.listens_for(User, "before_insert")
+@event.listens_for(User, "before_update")
+def _validate_user_team_event(_mapper, connection, target: User):
+    if target.is_admin and target.team_id is not None:
+        raise ValueError("administrators cannot belong to participant teams")
+    if target.team_id is not None:
+        team_event_id = connection.execute(select(Team.event_id).where(Team.id == target.team_id)).scalar_one_or_none()
+        if team_event_id is None or team_event_id != target.event_id:
+            raise ValueError("participant team must belong to participant event")
 
 
 class VMGoal(Base):
@@ -205,4 +300,3 @@ class ServiceCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
-

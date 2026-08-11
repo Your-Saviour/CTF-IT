@@ -100,6 +100,16 @@ local development Compose stack.
 | `SECRET_KEY` | Session signing + deterministic flag generation | `openssl rand -base64 32` |
 | `DATA_ENCRYPTION_KEY` | Encrypts stored infrastructure credentials | `openssl rand -base64 32` |
 | `EVENT_QUOTA` | Default module quota for the first event | See [Events & Scoring](#events--scoring) |
+
+Learner training is deliberately gated. Keep `LEARNER_TRAINING_ENABLED=false`
+while deploying a release, run `alembic upgrade head`, provision each team's
+training credential and each VM's restricted verifier account, then confirm
+`GET /admin/api/events/{event_id}/readiness` returns `ready: true`. Only then set
+the flag to `true` and restart the API. Verification defaults to a 300-second
+interval, five concurrent VMs, and a 10-second per-check timeout; override these
+with `VERIFICATION_INTERVAL_SECONDS`, `VERIFICATION_VM_CONCURRENCY`, and
+`VERIFICATION_TIMEOUT_SECONDS` when capacity testing justifies it. Hint reveals
+are recorded for instructor analytics and never reduce points.
 Set all generated files to owner-only access, then start the stack:
 
 ```bash

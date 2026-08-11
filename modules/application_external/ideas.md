@@ -123,8 +123,8 @@ The install script downloads a pre-built JAR (or builds from a vendored Maven pr
 
 **Vulnerabilities:**
 
-1. **Log4Shell (CVE-2021-44228)** — The app uses Log4j 2.14.1 which evaluates JNDI lookup strings in log messages, enabling remote code execution. Fix: upgrade Log4j to 2.17.1+ by replacing the JAR, or set the JVM flag `-Dlog4j2.formatMsgNoLookups=true` in the systemd unit.
-   - Verification: `file_contains` checking the systemd unit `ExecStart` line for `formatMsgNoLookups=true`, OR `file_not_contains` checking `/opt/logapp/lib/` for `log4j-core-2.14` (verifying the vulnerable JAR was replaced)
+1. **Log4Shell (CVE-2021-44228)** — The app uses Log4j 2.14.1 which evaluates JNDI lookup strings in log messages, enabling remote code execution. Fix: upgrade both `log4j-core` and `log4j-api` to 2.17.1 or later; `formatMsgNoLookups` is retained only as historical mitigation context.
+   - Verification: inspect the deployed JAR for fixed `log4j-core` and `log4j-api` versions, then require both the systemd service and its health endpoint to remain healthy.
 
 2. **JNDI Lookup Not Globally Disabled** — Even after patching Log4j, the JVM-wide JNDI can still be exploited by other libraries. Fix: set `-Dcom.sun.jndi.ldap.object.trustURLCodebase=false` in the service file.
    - Verification: `file_contains` checking the systemd unit for `trustURLCodebase=false`

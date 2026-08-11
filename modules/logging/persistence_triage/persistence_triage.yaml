@@ -1,0 +1,27 @@
+id: persistence_triage
+name: Persistence Triage and Removal
+description: Triage multiple persistence surfaces, remove an incident marker, and leave a documented scope record.
+type: payload
+difficulty: hard
+points: 300
+category: incident-response
+tags: [persistence, triage, logging]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_absent
+      path: /etc/profile.d/.system-update.sh
+    - type: file_contains
+      path: /root/incident-findings/persistence-triage.txt
+      pattern: "removed=/etc/profile.d/.system-update.sh"
+hints: [Compare cron, systemd, SSH keys, and shell startup files., Inspect hidden files under /etc/profile.d., Remove the marker and document its exact path in the finding.]
+learning_objectives: [Triage common Linux persistence surfaces, Document and remove confirmed persistence]
+estimated_minutes: 70
+debrief:
+  root_cause: A shell startup hook provided execution for every interactive login.
+  remediation: Remove the hook, scope adjacent persistence mechanisms, and preserve a concise incident record.
+  attack_mapping: T1546.004 — Unix Shell Configuration Modification
+suggested_fix: Remove /etc/profile.d/.system-update.sh and document removed=/etc/profile.d/.system-update.sh in /root/incident-findings/persistence-triage.txt.

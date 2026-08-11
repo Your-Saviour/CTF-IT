@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from api.database import engine, get_db, init_db
 from api.models import Event, User, VM, utcnow
-from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, service_credentials, vm, vm_goals
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
 
 _log = logging.getLogger(__name__)
@@ -22,11 +22,20 @@ _log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from api import database as database_module
+    from api.migrations import upgrade_database
+    with database_module.engine.connect() as migration_connection:
+        upgrade_database(migration_connection)
+    # create_all is retained as an idempotent safety net for plugin-owned
+    # tables; the core schema above is versioned by Alembic.
     init_db()
     from api.database import SessionLocal
     from sqlalchemy import inspect, text
     db = SessionLocal()
     try:
+        # Versioned migrations own all training-release schema changes. The
+        # compatibility block below remains only for installations predating
+        # the established Alembic baseline.
         # Schema migrations — run before any ORM queries so new columns exist first
         inspector = inspect(db.bind)
 
@@ -283,12 +292,21 @@ async def lifespan(app: FastAPI):
                 deadline_db.close()
 
     deadline_task = asyncio.create_task(enforce_event_deadlines())
+    verification_task = None
+    if os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}:
+        from api.services.verification_scheduler import scheduler_loop
+        verification_task = asyncio.create_task(scheduler_loop())
     try:
         yield
     finally:
         deadline_task.cancel()
+        if verification_task:
+            verification_task.cancel()
         with suppress(asyncio.CancelledError):
             await deadline_task
+        if verification_task:
+            with suppress(asyncio.CancelledError):
+                await verification_task
         await ai_agent.close_agent_client()
         engine.dispose()
 
@@ -327,6 +345,7 @@ app.include_router(caldera_setup.router)
 app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
 app.include_router(event_dashboard.router)
+app.include_router(learner.router)
 app.include_router(service_credentials.router)
 app.include_router(vm.router)
 app.include_router(vm_goals.router)
@@ -356,24 +375,39 @@ async def list_open_events(db: Session = Depends(get_db)):
     ]
 
 
-@app.get("/debug-users")
-async def debug_users(db: Session = Depends(get_db)):
-    from api.models import User
-    count = db.query(User).count()
-    users = db.query(User).all()
-    return {"count": count, "users": [{"id": u.id, "username": u.username, "is_admin": u.is_admin} for u in users]}
-
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if user and user.is_admin:
         return RedirectResponse("/admin", status_code=303)
+    if user and not user.is_admin and learner.enabled():
+        return RedirectResponse("/dashboard", status_code=303)
     error = request.query_params.get("error")
     return templates.TemplateResponse(request, "landing.html", {
         "user": user,
         "event": user.event if user else None,
         "error": error,
         "bootstrap_required": db.query(User).count() == 0,
+    })
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def learner_dashboard(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.is_admin or not learner.enabled():
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "learner.html", {
+        "user": user, "page_title": "Workspace", "view": "dashboard",
+    })
+
+
+@app.get("/scoreboard", response_class=HTMLResponse)
+async def learner_scoreboard(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or user.is_admin or not learner.enabled():
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "learner.html", {
+        "user": user, "page_title": "Scoreboard", "view": "scoreboard",
     })
 
 

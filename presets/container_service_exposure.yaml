@@ -1,0 +1,4 @@
+id: container_service_exposure
+name: Container and service exposure
+description: Build from the controlled Docker foundation into secrets, privilege, supply-chain, and network containment.
+modules: [docker_service_lab, environment_secret_leakage, privileged_container, untrusted_image_reference, docker_socket_exposure]

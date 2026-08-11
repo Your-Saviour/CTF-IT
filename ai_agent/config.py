@@ -32,6 +32,11 @@ class AgentConfig:
     # Database
     DATABASE_URL: str = os.environ.get("AGENT_DATABASE_URL", "sqlite:///data/agent.db")
 
+    def __init__(self):
+        # Read at instance creation so tests and disposable workers can select
+        # an isolated database without import-order coupling.
+        self.DATABASE_URL = os.environ.get("AGENT_DATABASE_URL", "sqlite:///data/agent.db")
+
     # Agent behavior
     MAX_STEPS: int = int(os.environ.get("AGENT_MAX_STEPS", "100"))
     STEP_TIMEOUT: int = int(os.environ.get("AGENT_STEP_TIMEOUT", "120"))

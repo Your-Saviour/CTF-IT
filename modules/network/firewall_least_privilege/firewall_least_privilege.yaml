@@ -1,0 +1,30 @@
+id: firewall_least_privilege
+name: Firewall Least Privilege
+description: Apply a host firewall policy that permits SSH and the declared web service while denying an unnecessary management port.
+type: hardening
+stage: preapplied
+difficulty: hard
+points: 300
+category: network
+tags: [firewall, least-privilege, exposure]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: ufw_default_deny
+    - type: listening_port
+      port: 9443
+      listening: false
+    - type: service_running
+      service: ssh
+      expected: active
+hints: [Inventory listening ports before applying firewall policy., Preserve SSH before setting deny-by-default., Stop the training management listener and allow only declared services.]
+learning_objectives: [Translate a service inventory into least-privilege policy, Preserve administrative access during containment]
+estimated_minutes: 65
+debrief:
+  root_cause: An unnecessary management listener expanded remote attack surface.
+  remediation: Remove the listener and apply an allow-listed firewall policy while preserving SSH.
+  attack_mapping: T1049 — System Network Connections Discovery
+suggested_fix: Stop ctf-management, disable it, then enable UFW with deny incoming as the default and explicit SSH and required application allowances.

@@ -1,0 +1,32 @@
+id: journal_retention
+name: Journal Retention
+description: Configure persistent systemd journal storage with bounded retention and verify journald remains available.
+type: hardening
+stage: preapplied
+difficulty: easy
+points: 100
+category: logging
+tags: [journald, retention, logging]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_contains
+      path: /etc/systemd/journald.conf.d/retention.conf
+      pattern: "Storage=persistent"
+    - type: file_contains
+      path: /etc/systemd/journald.conf.d/retention.conf
+      pattern: "SystemMaxUse=512M"
+    - type: service_running
+      service: systemd-journald
+      expected: active
+hints: [Inspect journald's effective storage mode., Use a drop-in rather than editing vendor defaults., Set persistent storage and a 512M bound, then restart journald.]
+learning_objectives: [Configure persistent bounded journal retention, Verify logging health after configuration changes]
+estimated_minutes: 25
+debrief:
+  root_cause: Volatile journal storage erased evidence on reboot.
+  remediation: Configure persistent storage with an explicit size bound and verify journald.
+  attack_mapping: T1070 — Indicator Removal
+suggested_fix: Create /etc/systemd/journald.conf.d/retention.conf with Storage=persistent and SystemMaxUse=512M, then restart systemd-journald.

@@ -1,0 +1,16 @@
+id: backup_agent
+name: Backup Automation Agent
+description: Internal backup and automation foundation used by logging, permissions, and credential-handling exercises.
+type: application_internal
+difficulty: easy
+points: 0
+category: automation
+tags: [backup, automation, foundation]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: service_running
+  service: ctf-backup-agent
+  expected: active
+hints: [Inspect the ctf-backup-agent service and /opt/ctf-backup-agent.]

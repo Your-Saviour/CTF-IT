@@ -10,14 +10,27 @@ conflicts: []
 requires: [nextjs_portal]
 script: nextjs_middleware_bypass.sh
 verification:
-  type: file_not_contains
-  path: /opt/portal/package.json
-  pattern: '"next": "14.1.0"'
+  type: all_of
+  checks:
+    - type: json_version_at_least
+      path: /opt/portal/package.json
+      key: dependencies.next
+      minimum: 14.2.25
+    - type: process_running
+      process: "0.0.0.0:3001"
+      expected: running
+    - type: http_response
+      port: 3001
+      path: /
+      status_code: 200
 suggested_fix: "Update Next.js to a patched version: edit /opt/portal/package.json and change the next version to 14.2.25 or later, then run: cd /opt/portal && npm install && node_modules/.bin/next build && systemctl restart portal"
 hints:
   - "Check the Next.js version installed in the portal application"
   - "Look up CVE-2025-29927 — it affects Next.js middleware authentication"
   - "Update the 'next' version in /opt/portal/package.json to 14.2.25 or later, run npm install, rebuild with next build, and restart the portal service"
+references:
+  - https://nextjs.org/blog/cve-2025-29927
+  - https://nvd.nist.gov/vuln/detail/CVE-2025-29927
 caldera:
   tactic: initial-access
   technique:

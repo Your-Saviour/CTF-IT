@@ -1,0 +1,29 @@
+id: untrusted_image_reference
+name: Unpinned Container Image
+description: Replace a mutable, untrusted image reference with the event-approved immutable digest and preserve the deployment manifest.
+type: hardening
+stage: preapplied
+difficulty: hard
+points: 300
+category: containers
+tags: [docker, supply-chain, images]
+conflicts: []
+requires: [docker_service_lab]
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_not_contains
+      path: /opt/container-lab/compose.yaml
+      pattern: "latest"
+    - type: file_contains
+      path: /opt/container-lab/compose.yaml
+      pattern: "ubuntu@sha256:"
+hints: [Review image provenance and mutable tags in the Compose file., Replace latest with an approved digest reference., Use ubuntu@sha256:<digest> and document the source digest.]
+learning_objectives: [Explain mutable-tag and provenance risk, Pin a workload to an immutable approved image digest]
+estimated_minutes: 65
+debrief:
+  root_cause: A mutable latest tag allowed deployment content to change without review.
+  remediation: Use a trusted registry and pin the exact reviewed digest with an update process.
+  attack_mapping: T1525 — Implant Internal Image
+suggested_fix: Resolve the approved Ubuntu 24.04 digest and replace ubuntu:latest with ubuntu@sha256:<digest> in /opt/container-lab/compose.yaml.

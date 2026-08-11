@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timezone
-import shlex
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -39,7 +38,6 @@ async def list_vm_goals(vm_id: int, request: Request, db: Session = Depends(get_
     vm = db.query(VM).filter(VM.id == vm_id).first()
     if not vm:
         return JSONResponse({"error": "VM not found"}, status_code=404)
-
     goals = db.query(VMGoal).filter(VMGoal.vm_id == vm_id).all()
     return [_goal_dict(g) for g in goals]
 
@@ -58,6 +56,8 @@ async def check_vm_goal(
     vm = db.query(VM).filter(VM.id == vm_id).first()
     if not vm:
         return JSONResponse({"error": "VM not found"}, status_code=404)
+    if vm.event.status != "open":
+        return JSONResponse({"error": "event is read-only"}, status_code=409)
 
     goal = db.query(VMGoal).filter(VMGoal.id == goal_id, VMGoal.vm_id == vm_id).first()
     if not goal:
@@ -72,14 +72,14 @@ async def check_vm_goal(
     now = datetime.now(timezone.utc)
 
     # Run verification check (goal achieved by red team)
-    verification_passed, err = await _run_remote_verification(module.verification, vm, db)
+    verification_passed, err = await _run_control_verification(module.verification, vm)
     if err:
         return JSONResponse({"error": err}, status_code=501)
 
     # Run revert verification check (blue team reverted)
     revert_passed = False
     if module.revert_verification:
-        revert_passed, err = await _run_remote_verification(module.revert_verification, vm, db)
+        revert_passed, err = await _run_control_verification(module.revert_verification, vm)
         if err:
             return JSONResponse({"error": err}, status_code=501)
 
@@ -104,62 +104,28 @@ async def _run_remote_verification(
     vm: VM,
     db: Session | None = None,
 ) -> tuple[bool, str | None]:
-    """Run a verification spec against a remote VM.
+    """Compatibility wrapper over the platform-wide verification service."""
+    from api.services.verification import _command, verify_spec
 
-    Returns (passed: bool, error: str | None).
-    error is set (and passed is False) when the verification type is not
-    supported for remote VMs — the caller should surface a 501.
-    """
-    vtype = verification.get("type")
-    if not vtype:
-        return False, "verification spec is missing 'type' field"
+    async def legacy_executor(spec):
+        status = await _run_ssh_command(vm, db, _command(spec))
+        kind = spec.get("type")
+        if kind in {"file_absent", "file_not_contains", "user_not_exists", "port_closed"}:
+            status = 0 if status != 0 else 1
+        elif kind in {"service_running", "service_state"} and spec.get("expected") in {"inactive", "failed"}:
+            status = 0 if status != 0 else 1
+        return status, ""
 
-    if vtype == "http_response":
-        port = verification.get("port", 80)
-        path = verification.get("path", "/").lstrip("/")
-        url = f"http://{vm.ip_address}:{port}/{path}"
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(url)
-        except Exception as exc:
-            # Network error — treat as not-passed but not a 501
-            return False, None
+    result = await verify_spec(verification, vm, ssh_executor=legacy_executor)
+    error = result.summary if result.result == "invalid" else None
+    return result.passed, error
 
-        body = resp.text
-        if "status_code" in verification:
-            if resp.status_code != verification["status_code"]:
-                return False, None
-        if "body_contains" in verification:
-            if verification["body_contains"] not in body:
-                return False, None
-        if "body_not_contains" in verification:
-            if verification["body_not_contains"] in body:
-                return False, None
-        return True, None
 
-    if vtype in {"service_running", "file_exists", "file_absent"}:
-        if db is None:
-            return False, "database session required for SSH verification"
-
-        if vtype == "service_running":
-            service = verification.get("service")
-            if not isinstance(service, str) or not service:
-                return False, "service_running verification requires 'service'"
-            expected = verification.get("expected", "active")
-            if expected not in {"active", "inactive"}:
-                return False, "service_running expected must be 'active' or 'inactive'"
-            command = f"systemctl is-active --quiet -- {shlex.quote(service)}"
-            exit_status = await _run_ssh_command(vm, db, command)
-            return (exit_status == 0 if expected == "active" else exit_status != 0), None
-
-        path = verification.get("path")
-        if not isinstance(path, str) or not path.startswith("/"):
-            return False, f"{vtype} verification requires an absolute 'path'"
-        command = f"test -e {shlex.quote(path)}"
-        exists = await _run_ssh_command(vm, db, command) == 0
-        return (exists if vtype == "file_exists" else not exists), None
-
-    return False, f"verification type '{vtype}' not supported for remote VMs"
+async def _run_control_verification(verification: dict, vm: VM) -> tuple[bool, str | None]:
+    """Production goal checks use the same restricted verifier as training."""
+    from api.services.verification import verify_spec
+    result = await verify_spec(verification, vm)
+    return result.passed, result.summary if result.result == "invalid" else None
 
 
 async def _run_ssh_command(vm: VM, db: Session, command: str) -> int:

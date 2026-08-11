@@ -30,4 +30,4 @@ caldera:
   exploit:
     description: "Read the notes database as an unprivileged user"
     command: |
-      sqlite3 /opt/notesapi/notes.db "SELECT * FROM notes;" 2>/dev/null && echo "Database contents read successfully"
+      sqlite3 /opt/notesapi/notes.db "SELECT count(*) FROM notes;" 2>/dev/null

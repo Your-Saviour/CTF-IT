@@ -1,0 +1,20 @@
+id: docker_service_lab
+name: Controlled Docker Service Lab
+description: Internal application foundation for container security exercises, providing a local-only training container and controlled image.
+type: application_internal
+difficulty: easy
+points: 0
+category: containers
+tags: [docker, foundation, internal]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: package_installed
+      package: docker.io
+    - type: service_running
+      service: docker
+      expected: active
+hints: [Check the Docker service and local training containers.]

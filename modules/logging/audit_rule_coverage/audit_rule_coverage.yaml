@@ -1,0 +1,32 @@
+id: audit_rule_coverage
+name: Audit Rule Coverage
+description: Add durable audit coverage for identity and privilege configuration changes, then keep auditd healthy.
+type: hardening
+stage: preapplied
+difficulty: medium
+points: 200
+category: logging
+tags: [auditd, logging, detection]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_contains
+      path: /etc/audit/rules.d/identity.rules
+      pattern: "-w /etc/passwd -p wa -k identity"
+    - type: file_contains
+      path: /etc/audit/rules.d/identity.rules
+      pattern: "-w /etc/sudoers.d -p wa -k privilege"
+    - type: service_running
+      service: auditd
+      expected: active
+hints: [Review audit coverage for identity files., Add persistent watch rules under /etc/audit/rules.d., Cover both /etc/passwd and /etc/sudoers.d and reload audit rules.]
+learning_objectives: [Design durable audit watch coverage, Validate collection health after rule changes]
+estimated_minutes: 45
+debrief:
+  root_cause: Identity and privilege changes were not covered by persistent audit rules.
+  remediation: Add keyed persistent watches and reload auditd while confirming service health.
+  attack_mapping: T1562.002 — Impair Defenses
+suggested_fix: Create /etc/audit/rules.d/identity.rules with watches for /etc/passwd and /etc/sudoers.d, then run augenrules --load.

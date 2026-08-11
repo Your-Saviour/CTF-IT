@@ -1,5 +1,5 @@
 VALID_DIFFICULTIES = {"easy", "medium", "hard"}
-RESERVED_KEYS = {"categories", "tags"}
+RESERVED_KEYS = {"categories", "tags", "preset"}
 
 
 def validate_quota(quota: dict) -> list[str]:
@@ -9,6 +9,14 @@ def validate_quota(quota: dict) -> list[str]:
         return ["Quota must be a JSON object"]
 
     for key, value in quota.items():
+        if key == "preset":
+            if not isinstance(value, str) or not value:
+                errors.append("'preset' must be a preset ID")
+            else:
+                from builder.preset_loader import load_presets
+                if value not in {preset.id for preset in load_presets()}:
+                    errors.append(f"Unknown preset '{value}'")
+            continue
         if key in RESERVED_KEYS:
             if not isinstance(value, dict):
                 errors.append(f"'{key}' must be an object")

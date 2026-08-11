@@ -1,0 +1,4 @@
+id: persistence_incident_response_hunt
+name: Persistence and incident-response hunt
+description: Correlate authentication evidence and remove cron, shell-profile, systemd, and configuration persistence.
+modules: [authentication_log_investigation, malicious_cron_beacon, backdoor_bashrc, rogue_systemd_persistence, persistence_triage, tampered_sshd_configuration]

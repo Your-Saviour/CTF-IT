@@ -1,0 +1,4 @@
+id: linux_hardening_foundations
+name: Linux hardening foundations
+description: Guided identity, SSH, audit, journal, and least-privilege fundamentals.
+modules: [authentication_log_investigation, disable_ssh_root_login, audit_rule_coverage, journal_retention, firewall_least_privilege]

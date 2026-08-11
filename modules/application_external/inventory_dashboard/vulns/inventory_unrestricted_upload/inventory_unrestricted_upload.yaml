@@ -1,7 +1,7 @@
 id: inventory_unrestricted_upload
 name: Unrestricted File Upload
 description: The inventory dashboard accepts any file type with no restrictions. A PHP web shell has been uploaded. Remove the shell and restore upload restrictions.
-type: vulnerability
+type: payload
 difficulty: medium
 points: 200
 category: web
@@ -10,9 +10,13 @@ conflicts: []
 requires: [inventory_dashboard]
 script: inventory_unrestricted_upload.sh
 verification:
-  type: file_not_contains
-  path: /opt/inventory/uploads/shell.php
-  pattern: "<?php"
+  type: all_of
+  checks:
+    - type: file_absent
+      path: /opt/inventory/uploads/shell.php
+    - type: file_not_contains
+      path: /opt/inventory/app.py
+      pattern: "if True:"
 hints:
   - "Check the uploads directory in the inventory application"
   - "Look for suspicious files in /opt/inventory/uploads/"

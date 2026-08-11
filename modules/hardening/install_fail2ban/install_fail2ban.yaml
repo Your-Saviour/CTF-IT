@@ -2,6 +2,7 @@ id: install_fail2ban
 name: Install and enable fail2ban
 description: fail2ban is not installed. It should be installed and running to protect against brute-force attacks.
 type: hardening
+stage: preapplied
 difficulty: medium
 points: 200
 category: services

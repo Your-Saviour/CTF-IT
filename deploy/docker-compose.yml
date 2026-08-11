@@ -183,6 +183,10 @@ services:
       - CALDERA_AGENT_URL=${CALDERA_AGENT_URL:-http://localhost:8888}
       - CALDERA_INTERNAL_URL=http://caldera:8888
       - AGENT_API_URL=http://ai-agent:8000/api/agent
+      - LEARNER_TRAINING_ENABLED=${LEARNER_TRAINING_ENABLED:-false}
+      - VERIFICATION_INTERVAL_SECONDS=${VERIFICATION_INTERVAL_SECONDS:-300}
+      - VERIFICATION_VM_CONCURRENCY=${VERIFICATION_VM_CONCURRENCY:-5}
+      - VERIFICATION_TIMEOUT_SECONDS=${VERIFICATION_TIMEOUT_SECONDS:-10}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
       start_period: 15s

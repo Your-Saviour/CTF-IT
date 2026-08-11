@@ -800,6 +800,13 @@ def _run_provision(vm_id: int) -> None:
         vm.updated_at = utcnow()
         db.commit()
 
+        # Learner and verification accounts are distinct from platform
+        # automation and are installed only after all module content exists.
+        from api.services.training_provisioning import finalize_training_vm
+        training_report = finalize_training_vm(db, vm)
+        if training_report["verifier"] == "failed" or training_report["credential"] == "failed":
+            _log.warning("Training controls are not ready on VM %d", vm.id)
+
         # If this VM has a VPC IP assigned, configure its VPC network interface.
         # Spawned as a daemon thread so _run_provision's DB session can close
         # before the (potentially long) netplan config task begins.

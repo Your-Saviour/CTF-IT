@@ -169,7 +169,8 @@ async def login(
 
     attempts.clear()
 
-    response = RedirectResponse("/admin" if user.is_admin else "/", status_code=303)
+    learner_enabled = os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}
+    response = RedirectResponse("/admin" if user.is_admin else ("/dashboard" if learner_enabled else "/"), status_code=303)
     set_session_cookie(response, user)
     return response
 
@@ -180,10 +181,13 @@ async def validate_invitation(token: str, db: Session = Depends(get_db)):
     if not record:
         return {"valid": False, "message": "This link is invalid or has expired."}
     event = db.query(Event).filter(Event.id == record.event_id).first()
+    from api.models import Team
+    team = db.query(Team).filter(Team.id == record.team_id).first() if record.team_id else None
     return {
         "valid": True,
         "event_name": event.name if event else None,
         "intended_username": record.intended_username,
+        "team_name": team.name if team else None,
     }
 
 
@@ -217,12 +221,14 @@ async def redeem_invitation(
         username=username,
         password_hash=bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode(),
         event_id=record.event_id,
+        team_id=record.team_id,
         is_admin=record.intended_is_admin,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    response = RedirectResponse("/admin" if user.is_admin else "/", status_code=303)
+    learner_enabled = os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}
+    response = RedirectResponse("/admin" if user.is_admin else ("/dashboard" if learner_enabled else "/"), status_code=303)
     set_session_cookie(response, user)
     return response
 

@@ -1,11 +1,11 @@
 id: monitord_suid_script
-name: SUID Bit on Daemon Script
-description: The monitord.sh script has the SUID bit set, meaning any user who can execute it will run it with root privileges. The script's bash functionality can be trivially abused for privilege escalation.
+name: Invalid SUID Bit on Daemon Script
+description: The monitord.sh shell script has an unnecessary SUID bit. Linux ignores SUID on interpreted scripts, so this is an audit and configuration-hygiene finding rather than an executable privilege-escalation path.
 type: vulnerability
-difficulty: medium
-points: 200
-category: filesystem
-tags: [suid, permissions, privilege-escalation, bash]
+difficulty: easy
+points: 100
+category: compliance
+tags: [suid, permissions, audit, bash]
 conflicts: []
 requires: [monitord]
 script: monitord_suid_script.sh

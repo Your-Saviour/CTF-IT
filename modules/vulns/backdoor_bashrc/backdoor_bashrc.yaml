@@ -1,7 +1,7 @@
 id: backdoor_bashrc
 name: Backdoor in Root .bashrc
 description: A reverse shell one-liner has been appended to /root/.bashrc. Every time root opens an interactive shell, the backdoor attempts to connect back to the attacker's machine.
-type: vulnerability
+type: payload
 difficulty: easy
 points: 100
 category: persistence

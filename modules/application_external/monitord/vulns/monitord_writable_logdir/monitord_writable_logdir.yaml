@@ -32,4 +32,4 @@ caldera:
     command: |
       ls /var/log/monitord/
       echo "TAMPERED" > /var/log/monitord/monitord.log
-      echo "Log file overwritten successfully"
+      grep -Fx "TAMPERED" /var/log/monitord/monitord.log

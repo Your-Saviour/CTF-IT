@@ -68,6 +68,11 @@ class Module:
     steps: list[Step] = field(default_factory=list)
     verification: dict = field(default_factory=dict)
     hints: list[str] = field(default_factory=list)
+    learning_objectives: list[str] = field(default_factory=list)
+    estimated_minutes: int = 0
+    prerequisites: list[str] = field(default_factory=list)
+    references: list[str] = field(default_factory=list)
+    debrief: dict = field(default_factory=dict)
     suggested_fix: Optional[str] = None
     caldera: Optional[dict] = None
     source_dir: Path = field(default_factory=Path)
@@ -87,6 +92,32 @@ class Module:
     def __post_init__(self):
         if self.stage is None:
             self.stage = _default_stage(self.type)
+        if self.type in {"vulnerability", "hardening", "payload"}:
+            if not self.learning_objectives:
+                self.learning_objectives = [f"Identify the root cause of {self.name.lower()}", "Apply and validate a durable remediation"]
+            if not self.estimated_minutes:
+                self.estimated_minutes = {"easy": 20, "medium": 40, "hard": 75}.get(self.difficulty, 40)
+            if not self.prerequisites:
+                self.prerequisites = list(self.requires)
+            if not self.debrief:
+                technique = ((self.caldera or {}).get("technique") or {})
+                category_mappings = {
+                    "authentication": "T1078 — Valid Accounts",
+                    "filesystem": "T1222.002 — Linux and Mac File and Directory Permissions Modification",
+                    "network": "T1049 — System Network Connections Discovery",
+                    "persistence": "T1546 — Event Triggered Execution",
+                    "web": "T1190 — Exploit Public-Facing Application",
+                    "containers": "T1611 — Escape to Host",
+                    "logging": "T1562.002 — Impair Defenses",
+                    "incident-response": "T1087 — Account Discovery",
+                    "compliance": "T1548.001 — Setuid and Setgid",
+                }
+                mapping = " — ".join(filter(None, (technique.get("attack_id"), technique.get("name")))) or category_mappings.get(self.category, "T1082 — System Information Discovery")
+                self.debrief = {
+                    "root_cause": self.description,
+                    "remediation": self.suggested_fix or "Remove the unsafe condition and verify the affected service still works.",
+                    "attack_mapping": mapping,
+                }
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
@@ -113,6 +144,11 @@ def load_all_modules() -> list[Module]:
             steps=_parse_steps(data),
             verification=data.get("verification", {}),
             hints=data.get("hints", []),
+            learning_objectives=data.get("learning_objectives", []),
+            estimated_minutes=data.get("estimated_minutes", 0),
+            prerequisites=data.get("prerequisites", data.get("requires", [])),
+            references=data.get("references", []),
+            debrief=data.get("debrief", {}),
             suggested_fix=data.get("suggested_fix"),
             caldera=data.get("caldera"),
             source_dir=yaml_path.parent,
@@ -125,4 +161,15 @@ def load_all_modules() -> list[Module]:
             defend_points=data.get("defend_points", 0),
             revert_verification=data.get("revert_verification", {}),
         ))
+    # Dependent remediation must preserve its application foundation. Compose
+    # that health contract automatically so catalogue authors cannot silently
+    # ship a file-only check that rewards breaking the service.
+    by_id = {module.id: module for module in modules}
+    for module in modules:
+        foundations = [by_id[item] for item in module.requires
+                       if item in by_id and by_id[item].type in {"application_external", "application_internal"}]
+        if module.type in {"vulnerability", "hardening", "payload"} and foundations and module.verification:
+            health_checks = [foundation.verification for foundation in foundations if foundation.verification]
+            if health_checks:
+                module.verification = {"type": "all_of", "checks": [module.verification, *health_checks]}
     return modules

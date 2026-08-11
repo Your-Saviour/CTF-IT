@@ -1,0 +1,75 @@
+name: Training release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 15 * * *"
+
+jobs:
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r requirements.txt -r requirements-agent.txt -r requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest -q
+        env:
+          SECRET_KEY: test-session-secret
+          DATA_ENCRYPTION_KEY: test-data-secret
+          COOKIE_SECURE: "false"
+          RUN_BROWSER_E2E: "true"
+
+  nightly-disposable-vm:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SECRET_KEY: nightly-session-secret
+      DATA_ENCRYPTION_KEY: ${{ secrets.NIGHTLY_DATA_ENCRYPTION_KEY }}
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      DATABASE_URL: sqlite:////tmp/ctf-nightly.db
+      NIGHTLY_LABEL: ctf-it-nightly-${{ github.run_id }}
+      NIGHTLY_REGION: ${{ vars.NIGHTLY_VULTR_REGION || 'syd' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: test -n "$VULTR_API_KEY" && test -n "$DATA_ENCRYPTION_KEY"
+      - run: pip install -r requirements.txt -r requirements-agent.txt -r requirements-dev.txt ansible
+      - run: ansible-galaxy collection install -r playbooks/collections/requirements.yml
+      - name: Create platform key
+        run: |
+          python - <<'PY' > /tmp/nightly-public-key
+          from api.database import SessionLocal, init_db
+          from api.services.ssh_keys import get_or_create_platform_keypair
+          init_db()
+          db = SessionLocal()
+          print(get_or_create_platform_keypair(db)[1])
+          db.close()
+          PY
+      - name: Create disposable VM
+        run: |
+          python - <<'PY'
+          import json, os
+          with open('/tmp/nightly-public-key') as source, open('/tmp/nightly-vars.json', 'w') as target:
+              json.dump({'vm_hostname': os.environ['NIGHTLY_LABEL'], 'vm_plan': 'vc2-1c-1gb',
+                         'vm_os': 'Ubuntu 24.04 LTS x64', 'vm_region': os.environ['NIGHTLY_REGION'],
+                         'ssh_key_name': os.environ['NIGHTLY_LABEL'], 'ssh_public_key': source.read().strip(),
+                         'vultr_api_key': os.environ['VULTR_API_KEY']}, target)
+          PY
+          ansible-playbook playbooks/create-vm.yml -e @/tmp/nightly-vars.json | tee /tmp/create-vm.log
+          ip=$(sed -n 's/.*VULTR_RESULT=.*"ip": "\([^"]*\)".*/\1/p' /tmp/create-vm.log | tail -1)
+          test -n "$ip"
+          echo "NIGHTLY_VM_HOST=$ip" >> "$GITHUB_ENV"
+      - name: Wait for SSH
+        run: for attempt in $(seq 1 40); do timeout 2 bash -c "</dev/tcp/$NIGHTLY_VM_HOST/22" && exit 0; sleep 10; done; exit 1
+      - name: Exercise training lifecycle
+        run: python -m pytest -q tests/test_nightly_vm.py
+      - name: Destroy disposable VM
+        if: always()
+        run: ansible-playbook playbooks/destroy-vm.yml -e "instance_label=$NIGHTLY_LABEL instance_region=$NIGHTLY_REGION vultr_api_key=$VULTR_API_KEY"

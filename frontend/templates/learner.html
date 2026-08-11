@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ page_title }} · CTF-IT</title>
+  <link rel="stylesheet" href="/static/learner.css">
+</head>
+<body data-view="{{ view }}">
+  <header class="masthead">
+    <a class="wordmark" href="/dashboard">CTF—IT</a>
+    <nav aria-label="Participant navigation">
+      <a href="/dashboard" {% if view == 'dashboard' %}aria-current="page"{% endif %}>Workspace</a>
+      <a href="/scoreboard" {% if view == 'scoreboard' %}aria-current="page"{% endif %}>Scoreboard</a>
+    </nav>
+    <form method="post" action="/auth/logout"><button class="text-button">Log out</button></form>
+  </header>
+  <main id="app" class="page" aria-live="polite">
+    <p class="loading">Loading current event…</p>
+  </main>
+  <dialog id="access-dialog">
+    <form method="dialog"><button class="dialog-close" aria-label="Close">Close</button></form>
+    <div id="access-content"></div>
+  </dialog>
+  <script src="/static/learner.js" defer></script>
+</body>
+</html>

@@ -192,9 +192,14 @@ def test_startup_migrates_existing_users_without_losing_role_or_event(tmp_path):
         """))
         connection.execute(text("DROP TABLE users_current"))
         connection.execute(text("INSERT INTO events (id, name, quota, open, status, created_at) VALUES (42, 'Legacy', '{}', 1, 'open', CURRENT_TIMESTAMP)"))
+        connection.execute(text("INSERT INTO teams (id, name, event_id, created_at) VALUES (99, 'Only Team', 42, CURRENT_TIMESTAMP)"))
         connection.execute(text("""
             INSERT INTO users (id, username, password_hash, is_admin, event_id)
             VALUES (7, 'legacy-admin', 'unused', 1, 42)
+        """))
+        connection.execute(text("""
+            INSERT INTO users (id, username, password_hash, is_admin, event_id)
+            VALUES (8, 'legacy-participant', 'unused', 0, 42)
         """))
 
     sessions = sessionmaker(bind=engine)
@@ -203,15 +208,25 @@ def test_startup_migrates_existing_users_without_losing_role_or_event(tmp_path):
             with TestClient(app):
                 pass
         columns = {column["name"] for column in inspect(engine).get_columns("users")}
-        assert {"active", "session_version", "updated_at", "deactivated_at", "password_changed_at"} <= columns
+        assert {"active", "session_version", "updated_at", "deactivated_at", "password_changed_at", "team_id"} <= columns
         assert inspect(engine).has_table("account_tokens")
         assert inspect(engine).has_table("admin_audit")
+        assert inspect(engine).has_table("team_training_credentials")
+        assert inspect(engine).has_table("verification_attempts")
+        assert inspect(engine).has_table("hint_reveals")
+        vm_module_columns = {column["name"] for column in inspect(engine).get_columns("vm_modules")}
+        assert {"status", "last_verified_at", "first_completed_at", "completed_by_id",
+                "verification_error_code", "verification_baseline_json"} <= vm_module_columns
         db = sessions()
         legacy = db.query(User).filter_by(username="legacy-admin").one()
         assert legacy.active is True
         assert legacy.session_version == 1
         assert legacy.is_admin is True
         assert legacy.event_id == 42
+        # Administrators stay event-scoped and do not require a team.
+        assert legacy.team_id is None
+        participant = db.query(User).filter_by(username="legacy-participant").one()
+        assert participant.team_id == 99
         db.close()
     finally:
         engine.dispose()

@@ -1,0 +1,28 @@
+id: docker_socket_exposure
+name: Exposed Docker Socket
+description: Remove a TCP proxy exposing the Docker control socket while keeping the Docker engine available locally.
+type: vulnerability
+difficulty: hard
+points: 300
+category: containers
+tags: [docker, socket, exposure]
+conflicts: []
+requires: [docker_service_lab]
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: listening_port
+      port: 2375
+      listening: false
+    - type: service_running
+      service: docker
+      expected: active
+hints: [Inventory Docker listeners and socket proxies., Inspect docker-tcp-proxy.service., Disable the proxy without stopping the local Docker engine.]
+learning_objectives: [Explain why Docker API access is root-equivalent, Remove remote exposure while preserving local workloads]
+estimated_minutes: 60
+debrief:
+  root_cause: A TCP proxy made the root-equivalent Docker socket remotely reachable.
+  remediation: Remove the proxy and restrict Docker access to the local Unix socket and approved operators.
+  attack_mapping: T1611 — Escape to Host
+suggested_fix: systemctl disable --now docker-tcp-proxy; remove its unit; systemctl daemon-reload; verify Docker remains active.

@@ -72,6 +72,23 @@ def select_modules(
 
     selected: list[Module] = []
 
+    # A preset is an ordered, curated progression. Dependencies are expanded
+    # through the same selector path and all ordinary conflict/base rules still
+    # apply. Additional type/category/tag quotas may extend it.
+    if quota.get("preset"):
+        from builder.preset_loader import load_presets
+        preset = next((item for item in load_presets() if item.id == quota["preset"]), None)
+        if preset is None:
+            raise ValueError(f"Unknown preset '{quota['preset']}'")
+        for module_id in preset.modules:
+            pick = find_module(module_id, module_library)
+            _pull_requires(pick, selected, module_library)
+            available = _pick_available([pick], selected)
+            if available is None and pick.id not in {module.id for module in selected}:
+                raise ValueError(f"Preset module '{pick.id}' conflicts with the selected progression")
+            if pick.id not in {module.id for module in selected}:
+                selected.append(pick)
+
     # Phase 1: type → difficulty selection in defined order.
     # Iterate _TYPE_ORDER first so apps are selected before goals, goals before
     # vulns, etc. Any quota keys not in _TYPE_ORDER are processed afterward.
