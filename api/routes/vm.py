@@ -615,6 +615,8 @@ def _run_provision(vm_id: int) -> None:
         vm = db.query(VM).filter(VM.id == vm_id).first()
         if not vm:
             return
+        vm.provision_error = None
+        db.commit()
 
         # A cloud API can report the VM and its IP before sshd is accepting
         # connections. Wait here so both base and module playbooks start only
@@ -797,6 +799,7 @@ def _run_provision(vm_id: int) -> None:
         # ── Success ───────────────────────────────────────────────────────────
         _update_provision_step(db, vm, "completed")
         vm.status = "active"
+        vm.provision_error = None
         vm.updated_at = utcnow()
         db.commit()
 

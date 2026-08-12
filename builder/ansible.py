@@ -11,6 +11,39 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 ANSIBLE_EXPORTS_DIR = PROJECT_ROOT / "ansible_exports"
 
 
+def dependency_order(modules: list[Module]) -> list[Module]:
+    """Return modules in stable dependency-first order.
+
+    VM assignments are loaded through an unordered database relationship, so
+    selector order cannot be relied on during later reprovisioning.
+    """
+    by_id = {module.id: module for module in modules}
+    ordered: list[Module] = []
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(module: Module) -> None:
+        if module.id in visited:
+            return
+        if module.id in visiting:
+            raise ValueError(f"Circular module dependency involving '{module.id}'")
+        visiting.add(module.id)
+        for required_id in module.requires:
+            required = by_id.get(required_id)
+            if required is None:
+                raise ValueError(
+                    f"Module '{module.id}' requires unassigned module '{required_id}'"
+                )
+            visit(required)
+        visiting.remove(module.id)
+        visited.add(module.id)
+        ordered.append(module)
+
+    for module in modules:
+        visit(module)
+    return ordered
+
+
 def _build_operations(modules: list[Module]) -> list[dict]:
     """Convert module steps to an operations list for the playbook template."""
     operations = []
@@ -35,6 +68,7 @@ def _build_operations(modules: list[Module]) -> list[dict]:
 
 def render_playbook(modules: list[Module]) -> str:
     """Render playbook.yml from the Jinja2 template."""
+    modules = dependency_order(modules)
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
     template = env.get_template("playbook.yml.j2")
     operations = _build_operations(modules)
