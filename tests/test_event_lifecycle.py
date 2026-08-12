@@ -8,6 +8,26 @@ from api.models import Event
 from api.services.event_lifecycle import expire_due_events
 
 
+def test_event_model_defaults_to_draft_and_closed():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    event = Event(name="Fresh", quota="{}")
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    assert event.status == "draft"
+    assert event.open is False
+
+    db.close()
+    Base.metadata.drop_all(engine)
+
+
 def test_only_due_open_events_are_stopped():
     engine = create_engine(
         "sqlite://",

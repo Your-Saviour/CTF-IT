@@ -155,7 +155,10 @@ async def lifespan(app: FastAPI):
                 "EVENT_QUOTA",
                 '{"vulnerability":{"easy":1,"medium":0,"hard":0},"hardening":{"easy":0,"medium":1,"hard":0}}',
             )
-            db.add(Event(name="Default CTF Event", quota=quota, status="open"))
+            # A new event must pass through the explicit start transition so
+            # timestamps, the legacy open flag, and VM provisioning are set
+            # consistently by POST /admin/events/{id}/start.
+            db.add(Event(name="Default CTF Event", quota=quota, status="draft"))
             db.commit()
 
         # Seed default service credentials if none exist
