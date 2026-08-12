@@ -32,10 +32,12 @@ permissions, then starts `deploy/docker-compose.yml`. Re-running preserves
 existing configuration. Use `--force` to back up and regenerate configuration,
 or `--non-interactive` to read inputs from environment variables.
 
-After it finishes, create DNS A-records for `ctf`, `caldera`, `semaphore`,
-`dockhand`, and `traefik` under your domain, pointing at the server. The manual
-steps below document what the script automates, and remain available if you
-prefer to configure the stack by hand.
+When `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_DOMAIN` are supplied, quickstart
+creates or updates DNS-only A records for `ctf`, `caldera`, `semaphore`,
+`dockhand`, and `traefik`, all pointing at the server. The token needs
+`Zone:Read` and `DNS:Edit` permissions. Without Cloudflare credentials, create
+those records manually. The steps below remain available if you prefer to
+configure the stack by hand.
 
 ### Prerequisites
 

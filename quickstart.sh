@@ -55,6 +55,26 @@ require_env_value() {
 # Double every '$' so docker-compose does not interpolate bcrypt hashes.
 escape_for_compose() { printf '%s' "$1" | sed 's/\$/\$\$/g'; }
 
+cloudflare_json_value() {
+  local path="$1"
+  python3 -c '
+import json, sys
+value = json.load(sys.stdin)
+for part in sys.argv[1].split("."):
+    value = value[int(part)] if isinstance(value, list) else value[part]
+print(value if not isinstance(value, bool) else str(value).lower())
+' "$path"
+}
+
+cloudflare_api() {
+  local method="$1" url="$2" body="${3:-}"
+  local args=(-fsS -X "$method" "$url"
+    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+    -H "Content-Type: application/json")
+  [[ -z "$body" ]] || args+=(--data "$body")
+  curl "${args[@]}"
+}
+
 # Produce a compose-escaped "user:bcrypthash" string using a throwaway httpd
 # container (avoids requiring apache2-utils on the host).
 bcrypt_htpasswd() {
@@ -162,14 +182,26 @@ phase_docker() {
     || err "Docker still unavailable after install."
 }
 collect_inputs() {
-  local need_deploy=false need_root=false
+  local need_deploy=false need_root=false caldera_url
   { [[ -f "$DEPLOY_ENV" ]] && [[ "$FORCE" != true ]]; } || need_deploy=true
   { [[ -f "$ROOT_ENV" ]]   && [[ "$FORCE" != true ]]; } || need_root=true
 
   if [[ -f "$DEPLOY_ENV" ]]; then
     [[ -n "$DOMAIN" ]] || DOMAIN="$(read_env_value "$DEPLOY_ENV" DOMAIN)"
     [[ -n "$ACME_EMAIL" ]] || ACME_EMAIL="$(read_env_value "$DEPLOY_ENV" ACME_EMAIL)"
+    if [[ -z "$SERVER_IP" ]]; then
+      caldera_url="$(read_env_value "$DEPLOY_ENV" CALDERA_AGENT_URL)"
+      SERVER_IP="${caldera_url#*://}"
+      SERVER_IP="${SERVER_IP%%:*}"
+    fi
     [[ -n "$TRAEFIK_USER" ]] || TRAEFIK_USER="admin"
+  fi
+
+  if [[ -f "$ROOT_ENV" ]]; then
+    [[ -n "$CLOUDFLARE_API_TOKEN" ]] \
+      || CLOUDFLARE_API_TOKEN="$(read_env_value "$ROOT_ENV" CLOUDFLARE_API_TOKEN)"
+    [[ -n "$CLOUDFLARE_DOMAIN" ]] \
+      || CLOUDFLARE_DOMAIN="$(read_env_value "$ROOT_ENV" CLOUDFLARE_DOMAIN)"
   fi
 
   if [[ "$need_deploy" == false && "$need_root" == false ]]; then
@@ -214,6 +246,15 @@ gen_root_env() {
     if ! grep -q '^CTF_API_KEY=' "$ROOT_ENV"; then
       echo "CTF_API_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
       log "Added missing CTF_API_KEY to $ROOT_ENV"
+    fi
+    if [[ -n "$VULTR_API_KEY" ]] && ! grep -q '^VULTR_API_KEY=' "$ROOT_ENV"; then
+      echo "VULTR_API_KEY=$VULTR_API_KEY" >> "$ROOT_ENV"
+    fi
+    if [[ -n "$CLOUDFLARE_API_TOKEN" ]] && ! grep -q '^CLOUDFLARE_API_TOKEN=' "$ROOT_ENV"; then
+      echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN" >> "$ROOT_ENV"
+    fi
+    if [[ -n "$CLOUDFLARE_DOMAIN" ]] && ! grep -q '^CLOUDFLARE_DOMAIN=' "$ROOT_ENV"; then
+      echo "CLOUDFLARE_DOMAIN=$CLOUDFLARE_DOMAIN" >> "$ROOT_ENV"
     fi
     if [[ -n "$AI_API_BASE" ]] && ! grep -q '^AI_API_BASE=' "$ROOT_ENV"; then
       echo "AI_API_BASE=$AI_API_BASE" >> "$ROOT_ENV"
@@ -278,6 +319,54 @@ validate_configuration() {
     || warn "AI_API_BASE is not configured; the AI-agent UI will run, but LLM actions will be unavailable."
   [[ -n "$(read_env_value "$ROOT_ENV" VULTR_API_KEY)" ]] \
     || warn "VULTR_API_KEY is not configured; automatic cloud VM provisioning will be unavailable."
+}
+
+configure_cloudflare_dns() {
+  local token domain zone_response zone_id name response record_id payload
+  token="$(read_env_value "$ROOT_ENV" CLOUDFLARE_API_TOKEN)"
+  domain="$(read_env_value "$ROOT_ENV" CLOUDFLARE_DOMAIN)"
+
+  if [[ -z "$token" ]]; then
+    warn "CLOUDFLARE_API_TOKEN is not configured; production DNS records were not changed."
+    return
+  fi
+  [[ -n "$domain" ]] || err "CLOUDFLARE_API_TOKEN is set but CLOUDFLARE_DOMAIN is missing."
+  [[ -n "$SERVER_IP" ]] || err "SERVER_IP is required to configure Cloudflare DNS."
+  require_cmd curl
+  require_cmd python3
+
+  CLOUDFLARE_API_TOKEN="$token"
+  log "Configuring Cloudflare DNS for $domain"
+  zone_response="$(cloudflare_api GET \
+    "https://api.cloudflare.com/client/v4/zones?name=$domain&status=active")" \
+    || err "Cloudflare zone lookup failed for $domain."
+  [[ "$(printf '%s' "$zone_response" | cloudflare_json_value success)" == true ]] \
+    || err "Cloudflare rejected the zone lookup for $domain."
+  zone_id="$(printf '%s' "$zone_response" | cloudflare_json_value result.0.id 2>/dev/null || true)"
+  [[ -n "$zone_id" ]] \
+    || err "No active Cloudflare zone found for $domain. The token needs Zone:Read access."
+
+  for name in ctf caldera semaphore dockhand traefik; do
+    name="$name.$DOMAIN"
+    response="$(cloudflare_api GET \
+      "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records?type=A&name=$name")" \
+      || err "Cloudflare record lookup failed for $name."
+    record_id="$(printf '%s' "$response" | cloudflare_json_value result.0.id 2>/dev/null || true)"
+    payload="{\"type\":\"A\",\"name\":\"$name\",\"content\":\"$SERVER_IP\",\"ttl\":1,\"proxied\":false}"
+    if [[ -n "$record_id" ]]; then
+      response="$(cloudflare_api PATCH \
+        "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records/$record_id" "$payload")" \
+        || err "Cloudflare failed to update $name."
+      log "Updated $name -> $SERVER_IP"
+    else
+      response="$(cloudflare_api POST \
+        "https://api.cloudflare.com/client/v4/zones/$zone_id/dns_records" "$payload")" \
+        || err "Cloudflare failed to create $name."
+      log "Created $name -> $SERVER_IP"
+    fi
+    [[ "$(printf '%s' "$response" | cloudflare_json_value success)" == true ]] \
+      || err "Cloudflare rejected the DNS change for $name."
+  done
 }
 gen_deploy_env() {
   if [[ -f "$DEPLOY_ENV" && "$FORCE" != true ]]; then
@@ -393,7 +482,7 @@ print_summary() {
 ============================================================
  CTF-IT deployment started.
 
- Services (create a DNS A-record for each, pointing at this server):
+ Services:
    https://ctf.$DOMAIN        — CTF dashboard
    https://caldera.$DOMAIN    — MITRE Caldera
    https://semaphore.$DOMAIN  — Ansible Semaphore
@@ -423,7 +512,7 @@ EOF
   cat <<EOF
 
  Next steps (manual):
-   - Create the DNS A-records listed above.
+   - If Cloudflare credentials were omitted, create the DNS A-records listed above.
    - Optional: export the Caldera plugin from the CTF admin UI.
 ============================================================
 EOF
@@ -439,6 +528,7 @@ main() {
   gen_caldera_config
   chmod 600 "$ROOT_ENV" "$DEPLOY_ENV" "$CALDERA_CFG" "$CALDERA_SSH_KEY"
   validate_configuration
+  configure_cloudflare_dns
   launch_stack
   wait_for_stack
   print_summary

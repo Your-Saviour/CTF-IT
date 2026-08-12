@@ -107,3 +107,39 @@ gen_root_env
     assert "ADMIN_BOOTSTRAP_TOKEN=" in upgraded
     assert "DATA_ENCRYPTION_KEY=" in upgraded
     assert root_env.stat().st_mode & 0o777 == 0o600
+
+
+def test_cloudflare_dns_creates_and_updates_production_records(tmp_path):
+    root_env = tmp_path / ".env"
+    root_env.write_text(
+        "CLOUDFLARE_API_TOKEN=test-token\n"
+        "CLOUDFLARE_DOMAIN=example.com\n"
+    )
+    calls = tmp_path / "calls"
+    script = f"""
+source ./quickstart.sh
+ROOT_ENV={root_env!s}
+SERVER_IP=192.0.2.30
+DOMAIN=example.com
+CLOUDFLARE_API_TOKEN=
+require_cmd() {{ :; }}
+cloudflare_api() {{
+  printf '%s %s %s\n' "$1" "$2" "${{3:-}}" >> {calls!s}
+  case "$2" in
+    *'/zones?name='*) printf '{{"success":true,"result":[{{"id":"zone-id"}}]}}' ;;
+    *'name=ctf.example.com'*) printf '{{"success":true,"result":[{{"id":"record-id"}}]}}' ;;
+    *'/dns_records?'*) printf '{{"success":true,"result":[]}}' ;;
+    *) printf '{{"success":true,"result":{{}}}}' ;;
+  esac
+}}
+configure_cloudflare_dns
+"""
+    _run_bash(script)
+
+    text = calls.read_text()
+    assert "PATCH https://api.cloudflare.com/client/v4/zones/zone-id/dns_records/record-id" in text
+    assert text.count("POST https://api.cloudflare.com/client/v4/zones/zone-id/dns_records") == 4
+    for service in ("ctf", "caldera", "semaphore", "dockhand", "traefik"):
+        assert f'"name":"{service}.example.com"' in text
+    assert text.count('"content":"192.0.2.30"') == 5
+    assert text.count('"proxied":false') == 5
