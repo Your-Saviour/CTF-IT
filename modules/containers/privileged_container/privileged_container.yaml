@@ -20,3 +20,9 @@ debrief:
   remediation: Recreate the workload without privileged mode and grant only explicitly required capabilities.
   attack_mapping: T1611 — Escape to Host
 suggested_fix: Remove training-maintenance and recreate it without --privileged, granting only the specific capabilities it requires.
+
+references:
+  - title: "Docker Engine security documentation"
+    url: https://docs.docker.com/engine/security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

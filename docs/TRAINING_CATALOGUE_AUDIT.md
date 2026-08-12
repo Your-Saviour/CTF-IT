@@ -14,7 +14,8 @@ and 3 cyclical goals.
   service-health regression check.
 - Every visible task has objectives, an estimate, progressive hints, a
   root-cause debrief, remediation principles, and an ATT&CK mapping.
-- CVE tasks require authoritative HTTPS references.
+- All 65 learner exercises have at least two titled authoritative HTTPS references: a primary technical source and a security-context source.
+- CVE tasks include both the relevant vendor advisory and an NVD or CISA entry.
 - Application-dependent checks are automatically composed with the
   foundation's health check so breaking the service cannot earn points.
 - Definitions, paths, identifiers, ports, dependency edges, conflicts, stages,

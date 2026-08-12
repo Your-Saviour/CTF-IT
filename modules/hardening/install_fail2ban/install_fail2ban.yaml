@@ -17,3 +17,9 @@ verification:
 suggested_fix: "apt-get update && apt-get install -y fail2ban && systemctl start fail2ban && systemctl enable fail2ban"
 hints:
   - "Look into intrusion prevention tools available via apt"
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

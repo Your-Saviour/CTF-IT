@@ -32,3 +32,9 @@ caldera:
     command: |
       curl -s "http://localhost:3001/_next/static/chunks/app/page.js.map" | python3 -m json.tool | grep -i "sources\|sourcesContent" | head -5
       echo "Source code exposed via .map files"
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

@@ -30,3 +30,9 @@ debrief:
   remediation: Add keyed persistent watches and reload auditd while confirming service health.
   attack_mapping: T1562.002 — Impair Defenses
 suggested_fix: Create /etc/audit/rules.d/identity.rules with watches for /etc/passwd and /etc/sudoers.d, then run augenrules --load.
+
+references:
+  - title: "Ubuntu security logging documentation"
+    url: https://documentation.ubuntu.com/security/security-features/operating-system/security-logging/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

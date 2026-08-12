@@ -32,3 +32,9 @@ caldera:
     description: "Dump all user records from the unprotected admin API"
     command: |
       curl -s http://localhost:3001/api/admin/users | python3 -m json.tool
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

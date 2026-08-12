@@ -31,3 +31,9 @@ caldera:
     description: "Inject a command via the metrics TCP endpoint"
     command: |
       echo "cpu; id" | nc -q 1 localhost 9000
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

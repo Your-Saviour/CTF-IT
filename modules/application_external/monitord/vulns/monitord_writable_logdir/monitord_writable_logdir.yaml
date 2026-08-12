@@ -33,3 +33,9 @@ caldera:
       ls /var/log/monitord/
       echo "TAMPERED" > /var/log/monitord/monitord.log
       grep -Fx "TAMPERED" /var/log/monitord/monitord.log
+
+references:
+  - title: "Ubuntu security logging documentation"
+    url: https://documentation.ubuntu.com/security/security-features/operating-system/security-logging/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

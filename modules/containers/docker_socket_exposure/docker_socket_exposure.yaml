@@ -26,3 +26,9 @@ debrief:
   remediation: Remove the proxy and restrict Docker access to the local Unix socket and approved operators.
   attack_mapping: T1611 — Escape to Host
 suggested_fix: systemctl disable --now docker-tcp-proxy; remove its unit; systemctl daemon-reload; verify Docker remains active.
+
+references:
+  - title: "Docker Engine security documentation"
+    url: https://docs.docker.com/engine/security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

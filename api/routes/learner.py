@@ -55,7 +55,7 @@ def _module_payload(assignment: VMModule, definition, revealed: set[int]) -> dic
         "hints": [{"index": index, "revealed": index in revealed,
                    "text": hint if index in revealed else None} for index, hint in enumerate(definition.hints)],
         "debrief": definition.debrief if unlocked else None,
-        "references": definition.references if unlocked else [],
+        "references": [reference.as_dict() for reference in definition.references] if unlocked else [],
     }
 
 

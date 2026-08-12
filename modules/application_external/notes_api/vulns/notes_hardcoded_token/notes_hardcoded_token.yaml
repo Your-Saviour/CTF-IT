@@ -32,3 +32,9 @@ caldera:
     command: |
       TOKEN=$(grep -oP "SuperSecret123[^'\"]*" /opt/notesapi/app.js | head -1)
       curl -s -H "X-Admin-Token: $TOKEN" http://localhost:3000/admin/notes | python3 -m json.tool
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

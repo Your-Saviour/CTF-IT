@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import Event, Team, User, VM, VMGoal, VMModule
+from api.models import Event, HintReveal, Team, User, VerificationAttempt, VM, VMGoal, VMModule
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient, get_caldera_api_key
 from api.services.verifier_account import scoring_enabled_vm_ids
@@ -41,6 +41,121 @@ def _agent_alive(agent: dict | None) -> bool:
 
 def _make_client() -> CalderaClient:
     return CalderaClient(get_caldera_api_key())
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _analytics_metrics(assignments, attempts_by_assignment, hinted_ids, event_start):
+    completed = [item for item in assignments if item.status == "completed" and item.first_completed_at is not None]
+    completion_minutes = []
+    start = _utc(event_start)
+    if start:
+        for item in completed:
+            finished = _utc(item.first_completed_at)
+            if finished and finished >= start:
+                completion_minutes.append((finished - start).total_seconds() / 60)
+
+    attempts = [attempt for item in assignments for attempt in attempts_by_assignment.get(item.id, [])]
+    learner_attempts = [attempt for attempt in attempts if attempt.trigger_type == "learner"]
+    learner_failures = sum(attempt.result == "fail" for attempt in learner_attempts)
+    operational_errors = sum(attempt.result in {"invalid", "unavailable"} for attempt in attempts)
+    regression_count = 0
+    currently_regressed = 0
+    for item in assignments:
+        state = False
+        regressed = False
+        first_completed = _utc(item.first_completed_at)
+        completion_seeded = False
+        for attempt in attempts_by_assignment.get(item.id, []):
+            created = _utc(attempt.created_at)
+            if not completion_seeded and first_completed and created and first_completed <= created:
+                state = True
+                completion_seeded = True
+            if attempt.result == "pass":
+                state, regressed = True, False
+            elif attempt.trigger_type == "periodic" and attempt.result == "fail" and state and not regressed:
+                regression_count += 1
+                state, regressed = False, True
+        currently_regressed += int(regressed or item.status == "regressed")
+
+    assigned = len(assignments)
+    hint_assisted = sum(item.id in hinted_ids for item in assignments)
+    mean = sum(completion_minutes) / len(completion_minutes) if completion_minutes else None
+    return {
+        "assigned_exercises": assigned,
+        "completed_exercises": len(completed),
+        "completion_percentage": round(len(completed) * 100 / assigned, 1) if assigned else 0,
+        "mean_completion_minutes": round(mean, 1) if mean is not None else None,
+        "median_completion_minutes": round(_median(completion_minutes), 1) if completion_minutes else None,
+        "learner_verification_attempts": len(learner_attempts),
+        "learner_failures": learner_failures,
+        "failure_rate": round(learner_failures * 100 / len(learner_attempts), 1) if learner_attempts else 0,
+        "hint_reveals": sum(len({row.hint_index for row in hinted_ids.get(item.id, [])}) for item in assignments) if isinstance(hinted_ids, dict) else 0,
+        "hint_assisted_assignments": hint_assisted if not isinstance(hinted_ids, dict) else sum(item.id in hinted_ids for item in assignments),
+        "hint_use_rate": round(hint_assisted * 100 / assigned, 1) if assigned and not isinstance(hinted_ids, dict) else 0,
+        "regression_count": regression_count,
+        "currently_regressed_assignments": currently_regressed,
+        "operational_verification_errors": operational_errors,
+    }
+
+
+@router.get("/{event_id}/training-analytics")
+async def training_analytics(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+
+    teams = db.query(Team).filter(Team.event_id == event_id).all()
+    vms = db.query(VM).filter(VM.event_id == event_id).all()
+    vm_map = {vm.id: vm for vm in vms}
+    assignments = db.query(VMModule).filter(
+        VMModule.vm_id.in_(vm_map), VMModule.stage == "preapplied"
+    ).all() if vm_map else []
+    assignment_ids = [item.id for item in assignments]
+    attempts = db.query(VerificationAttempt).filter(
+        VerificationAttempt.module_assignment_id.in_(assignment_ids)
+    ).order_by(VerificationAttempt.module_assignment_id, VerificationAttempt.created_at, VerificationAttempt.id).all() if assignment_ids else []
+    reveals = db.query(HintReveal).filter(HintReveal.module_assignment_id.in_(assignment_ids)).all() if assignment_ids else []
+    attempts_by_assignment = {}
+    for attempt in attempts:
+        attempts_by_assignment.setdefault(attempt.module_assignment_id, []).append(attempt)
+    reveals_by_assignment = {}
+    for reveal in reveals:
+        reveals_by_assignment.setdefault(reveal.module_assignment_id, []).append(reveal)
+
+    def metrics(items):
+        result = _analytics_metrics(items, attempts_by_assignment, set(reveals_by_assignment), event.started_at)
+        result["hint_reveals"] = sum(len({row.hint_index for row in reveals_by_assignment.get(item.id, [])}) for item in items)
+        result["hint_assisted_assignments"] = sum(item.id in reveals_by_assignment for item in items)
+        result["hint_use_rate"] = round(result["hint_assisted_assignments"] * 100 / len(items), 1) if items else 0
+        return result
+
+    try:
+        from builder.module_loader import load_all_modules
+        names = {module.id: module.name for module in load_all_modules()}
+    except Exception:
+        names = {}
+    team_rows = []
+    for team in teams:
+        items = [item for item in assignments if vm_map[item.vm_id].team_id == team.id]
+        team_rows.append({"team_id": team.id, "team_name": team.name, **metrics(items)})
+    team_rows.sort(key=lambda row: row["team_name"].lower())
+
+    module_rows = []
+    for module_id in sorted({item.module_id for item in assignments}):
+        items = [item for item in assignments if item.module_id == module_id]
+        module_rows.append({"module_id": module_id, "module_name": names.get(module_id, module_id), **metrics(items)})
+    module_rows.sort(key=lambda row: (-row["learner_failures"] / row["assigned_exercises"], -row["hint_use_rate"], row["completion_percentage"], row["module_name"].lower()))
+    return {"summary": metrics(assignments), "teams": team_rows, "modules": module_rows,
+            "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
 @router.get("/{event_id}/dashboard-data")

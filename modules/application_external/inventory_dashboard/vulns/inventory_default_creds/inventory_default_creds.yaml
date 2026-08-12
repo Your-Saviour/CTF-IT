@@ -33,3 +33,9 @@ caldera:
       curl -s -c /tmp/cookies.txt -X POST -d 'username=admin&password=admin' http://localhost:5001/login && curl -s -b /tmp/cookies.txt http://localhost:5001/ | head -20
     cleanup: |
       rm -f /tmp/cookies.txt
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

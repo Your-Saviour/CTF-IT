@@ -24,3 +24,9 @@ hints:
   - "Check the SSH server configuration for dangerous access settings"
   - "Look at /etc/ssh/sshd_config for login-related directives"
   - "Set PermitRootLogin to no and restart the SSH service"
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

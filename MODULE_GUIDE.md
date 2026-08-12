@@ -45,6 +45,7 @@ modules/
 | `points` | integer | Points awarded on completion. |
 | `category` | string | Grouping category (e.g. `filesystem`, `services`, `network`, `authentication`). |
 | `verification` | object | How to check if the user fixed the issue. See [Verification Types](#verification-types). |
+| `references` | list[object] | At least two titled authoritative HTTPS sources for every learner exercise. |
 
 ### Optional Fields
 
@@ -57,6 +58,20 @@ modules/
 | `steps` | list | `[]` | Ordered build steps. See [Build Steps](#build-steps). Replaces `script`. |
 | `hints` | list[string] | `[]` | Progressive hints shown to users. Order from vague to specific. |
 | `suggested_fix` | string | `null` | The command(s) that fix the issue. Used for admin reference/testing. |
+
+### Authoritative references
+
+Every vulnerability, hardening, payload, and goal definition requires at least two references in `title`/`url` form. Include a primary technical source (upstream or vendor documentation, an advisory, Ubuntu documentation, or an applicable standard) and a security-context source (MITRE ATT&CK, OWASP, CISA, NIST, or NVD). CVE exercises must include both the vendor advisory and an NVD or CISA entry. URLs must use HTTPS and titles must describe the destination.
+
+```yaml
+references:
+  - title: Ubuntu OpenSSH server documentation
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: MITRE ATT&CK Enterprise techniques
+    url: https://attack.mitre.org/techniques/enterprise/
+```
+
+References are debrief material and remain hidden from learners until their first successful completion.
 
 ## Build Steps
 

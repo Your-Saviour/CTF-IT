@@ -28,3 +28,9 @@ debrief:
   remediation: Disable and stop the rogue unit, remove its unit and payload, reload systemd, and verify it remains inactive.
   attack_mapping: "T1543.002 — Create or Modify System Process: Systemd Service"
 suggested_fix: systemctl disable --now system-health-sync; rm /etc/systemd/system/system-health-sync.service /usr/local/bin/system-health-sync; systemctl daemon-reload
+
+references:
+  - title: "Ubuntu security logging documentation"
+    url: https://documentation.ubuntu.com/security/security-features/operating-system/security-logging/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

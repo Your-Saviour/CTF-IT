@@ -36,10 +36,13 @@ learning_objectives:
   - Distinguish temporary mitigations from a root-cause dependency upgrade
   - Verify the deployed library version without breaking application health
 estimated_minutes: 75
-references:
-  - https://logging.apache.org/log4j/2.x/security.html
-  - https://nvd.nist.gov/vuln/detail/CVE-2021-44228
 debrief:
   root_cause: User-controlled log messages reached JNDI lookup processing in vulnerable Log4j 2.14.1.
   remediation: Upgrade log4j-core and log4j-api to a fixed release and regression-test the application; JVM flags are not a durable dependency fix.
   attack_mapping: T1190 — Exploit Public-Facing Application
+
+references:
+  - title: "Vendor advisory — Log4Shell (CVE-2021-44228)"
+    url: https://logging.apache.org/log4j/2.x/security.html
+  - title: "NVD — Log4Shell (CVE-2021-44228)"
+    url: https://nvd.nist.gov/vuln/detail/CVE-2021-44228

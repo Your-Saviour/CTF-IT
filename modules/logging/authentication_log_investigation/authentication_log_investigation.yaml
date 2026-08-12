@@ -26,3 +26,9 @@ debrief:
   remediation: Document the source and target, then use the evidence to drive access control and credential response.
   attack_mapping: T1110.003 — Password Spraying
 suggested_fix: Record the source and target as key-value lines in /root/incident-findings/authentication-spray.txt.
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

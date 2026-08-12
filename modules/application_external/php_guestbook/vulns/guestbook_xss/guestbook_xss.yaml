@@ -34,3 +34,9 @@ hints:
   - "Review how user input is stored and displayed on the guestbook page"
   - "Check /opt/guestbook/messages.txt for raw HTML content"
   - "Restore contextual HTML encoding in /opt/guestbook/index.php, remove the planted entry, and test with a fresh script-tag message"
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

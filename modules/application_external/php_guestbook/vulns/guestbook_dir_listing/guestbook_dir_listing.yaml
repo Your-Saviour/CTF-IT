@@ -31,3 +31,9 @@ caldera:
     description: "Browse the web root directory listing to enumerate application files"
     command: |
       curl -s http://localhost:8080/ | grep -oP 'href="[^"]+"' | grep -v "^href=\"http" | head -20
+
+references:
+  - title: "Ubuntu Server security documentation"
+    url: https://documentation.ubuntu.com/server/explanation/security/intro-to-security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

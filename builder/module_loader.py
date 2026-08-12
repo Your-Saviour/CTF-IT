@@ -20,6 +20,31 @@ class RunStep:
 Step = Union[CopyStep, RunStep]
 
 
+@dataclass(frozen=True)
+class Reference:
+    title: str
+    url: str
+    legacy: bool = field(default=False, compare=False, repr=False)
+
+    def as_dict(self) -> dict[str, str]:
+        return {"title": self.title, "url": self.url}
+
+
+def _parse_references(entries: object) -> list[Reference]:
+    """Normalize legacy URL strings while retaining malformed entries for validation."""
+    if not isinstance(entries, list):
+        return [Reference(title="", url="")]
+    references = []
+    for entry in entries:
+        if isinstance(entry, str):
+            references.append(Reference(title=entry, url=entry, legacy=True))
+        elif isinstance(entry, dict):
+            references.append(Reference(title=entry.get("title", ""), url=entry.get("url", "")))
+        else:
+            references.append(Reference(title="", url=""))
+    return references
+
+
 def _parse_steps(data: dict) -> list[Step]:
     """Parse steps from YAML data, or convert legacy script field."""
     if "steps" in data:
@@ -71,7 +96,7 @@ class Module:
     learning_objectives: list[str] = field(default_factory=list)
     estimated_minutes: int = 0
     prerequisites: list[str] = field(default_factory=list)
-    references: list[str] = field(default_factory=list)
+    references: list[Reference] = field(default_factory=list)
     debrief: dict = field(default_factory=dict)
     suggested_fix: Optional[str] = None
     caldera: Optional[dict] = None
@@ -147,7 +172,7 @@ def load_all_modules() -> list[Module]:
             learning_objectives=data.get("learning_objectives", []),
             estimated_minutes=data.get("estimated_minutes", 0),
             prerequisites=data.get("prerequisites", data.get("requires", [])),
-            references=data.get("references", []),
+            references=_parse_references(data.get("references", [])),
             debrief=data.get("debrief", {}),
             suggested_fix=data.get("suggested_fix"),
             caldera=data.get("caldera"),

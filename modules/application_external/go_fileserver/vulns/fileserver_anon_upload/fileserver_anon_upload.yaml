@@ -33,3 +33,9 @@ caldera:
       echo '#!/bin/bash\nid' > /tmp/backdoor.sh
       curl -sk -X PUT "https://localhost:8000/files/backdoor.sh" --data-binary @/tmp/backdoor.sh
       curl -sk "https://localhost:8000/files/" | grep backdoor
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

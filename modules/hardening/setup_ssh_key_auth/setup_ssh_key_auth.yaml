@@ -24,3 +24,9 @@ hints:
   - "Key-based authentication is more secure than passwords for SSH"
   - "Generate an SSH key pair and add the public key to authorized_keys"
   - "Disable PasswordAuthentication in /etc/ssh/sshd_config and restart sshd"
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, event, inspect, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, inspect, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database import Base
@@ -130,6 +130,7 @@ class TeamTrainingCredential(Base):
 
 class VM(Base):
     __tablename__ = "vms"
+    __table_args__ = (Index("ix_vms_event_team", "event_id", "team_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     hostname: Mapped[str] = mapped_column(String(256), nullable=True)
@@ -182,6 +183,7 @@ class PlatformSettings(Base):
 
 class VMModule(Base):
     __tablename__ = "vm_modules"
+    __table_args__ = (Index("ix_vm_modules_vm_module", "vm_id", "module_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     vm_id: Mapped[int] = mapped_column(ForeignKey("vms.id"), nullable=False)
@@ -212,6 +214,7 @@ class VMModule(Base):
 
 class VerificationAttempt(Base):
     __tablename__ = "verification_attempts"
+    __table_args__ = (Index("ix_verification_attempts_assignment_created", "module_assignment_id", "created_at", "id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     module_assignment_id: Mapped[int] = mapped_column(ForeignKey("vm_modules.id"), nullable=False)
@@ -230,6 +233,7 @@ class HintReveal(Base):
     __tablename__ = "hint_reveals"
     __table_args__ = (
         UniqueConstraint("user_id", "module_assignment_id", "hint_index", name="uq_hint_reveal"),
+        Index("ix_hint_reveals_assignment_revealed", "module_assignment_id", "revealed_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

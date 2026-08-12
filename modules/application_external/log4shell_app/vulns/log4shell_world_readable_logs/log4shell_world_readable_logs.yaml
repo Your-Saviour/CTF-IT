@@ -32,3 +32,9 @@ caldera:
     command: |
       ls /var/log/logapp/
       cat /var/log/logapp/application.log 2>/dev/null | grep -i "jndi\|password\|secret\|token" | head -10
+
+references:
+  - title: "Ubuntu security logging documentation"
+    url: https://documentation.ubuntu.com/security/security-features/operating-system/security-logging/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

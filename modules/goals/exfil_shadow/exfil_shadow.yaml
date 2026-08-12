@@ -28,3 +28,9 @@ verification:
 revert_verification:
   type: file_absent
   path: /tmp/.exfil_shadow
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

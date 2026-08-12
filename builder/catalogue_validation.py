@@ -17,12 +17,26 @@ def validate_module(module: Module, known_ids: set[str]) -> list[str]:
             module.debrief.get(key) for key in ("root_cause", "remediation", "attack_mapping")
         ):
             errors.append("debrief requires root_cause, remediation, and attack_mapping")
-    if "cve" in module.tags and not module.references:
-        errors.append("CVE exercise requires an authoritative reference")
+    exercise = module.type in {"vulnerability", "hardening", "payload", "goal"}
+    if exercise and len(module.references) < 2:
+        errors.append("exercise requires at least two authoritative references")
     for reference in module.references:
-        parsed = urlparse(reference)
+        if reference.legacy:
+            errors.append("reference must use title/url object format")
+        if not isinstance(reference.title, str) or not reference.title.strip():
+            errors.append("reference title must not be empty")
+        if not isinstance(reference.url, str):
+            errors.append("reference URL must be a string")
+            continue
+        parsed = urlparse(reference.url)
         if parsed.scheme != "https" or not parsed.netloc:
-            errors.append(f"invalid reference: {reference}")
+            errors.append(f"invalid reference: {reference.url}")
+    if "cve" in module.tags:
+        hosts = {urlparse(reference.url).hostname or "" for reference in module.references}
+        has_vendor = any(host not in {"nvd.nist.gov", "www.cisa.gov", "cisa.gov"} for host in hosts)
+        has_government = bool(hosts & {"nvd.nist.gov", "www.cisa.gov", "cisa.gov"})
+        if not (has_vendor and has_government):
+            errors.append("CVE exercise requires vendor and NVD or CISA references")
     for dependency in [*module.requires, *module.prerequisites, *module.conflicts]:
         if dependency not in known_ids:
             errors.append(f"unknown dependency: {dependency}")

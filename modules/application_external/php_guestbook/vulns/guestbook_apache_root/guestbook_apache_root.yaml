@@ -32,3 +32,9 @@ caldera:
     command: |
       curl -s "http://localhost:8080/?cmd=id" 2>/dev/null || echo "Exploit requires code execution via an existing web vulnerability"
       grep -q "User root" /etc/apache2/apache2.conf && echo "Confirmed: Apache configured to run as root"
+
+references:
+  - title: "Ubuntu Server security documentation"
+    url: https://documentation.ubuntu.com/server/explanation/security/intro-to-security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

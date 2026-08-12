@@ -35,3 +35,9 @@ caldera:
       sysctl fs.suid_dumpable
       ulimit -c
       echo "Core dumps unrestricted — crash a SUID process to dump its memory for credential extraction"
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

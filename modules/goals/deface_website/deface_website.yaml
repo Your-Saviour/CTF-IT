@@ -31,3 +31,9 @@ revert_verification:
   type: http_response
   label: localhost_5000
   body_not_contains: "HACKED BY RED TEAM"
+
+references:
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

@@ -28,3 +28,9 @@ debrief:
   remediation: Remove the drop-in, validate the complete configuration, reload SSH, and confirm administrative access remains available.
   attack_mapping: T1098 — Account Manipulation
 suggested_fix: rm /etc/ssh/sshd_config.d/90-remote-maintenance.conf; sshd -t && systemctl reload ssh
+
+references:
+  - title: "Ubuntu OpenSSH server documentation"
+    url: https://documentation.ubuntu.com/server/how-to/security/openssh-server/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

@@ -27,3 +27,9 @@ debrief:
   remediation: Use a trusted registry and pin the exact reviewed digest with an update process.
   attack_mapping: T1525 — Implant Internal Image
 suggested_fix: Resolve the approved Ubuntu 24.04 digest and replace ubuntu:latest with ubuntu@sha256:<digest> in /opt/container-lab/compose.yaml.
+
+references:
+  - title: "Docker Engine security documentation"
+    url: https://docs.docker.com/engine/security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

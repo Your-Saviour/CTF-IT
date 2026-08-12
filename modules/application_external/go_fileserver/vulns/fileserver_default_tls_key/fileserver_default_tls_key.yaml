@@ -32,3 +32,9 @@ caldera:
     command: |
       cat /opt/fileserver/server.key | head -5
       echo "Private key exfiltrated — can now decrypt captured HTTPS sessions"
+
+references:
+  - title: "Ubuntu Server security documentation"
+    url: https://documentation.ubuntu.com/server/explanation/security/intro-to-security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

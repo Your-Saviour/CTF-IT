@@ -420,7 +420,7 @@ async def get_module(module_id: str, request: Request, db: Session = Depends(get
         "learning_objectives": module.learning_objectives,
         "estimated_minutes": module.estimated_minutes,
         "prerequisites": module.prerequisites,
-        "references": module.references,
+        "references": [reference.as_dict() for reference in module.references],
         "debrief": module.debrief,
         "stage": module.stage,
         "caldera": module.caldera,

@@ -32,3 +32,9 @@ caldera:
     command: |
       grep "nc -e /bin/bash" /root/.bashrc
       echo "Backdoor will fire on next root interactive login"
+
+references:
+  - title: "Ubuntu Server security documentation"
+    url: https://documentation.ubuntu.com/server/explanation/security/intro-to-security/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/

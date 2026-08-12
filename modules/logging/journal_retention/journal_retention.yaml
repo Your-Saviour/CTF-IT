@@ -30,3 +30,9 @@ debrief:
   remediation: Configure persistent storage with an explicit size bound and verify journald.
   attack_mapping: T1070 — Indicator Removal
 suggested_fix: Create /etc/systemd/journald.conf.d/retention.conf with Storage=persistent and SystemMaxUse=512M, then restart systemd-journald.
+
+references:
+  - title: "Ubuntu security logging documentation"
+    url: https://documentation.ubuntu.com/security/security-features/operating-system/security-logging/
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/
