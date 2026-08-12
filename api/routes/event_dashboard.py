@@ -12,6 +12,7 @@ from api.database import get_db
 from api.models import Event, Team, User, VM, VMGoal, VMModule
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient, get_caldera_api_key
+from api.services.verifier_account import scoring_enabled_vm_ids
 
 
 router = APIRouter(prefix="/admin/api/events", tags=["admin"])
@@ -60,6 +61,9 @@ async def event_dashboard_data(
     vm_ids = [vm.id for vm in vms]
     modules = db.query(VMModule).filter(VMModule.vm_id.in_(vm_ids)).all() if vm_ids else []
     goals = db.query(VMGoal).filter(VMGoal.vm_id.in_(vm_ids)).all() if vm_ids else []
+    enabled_vm_ids = scoring_enabled_vm_ids(db, vm_ids)
+    scoring_modules = [module for module in modules if module.vm_id in enabled_vm_ids]
+    scoring_goals = [goal for goal in goals if goal.vm_id in enabled_vm_ids]
 
     try:
         from builder.module_loader import load_all_modules
@@ -174,8 +178,8 @@ async def event_dashboard_data(
     team_results = []
     for team in teams:
         team_vm_ids = [vm.id for vm in vms if vm.team_id == team.id]
-        team_modules = [m for m in modules if m.vm_id in team_vm_ids and m.stage == "preapplied"]
-        team_goals = [g for g in goals if g.vm_id in team_vm_ids]
+        team_modules = [m for m in scoring_modules if m.vm_id in team_vm_ids and m.stage == "preapplied"]
+        team_goals = [g for g in scoring_goals if g.vm_id in team_vm_ids]
         completed = sum(1 for m in team_modules if m.completed)
         blue_defensive = sum(m.points for m in team_modules if m.completed)
         blue_reactive = sum(g.defend_points * g.defend_count for g in team_goals)
@@ -189,7 +193,7 @@ async def event_dashboard_data(
         })
     team_results.sort(key=lambda item: (-item["blue_total"], item["team_name"].lower()))
 
-    preapplied = [m for m in modules if m.stage == "preapplied"]
+    preapplied = [m for m in scoring_modules if m.stage == "preapplied"]
     bottleneck_groups: dict[str, list[VMModule]] = {}
     for module in preapplied:
         bottleneck_groups.setdefault(module.module_id, []).append(module)
@@ -235,8 +239,8 @@ async def event_dashboard_data(
 
     completed_total = sum(1 for module in preapplied if module.completed)
     blue_defensive_total = sum(module.points for module in preapplied if module.completed)
-    blue_reactive_total = sum(goal.defend_points * goal.defend_count for goal in goals)
-    red_total = sum(goal.red_points * goal.achievement_count for goal in goals)
+    blue_reactive_total = sum(goal.defend_points * goal.defend_count for goal in scoring_goals)
+    red_total = sum(goal.red_points * goal.achievement_count for goal in scoring_goals)
     ends_at = _utc(event.ends_at)
 
     return {

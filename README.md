@@ -103,13 +103,23 @@ local development Compose stack.
 
 Learner training is deliberately gated. Keep `LEARNER_TRAINING_ENABLED=false`
 while deploying a release, run `alembic upgrade head`, provision each team's
-training credential and each VM's restricted verifier account, then confirm
+training credential and each VM's protected `gt` (green-team) checker account, then confirm
 `GET /admin/api/events/{event_id}/readiness` returns `ready: true`. Only then set
 the flag to `true` and restart the API. Verification defaults to a 300-second
 interval, five concurrent VMs, and a 10-second per-check timeout; override these
 with `VERIFICATION_INTERVAL_SECONDS`, `VERIFICATION_VM_CONCURRENCY`, and
 `VERIFICATION_TIMEOUT_SECONDS` when capacity testing justifies it. Hint reveals
 are recorded for instructor analytics and never reduce points.
+
+Host scoring checks execute inside each target VM through `gt`; the API can only
+submit structured, allow-listed checks through its forced SSH command. Every
+score path first passes this VM-local integrity gate, while HTTP probes still
+originate from the API. The
+account, key, checker, sudo rule, ownership, modes, password state, and group
+membership are sealed during provisioning. If participants modify that
+boundary, checks fail closed and scoring for that VM stops until an organizer
+reprovisions the checker. This is intentional exercise behavior: `gt` is
+green-team infrastructure and must not be touched.
 Set all generated files to owner-only access, then start the stack:
 
 ```bash

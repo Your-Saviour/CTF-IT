@@ -1,13 +1,69 @@
 #!/usr/bin/env python3
 """Root-owned forced-command gateway for structured, read-only CTF checks."""
+import hashlib
 import json
 import os
+import pwd
 import re
+import stat
 import subprocess
 import sys
 
 IDENT = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
 PATH = re.compile(r"^/(?!.*(?:^|/)\.\.(?:/|$))[^\x00\r\n]{0,1023}$")
+GT_USER = "gt"
+SEAL_PATH = "/etc/ctf/gt-integrity.json"
+GATEWAY_PATH = "/usr/local/sbin/ctf-audit-gateway"
+SUDOERS_PATH = "/etc/sudoers.d/gt"
+AUTHORIZED_KEYS_PATH = "/home/gt/.ssh/authorized_keys"
+
+
+def digest(path):
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def metadata(path):
+    info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode):
+        raise ValueError()
+    return {"uid": info.st_uid, "gid": info.st_gid, "mode": stat.S_IMODE(info.st_mode)}
+
+
+def account_state(account):
+    import grp
+    with open("/etc/shadow", encoding="utf-8") as handle:
+        shadow = next(line.rstrip("\n") for line in handle if line.startswith(GT_USER + ":"))
+    groups = sorted(group.gr_name for group in grp.getgrall() if GT_USER in group.gr_mem)
+    primary = grp.getgrgid(account.pw_gid)
+    return {"uid": account.pw_uid, "gid": account.pw_gid, "home": account.pw_dir,
+            "shell": account.pw_shell, "gecos": account.pw_gecos,
+            "shadow_sha256": hashlib.sha256(shadow.encode()).hexdigest(), "groups": groups,
+            "primary_group": {"name": primary.gr_name, "gid": primary.gr_gid,
+                              "members": sorted(primary.gr_mem)}}
+
+
+def integrity_ok():
+    """Fail closed when the gt account or a checker control file changed."""
+    try:
+        if metadata(SEAL_PATH) != {"uid": 0, "gid": 0, "mode": 0o400}:
+            return False
+        with open(SEAL_PATH, encoding="utf-8") as handle:
+            seal = json.load(handle)
+        account = pwd.getpwnam(GT_USER)
+        if seal["account"] != account_state(account):
+            return False
+        if account.pw_dir != "/home/gt" or account.pw_shell != "/bin/bash":
+            return False
+        for path, expected in seal["files"].items():
+            actual = metadata(path)
+            if "sha256" in expected:
+                actual["sha256"] = digest(path)
+            if actual != expected:
+                return False
+        return True
+    except (KeyError, OSError, StopIteration, ValueError, json.JSONDecodeError):
+        return False
 
 
 def run(args):
@@ -22,6 +78,8 @@ def valid(value, pattern):
 def check(spec):
     kind = {"password_changed":"password_hash_changed", "port_closed":"listening_port",
             "process_running":"process_state", "user_not_exists":"user_absent"}.get(spec.get("type"), spec.get("type"))
+    if kind == "integrity":
+        return 0, ""
     if kind in {"all_of", "any_of"}:
         values = [check(child)[0] == 0 for child in spec.get("checks", [])]
         passed = all(values) if kind == "all_of" else any(values)
@@ -120,6 +178,10 @@ def check(spec):
         return status, output.split(":", 2)[1] if status == 0 and ":" in output else ""
     raise ValueError()
 
+
+if not integrity_ok():
+    print(json.dumps({"status": 3, "value": ""}))
+    sys.exit(3)
 
 try:
     payload = os.environ.get("SSH_ORIGINAL_COMMAND", "")

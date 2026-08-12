@@ -50,11 +50,17 @@ def test_disposable_vm_training_lifecycle():
         assert provision_team_credential(db, credential)["failed_vm_ids"] == []
         assert provision_verifier(vm, db)
 
-        # The restricted account rejects arbitrary commands and accepts only a
+        # The VM-local gt account rejects arbitrary commands and accepts only a
         # structured allow-listed audit request.
         verifier = connect_verifier(vm, db)
         _, stdout, _ = verifier.exec_command(json.dumps({"type": "shell", "command": "id"}))
         assert json.loads(stdout.read().decode())["status"] == 2
+
+        # Changing the gt boundary deliberately disables scoring for the VM.
+        root.exec_command("chmod 0644 /home/gt/.ssh/authorized_keys")[1].channel.recv_exit_status()
+        _, stdout, _ = verifier.exec_command(json.dumps({"type": "file_exists", "path": "/etc/passwd"}))
+        assert json.loads(stdout.read().decode())["status"] == 3
+        assert provision_verifier(vm, db)
 
         spec = {"type": "cron_not_present", "pattern": "beacon.sh"}
         assert asyncio.run(verify_spec(spec, vm)).result == "fail"

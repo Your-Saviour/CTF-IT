@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from api.database import Base, get_db
 from api.models import Event, Team, VM, VMGoal, User, VMModule, PlatformSettings
 from api.main import app
-from api.routes.vm_goals import _run_remote_verification
+from api.routes.vm_goals import _run_control_verification
 
 
 # ── Shared in-memory SQLite (StaticPool keeps one connection) ─────────────────
@@ -203,8 +203,9 @@ def test_check_goal_http_response_achieved(client, seeded_data):
     mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client_instance)
     mock_client_cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
-        with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
+    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]), \
+         patch("api.services.verification._ssh", new=AsyncMock(return_value=(0, ""))):
+        with patch("api.services.verification.httpx.AsyncClient", return_value=mock_client_cm):
             resp = c.post(f"/admin/api/vms/{vm.id}/goals/{goal_id}/check")
 
     assert resp.status_code == 200
@@ -279,8 +280,9 @@ def test_check_goal_revert_to_defended(client, seeded_data):
     mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client_instance)
     mock_client_cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
-        with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
+    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]), \
+         patch("api.services.verification._ssh", new=AsyncMock(return_value=(0, ""))):
+        with patch("api.services.verification.httpx.AsyncClient", return_value=mock_client_cm):
             resp = c.post(f"/admin/api/vms/{vm.id}/goals/{goal_id}/check")
 
     assert resp.status_code == 200
@@ -332,8 +334,9 @@ def test_check_goal_reexploit_from_defended(client, seeded_data):
     mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client_instance)
     mock_client_cm.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]):
-        with patch("api.routes.vm_goals.httpx.AsyncClient", return_value=mock_client_cm):
+    with patch("api.routes.vm_goals.load_all_modules", return_value=[mock_module]), \
+         patch("api.services.verification._ssh", new=AsyncMock(return_value=(0, ""))):
+        with patch("api.services.verification.httpx.AsyncClient", return_value=mock_client_cm):
             resp = c.post(f"/admin/api/vms/{vm.id}/goals/{goal_id}/check")
 
     assert resp.status_code == 200
@@ -349,39 +352,14 @@ def test_check_goal_reexploit_from_defended(client, seeded_data):
     db.close()
 
 
-@pytest.mark.parametrize(
-    ("verification", "exit_status", "expected"),
-    [
-        ({"type": "service_running", "service": "sysmon-helper", "expected": "active"}, 0, True),
-        ({"type": "service_running", "service": "sysmon-helper", "expected": "inactive"}, 3, True),
-        ({"type": "file_exists", "path": "/tmp/.exfil_shadow"}, 0, True),
-        ({"type": "file_absent", "path": "/tmp/.exfil_shadow"}, 1, True),
-        ({"type": "file_exists", "path": "/tmp/.exfil_shadow"}, 1, False),
-    ],
-)
-def test_ssh_verification_types(seeded_data, verification, exit_status, expected):
+def test_control_verification_fails_closed_without_gt_checker(seeded_data):
+    from api.services.verification import VerificationResult
     vm = seeded_data["vm"]
     db = _Session()
-    with patch(
-        "api.routes.vm_goals._run_ssh_command",
-        new=AsyncMock(return_value=exit_status),
-    ):
-        passed, error = asyncio.run(_run_remote_verification(verification, vm, db))
-    db.close()
-    assert error is None
-    assert passed is expected
-
-
-def test_ssh_verification_rejects_unsafe_or_incomplete_specs(seeded_data):
-    vm = seeded_data["vm"]
-    db = _Session()
-    cases = [
-        {"type": "file_exists", "path": "relative/path"},
-        {"type": "service_running", "service": ""},
-        {"type": "service_running", "service": "sshd", "expected": "maybe"},
-    ]
-    for verification in cases:
-        passed, error = asyncio.run(_run_remote_verification(verification, vm, db))
-        assert passed is False
-        assert error
+    spec = {"type": "file_exists", "path": "/tmp/goal"}
+    with patch("api.services.verification.verify_spec", new=AsyncMock(
+        return_value=VerificationResult("unavailable", "not ready", "target_unavailable")
+    )):
+        result = asyncio.run(_run_control_verification(spec, vm))
+    assert result == (False, "not ready")
     db.close()

@@ -461,6 +461,7 @@ async def caldera_scoreboard(
     - Red offensive score: goal achievements (achievement_count × red_points)
     """
     from api.models import Event, Team, VM, VMModule, VMGoal
+    from api.services.verifier_account import scoring_enabled_vm_ids
 
     admin = require_admin(request, db)
     if not admin:
@@ -484,6 +485,7 @@ async def caldera_scoreboard(
     modules = db.query(VMModule).filter(VMModule.vm_id.in_(vm_ids)).all()
     # Load all VMGoals for these VMs
     goals = db.query(VMGoal).filter(VMGoal.vm_id.in_(vm_ids)).all()
+    enabled_vm_ids = scoring_enabled_vm_ids(db, vm_ids)
 
     # Index by vm_id
     vm_modules: dict[int, list[VMModule]] = {}
@@ -500,20 +502,22 @@ async def caldera_scoreboard(
     def _vm_scores(vm_id: int) -> dict:
         mods = vm_modules.get(vm_id, [])
         gls = vm_goals.get(vm_id, [])
+        scoring_enabled = vm_id in enabled_vm_ids
 
         blue_defensive = sum(
             m.points for m in mods
-            if m.completed and m.stage == "preapplied"
+            if scoring_enabled and m.completed and m.stage == "preapplied"
         )
         blue_reactive = sum(
-            g.defend_points * g.defend_count for g in gls
+            g.defend_points * g.defend_count for g in gls if scoring_enabled
         )
         red_offensive = sum(
-            g.red_points * g.achievement_count for g in gls
+            g.red_points * g.achievement_count for g in gls if scoring_enabled
         )
         return {
             "vm_id": vm_id,
             "hostname": vm_map[vm_id].hostname,
+            "scoring_enabled": scoring_enabled,
             "blue_defensive": blue_defensive,
             "blue_reactive": blue_reactive,
             "blue_total": blue_defensive + blue_reactive,

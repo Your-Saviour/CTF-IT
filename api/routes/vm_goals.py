@@ -1,7 +1,5 @@
-import asyncio
 from datetime import datetime, timezone
 
-import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -99,55 +97,10 @@ async def check_vm_goal(
     return _goal_dict(goal)
 
 
-async def _run_remote_verification(
-    verification: dict,
-    vm: VM,
-    db: Session | None = None,
+async def _run_control_verification(
+    verification: dict, vm: VM
 ) -> tuple[bool, str | None]:
-    """Compatibility wrapper over the platform-wide verification service."""
-    from api.services.verification import _command, verify_spec
-
-    async def legacy_executor(spec):
-        status = await _run_ssh_command(vm, db, _command(spec))
-        kind = spec.get("type")
-        if kind in {"file_absent", "file_not_contains", "user_not_exists", "port_closed"}:
-            status = 0 if status != 0 else 1
-        elif kind in {"service_running", "service_state"} and spec.get("expected") in {"inactive", "failed"}:
-            status = 0 if status != 0 else 1
-        return status, ""
-
-    result = await verify_spec(verification, vm, ssh_executor=legacy_executor)
-    error = result.summary if result.result == "invalid" else None
-    return result.passed, error
-
-
-async def _run_control_verification(verification: dict, vm: VM) -> tuple[bool, str | None]:
-    """Production goal checks use the same restricted verifier as training."""
+    """Run through the VM-local gt checker; fail closed if it was modified."""
     from api.services.verification import verify_spec
     result = await verify_spec(verification, vm)
-    return result.passed, result.summary if result.result == "invalid" else None
-
-
-async def _run_ssh_command(vm: VM, db: Session, command: str) -> int:
-    """Execute a read-only verification command using the platform SSH key."""
-    def execute() -> int:
-        from api.database import SessionLocal
-        from api.services.ssh_connection import connect_vm
-
-        thread_db = SessionLocal()
-        client = None
-        try:
-            thread_vm = thread_db.query(VM).filter(VM.id == vm.id).first()
-            if not thread_vm:
-                return 255
-            client = connect_vm(thread_vm, thread_db)
-            _, stdout, _ = client.exec_command(command, timeout=10)
-            return stdout.channel.recv_exit_status()
-        except Exception:
-            return 255
-        finally:
-            if client:
-                client.close()
-            thread_db.close()
-
-    return await asyncio.to_thread(execute)
+    return result.passed, result.summary if result.result in {"invalid", "unavailable"} else None

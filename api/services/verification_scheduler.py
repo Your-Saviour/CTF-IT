@@ -30,12 +30,17 @@ async def _check_vm(vm_id: int, definitions: dict, semaphore: asyncio.Semaphore)
             assignments = db.query(VMModule).filter(VMModule.vm_id == vm.id, VMModule.stage == "preapplied").all()
 
             def open_client():
+                import paramiko
                 from api.database import SessionLocal
-                from api.services.verifier_account import connect_verifier
+                from api.services.verifier_account import connect_verifier, mark_verifier_tampered
                 connection_db = SessionLocal()
                 try:
                     current = connection_db.query(VM).filter(VM.id == vm_id).one()
-                    return connect_verifier(current, connection_db)
+                    try:
+                        return connect_verifier(current, connection_db)
+                    except paramiko.AuthenticationException:
+                        mark_verifier_tampered(connection_db, vm_id)
+                        raise
                 finally:
                     connection_db.close()
 
@@ -54,7 +59,11 @@ async def _check_vm(vm_id: int, definitions: dict, semaphore: asyncio.Semaphore)
                         return int(payload["status"]), str(payload.get("value", ""))
                     except Exception:
                         return 255, ""
-                return await asyncio.to_thread(execute)
+                result = await asyncio.to_thread(execute)
+                if result[0] == 3:
+                    from api.services.verifier_account import mark_verifier_tampered
+                    mark_verifier_tampered(db, vm_id)
+                return result
 
             for assignment in assignments:
                 definition = definitions.get(assignment.module_id)

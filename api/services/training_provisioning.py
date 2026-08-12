@@ -14,8 +14,12 @@ from builder.module_loader import load_all_modules
 
 def finalize_training_vm(db: Session, vm) -> dict:
     assignments = db.query(VMModule).filter(VMModule.vm_id == vm.id, VMModule.stage == "preapplied").all()
+    # Goal verification also uses the restricted verifier account, so install
+    # it even when this VM has no learner-facing, pre-applied assignments.
+    verifier_ok = provision_verifier(vm, db)
     if not assignments:
-        return {"verifier": "not_applicable", "credential": "not_applicable", "baselines": 0}
+        return {"verifier": "provisioned" if verifier_ok else "failed",
+                "credential": "not_applicable", "baselines": 0}
     credential = vm.team.training_credential
     if credential is None:
         credential = generate_credential(vm.team)
@@ -31,7 +35,6 @@ def finalize_training_vm(db: Session, vm) -> dict:
     else:
         credential.status = "partial"
         credential.last_error_code = "vm_provision_failed"
-    verifier_ok = provision_verifier(vm, db)
     definitions = {module.id: module for module in load_all_modules()}
     captured = 0
     if verifier_ok:

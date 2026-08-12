@@ -195,8 +195,9 @@ def _command(spec: dict) -> str:
 
 async def _ssh(vm: VM, spec: dict) -> tuple[int, str]:
     def execute() -> tuple[int, str]:
+        import paramiko
         from api.database import SessionLocal
-        from api.services.verifier_account import connect_verifier
+        from api.services.verifier_account import connect_verifier, mark_verifier_tampered
         db = SessionLocal()
         client = None
         try:
@@ -207,10 +208,16 @@ async def _ssh(vm: VM, spec: dict) -> tuple[int, str]:
             _, stdout, _ = client.exec_command(json.dumps(spec, separators=(",", ":")), timeout=CHECK_TIMEOUT)
             output = stdout.read(4096).decode("utf-8", "replace").strip()
             transport_status = stdout.channel.recv_exit_status()
-            if transport_status not in {0, 1, 2}:
+            if transport_status not in {0, 1, 2, 3}:
                 return 255, ""
             payload = json.loads(output)
-            return int(payload["status"]), str(payload.get("value", ""))
+            status = int(payload["status"])
+            if status == 3:
+                mark_verifier_tampered(db, vm.id)
+            return status, str(payload.get("value", ""))
+        except paramiko.AuthenticationException:
+            mark_verifier_tampered(db, vm.id)
+            return 3, ""
         except Exception:
             return 255, ""
         finally:
@@ -291,6 +298,15 @@ async def verify_spec(spec: dict, vm: VM, baseline: dict[str, str] | None = None
     started = time.monotonic()
     try:
         validate_spec(spec)
+        # Every scoring path, including API-originated HTTP checks, first proves
+        # that the VM's protected gt checker boundary is intact.
+        integrity_status, _ = await (
+            ssh_executor({"type": "integrity"}) if ssh_executor else _ssh(vm, {"type": "integrity"})
+        )
+        if integrity_status != 0:
+            code = "checker_integrity_failed" if integrity_status == 3 else "target_unavailable"
+            return VerificationResult("unavailable", "Scoring is disabled because the VM checker is unavailable.",
+                                      code, int((time.monotonic()-started)*1000))
         passed, unavailable = await _evaluate(spec, vm, baseline or {}, ssh_executor)
         if unavailable:
             return VerificationResult("unavailable", "Verification is temporarily unavailable.", "target_unavailable", int((time.monotonic()-started)*1000))

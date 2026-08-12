@@ -13,6 +13,7 @@ from api.models import AdminAudit, HintReveal, Team, User, VerificationAttempt, 
 from api.services.authorization import learner_assignment, participant
 from api.services.secrets import decrypt_secret
 from api.services.verification import verify_assignment
+from api.services.verifier_account import scoring_enabled_vm_ids
 from builder.module_loader import load_all_modules
 
 router = APIRouter(prefix="/api", tags=["learner"])
@@ -60,10 +61,11 @@ def _module_payload(assignment: VMModule, definition, revealed: set[int]) -> dic
 
 def _score(db: Session, user: User, assignments: list[VMModule]) -> dict:
     goals = db.query(VMGoal).join(VM).filter(VM.team_id == user.team_id, VM.event_id == user.event_id).all()
-    defensive = sum(item.points for item in assignments if item.status == "completed")
-    reactive = sum(goal.defend_points * goal.defend_count for goal in goals)
+    enabled_ids = scoring_enabled_vm_ids(db, {item.vm_id for item in assignments} | {goal.vm_id for goal in goals})
+    defensive = sum(item.points for item in assignments if item.vm_id in enabled_ids and item.status == "completed")
+    reactive = sum(goal.defend_points * goal.defend_count for goal in goals if goal.vm_id in enabled_ids)
     total = len(assignments)
-    completed = sum(item.status == "completed" for item in assignments)
+    completed = sum(item.vm_id in enabled_ids and item.status == "completed" for item in assignments)
     return {"blue_defensive": defensive, "blue_reactive": reactive,
             "total": defensive + reactive, "completed": completed, "assigned": total,
             "completion_percentage": round(completed * 100 / total, 1) if total else 0}
@@ -194,10 +196,11 @@ async def scoreboard(request: Request, db: Session = Depends(get_db)):
         modules = db.query(VMModule).join(VM).filter(VM.team_id == team.id, VM.event_id == user.event_id,
             VMModule.stage == "preapplied").all()
         goals = db.query(VMGoal).join(VM).filter(VM.team_id == team.id, VM.event_id == user.event_id).all()
-        defensive = sum(module.points for module in modules if module.status == "completed")
-        reactive = sum(goal.defend_points * goal.defend_count for goal in goals)
-        red = sum(goal.red_points * goal.achievement_count for goal in goals)
-        completed = sum(module.status == "completed" for module in modules)
+        enabled_ids = scoring_enabled_vm_ids(db, {module.vm_id for module in modules} | {goal.vm_id for goal in goals})
+        defensive = sum(module.points for module in modules if module.vm_id in enabled_ids and module.status == "completed")
+        reactive = sum(goal.defend_points * goal.defend_count for goal in goals if goal.vm_id in enabled_ids)
+        red = sum(goal.red_points * goal.achievement_count for goal in goals if goal.vm_id in enabled_ids)
+        completed = sum(module.vm_id in enabled_ids and module.status == "completed" for module in modules)
         rows.append({"team_id": team.id, "team_name": team.name, "blue_defensive": defensive,
                      "blue_reactive": reactive, "total_score": defensive + reactive,
                      "completion_percentage": round(completed * 100 / len(modules), 1) if modules else 0,

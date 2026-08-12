@@ -80,6 +80,7 @@ The selector (`builder/selector.py`) runs in ordered phases: (1) application mod
 ### Key Design Decisions
 
 - **Admin bootstrap**: the first registration on a fresh database must supply `ADMIN_BOOTSTRAP_TOKEN`; only that account is granted `is_admin = True`.
+- **VM-local scoring**: verification executes in each VM through the dedicated `gt` green-team account and a forced, allow-listed checker command. Provisioning seals the account and checker control files; any participant modification makes verification unavailable and therefore stops scoring on that VM until reprovisioned.
 - **Docker access**: production services use least-privilege Docker socket proxies. The API proxy permits the container restart needed by `POST /admin/caldera-setup`; the host socket is not mounted into the API or Dockhand containers.
 
 ### Multi-Event System
@@ -224,7 +225,7 @@ Each achievement increments `VMGoal.achievement_count`; each defence increments 
 
 **VMGoal API** (`api/routes/vm_goals.py`):
 - `GET /admin/vms/{vm_id}/goals` — list goal states for a VM
-- `POST /admin/vms/{vm_id}/goals/{goal_id}/check` — run `verification` + `revert_verification` against a VM and transition state. Remote checks support `http_response`, `service_running`, `file_exists`, and `file_absent`; SSH checks use the platform key and a per-VM pinned host key.
+- `POST /admin/vms/{vm_id}/goals/{goal_id}/check` — run `verification` + `revert_verification` against a VM and transition state. Host checks execute inside the VM through the protected `gt` checker account and a per-VM pinned host key; HTTP checks originate from the API.
 
 **Scoring model**:
 - Blue defensive: sum of `points` for completed `preapplied` VMModules (unchanged from existing flow)
