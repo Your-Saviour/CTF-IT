@@ -133,6 +133,10 @@ async def register(
     user.is_admin = True
 
     db.add(user)
+    db.flush()
+    if not user.is_admin and user.team_id:
+        from api.services.gamenet import ensure_user_vpn_credential
+        ensure_user_vpn_credential(db, user)
     db.commit()
     db.refresh(user)
 
@@ -225,6 +229,10 @@ async def redeem_invitation(
         is_admin=record.intended_is_admin,
     )
     db.add(user)
+    db.flush()
+    if not user.is_admin and user.team_id:
+        from api.services.gamenet import ensure_user_vpn_credential
+        ensure_user_vpn_credential(db, user)
     db.commit()
     db.refresh(user)
     learner_enabled = os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}

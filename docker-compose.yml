@@ -5,6 +5,10 @@ services:
       target: runtime
     ports:
       - "${API_PORT:-8080}:8000"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     volumes:
       - api_data:/app/data
     env_file: .env
@@ -13,7 +17,6 @@ services:
       - COOKIE_SECURE=false
       - AGENT_API_URL=http://ai-agent:8000/api/agent
       - AGENT_API_KEY=${AGENT_API_KEY:-}
-      - LEARNER_TRAINING_ENABLED=${LEARNER_TRAINING_ENABLED:-false}
       - VERIFICATION_INTERVAL_SECONDS=${VERIFICATION_INTERVAL_SECONDS:-300}
       - VERIFICATION_VM_CONCURRENCY=${VERIFICATION_VM_CONCURRENCY:-5}
       - VERIFICATION_TIMEOUT_SECONDS=${VERIFICATION_TIMEOUT_SECONDS:-10}

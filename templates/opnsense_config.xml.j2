@@ -53,6 +53,7 @@
       <ssl-certref>self-signed</ssl-certref>
       <nohttpreferercheck>1</nohttpreferercheck>
       <noantilockout>1</noantilockout>
+      <interfaces>lan</interfaces>
     </webgui>
   </system>
   <interfaces>
@@ -79,6 +80,7 @@
   <gateways/>
   <staticroutes/>
   <filter>
+{% if temporary_management | default(true) %}
     <rule>
       <type>pass</type>
       <interface>wan</interface>
@@ -109,6 +111,7 @@
       </destination>
       <descr>Allow SSH access</descr>
     </rule>
+{% endif %}
     <rule>
       <type>pass</type>
       <interface>wan</interface>

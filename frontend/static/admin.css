@@ -145,7 +145,10 @@ body.admin-app::after { opacity: .45; }
 .close-button span::after { content: ''; transform: rotate(90deg); }
 .nav-backdrop { display: none; }
 
-.admin-main { max-width: 1480px; margin: 0 auto; padding: 2rem 2.25rem 4rem; }
+.admin-main { min-width: 0; max-width: 1480px; margin: 0 auto; padding: 2rem 2.25rem 4rem; }
+.admin-stage { min-width: 0; }
+.admin-main .card,
+.admin-main .card-body { min-width: 0; max-width: 100%; }
 .page-header {
     display: flex;
     align-items: flex-end;
@@ -280,6 +283,18 @@ body.admin-app input:-webkit-autofill {
 .empty-state { padding: 2.5rem 1rem; color: var(--text-secondary); text-align: center; }
 .status { display: inline-flex; padding: .2rem .5rem; border: 1px solid var(--border); border-radius: 3px; font-size: .68rem; text-transform: uppercase; }
 .status.open, .status.ready, .status.active { color: var(--green); border-color: rgba(0,230,118,.35); }
+
+.gamenet-editor .raw-json { display: block; width: 100%; font-family: "JetBrains Mono", monospace; }
+.gamenet-rail { margin-top: 16px; border: 1px solid var(--border); background: #000; padding: 14px; font-variant-numeric: tabular-nums; }
+.gamenet-node { position: relative; display: flex; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid var(--border); color: var(--text-primary); }
+.gamenet-node + .gamenet-node, .gamenet-site + .gamenet-site { margin-top: 8px; }
+.gamenet-node span { color: var(--text-muted); text-align: right; }
+.gamenet-site { margin: 8px 0 0 24px; padding-left: 15px; border-left: 1px solid var(--green); }
+.gamenet-node.gateway, .gamenet-node.firewall { border-color: rgba(0,230,118,.45); }
+.gamenet-node.zone.blue { border-left: 3px solid #00e676; }
+.gamenet-node.zone.red { border-left: 3px solid #ff3b30; }
+.gamenet-total { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-muted); }
+.gamenet-total strong { color: var(--green); }
 .status.failed, .status.critical { color: var(--red); border-color: rgba(255,23,68,.35); }
 
 .drawer-backdrop { position: fixed; inset: 0; z-index: 70; display: none; background: rgba(8,9,13,.78); }

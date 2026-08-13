@@ -7,16 +7,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 FROM base AS test
 
-COPY requirements-dev.txt .
-RUN pip install --no-cache-dir -r requirements-dev.txt
+COPY requirements-dev.txt requirements-agent.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt -r requirements-agent.txt
 
 COPY . .
 
-ENV PYTHONPATH=/app:/app/ai_agent:$PYTHONPATH
+ENV PYTHONPATH=/app:/app/ai_agent
 
 CMD ["python", "-m", "pytest", "tests/"]
 
 FROM base AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY . .
 

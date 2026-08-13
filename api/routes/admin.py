@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import secrets
+from collections import Counter
 from datetime import timedelta
 from typing import Optional
 from urllib.parse import urljoin
@@ -19,9 +20,21 @@ from api.routes.auth import _token_digest, get_current_user
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 
+async def _live_vpc_counts() -> dict[str, int]:
+    """Return current Vultr VPC consumption by location for capacity gating."""
+    key = os.environ.get("VULTR_API_KEY")
+    if not key:
+        return {}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get("https://api.vultr.com/v2/vpcs", params={"per_page": 500},
+                                    headers={"Authorization": f"Bearer {key}"})
+    response.raise_for_status()
+    return dict(Counter(vpc.get("region") for vpc in response.json().get("vpcs", []) if vpc.get("region")))
+
+
 class PlanPreviewRequest(BaseModel):
     quota: Optional[dict] = None
-    vm_quota: Optional[dict] = None
+    infrastructure: Optional[dict] = None
 
 
 class UserUpdateRequest(BaseModel):
@@ -98,10 +111,18 @@ async def overview(request: Request, db: Session = Depends(get_db)):
     events = db.query(Event).order_by(Event.created_at.desc()).all()
     vms = db.query(VM).all()
     users = db.query(User).all()
-    event_counts = {state: sum(e.status == state for e in events) for state in ("draft", "open", "stopped")}
+    event_counts = {state: sum(e.status == state for e in events)
+                    for state in ("draft", "provisioning", "provision_failed", "open", "stopped")}
     vm_states = sorted({vm.status or "unknown" for vm in vms})
     agent_states = sorted({vm.agent_status or "not_deployed" for vm in vms})
     attention = []
+    for event in events:
+        if event.status == "provision_failed":
+            attention.append({
+                "severity": "critical", "kind": "provisioning",
+                "message": f"{event.name} provisioning failed",
+                "href": f"/admin/events/{event.id}/dashboard",
+            })
     for vm in vms:
         if vm.status == "failed" or vm.provision_error:
             attention.append({
@@ -238,6 +259,10 @@ async def update_user(
     target.event_id = new_event_id
     target.team_id = None if new_admin else new_team_id
     if changed:
+        from api.services.gamenet import ensure_user_vpn_credential, revoke_user_vpn
+        revoke_user_vpn(db, target.id)
+        if not target.is_admin and target.team_id:
+            ensure_user_vpn_credential(db, target)
         target.session_version += 1
         target.updated_at = utcnow()
         _audit(
@@ -268,6 +293,9 @@ async def set_user_activation(
         target.deactivated_at = None if body.active else utcnow()
         target.updated_at = utcnow()
         target.session_version += 1
+        if not body.active:
+            from api.services.gamenet import revoke_user_vpn
+            revoke_user_vpn(db, target.id)
         _audit(db, admin, "user_reactivated" if body.active else "user_deactivated", target)
         db.commit()
     return _user_payload(target)
@@ -514,7 +542,7 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "started_at": e.started_at.isoformat() if e.started_at else None,
             "ends_at": e.ends_at.isoformat() if e.ends_at else None,
             "quota": json.loads(e.quota),
-            "vm_quota": json.loads(e.vm_quota) if e.vm_quota else None,
+            "infrastructure": json.loads(e.infrastructure) if e.infrastructure else None,
             "user_count": user_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
         })
@@ -541,7 +569,7 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "started_at": event.started_at.isoformat() if event.started_at else None,
         "ends_at": event.ends_at.isoformat() if event.ends_at else None,
         "quota": json.loads(event.quota),
-        "vm_quota": json.loads(event.vm_quota) if event.vm_quota else None,
+        "infrastructure": json.loads(event.infrastructure) if event.infrastructure else None,
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
     }
@@ -573,21 +601,21 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
                 status_code=422,
             )
 
-    if "vm_quota" in body:
-        from builder.vm_quota_validation import validate_vm_quota
+    if "infrastructure" in body:
+        from builder.infrastructure_validation import validate_infrastructure
         from builder.base_loader import load_all_bases
         valid_base_ids = {b.id for b in load_all_bases() if not b.disabled}
-        errors = validate_vm_quota(body["vm_quota"], valid_base_ids)
+        errors = validate_infrastructure(body["infrastructure"], valid_base_ids)
         if errors:
             return JSONResponse(
-                {"error": "Invalid vm_quota", "details": errors},
+                {"error": "Invalid infrastructure", "details": errors},
                 status_code=422,
             )
 
     event = Event(
         name=body.get("name", "CTF Event"),
         quota=json.dumps(body.get("quota", {})),
-        vm_quota=json.dumps(body["vm_quota"]) if "vm_quota" in body else None,
+        infrastructure=json.dumps(body["infrastructure"]) if "infrastructure" in body else None,
         status="draft",
         description=body.get("description"),
         welcome_message=body.get("welcome_message"),
@@ -612,6 +640,11 @@ async def update_event(
         return JSONResponse({"error": "Event not found"}, status_code=404)
 
     body = await request.json()
+    if event.status != "draft" and "infrastructure" in body:
+        return JSONResponse(
+            {"error": "infrastructure cannot be edited after provisioning begins; destroy and reprovision the GameNet"},
+            status_code=409,
+        )
 
     time_limit = body.get("time_limit_minutes")
     if "time_limit_minutes" in body and time_limit is not None and (
@@ -632,20 +665,20 @@ async def update_event(
             )
         event.quota = json.dumps(body["quota"])
 
-    if "vm_quota" in body:
-        if body["vm_quota"] is None:
-            event.vm_quota = None
+    if "infrastructure" in body:
+        if body["infrastructure"] is None:
+            event.infrastructure = None
         else:
-            from builder.vm_quota_validation import validate_vm_quota
+            from builder.infrastructure_validation import validate_infrastructure
             from builder.base_loader import load_all_bases
             valid_base_ids = {b.id for b in load_all_bases() if not b.disabled}
-            errors = validate_vm_quota(body["vm_quota"], valid_base_ids)
+            errors = validate_infrastructure(body["infrastructure"], valid_base_ids)
             if errors:
                 return JSONResponse(
-                    {"error": "Invalid vm_quota", "details": errors},
+                    {"error": "Invalid infrastructure", "details": errors},
                     status_code=422,
                 )
-            event.vm_quota = json.dumps(body["vm_quota"])
+            event.infrastructure = json.dumps(body["infrastructure"])
 
     if "name" in body:
         event.name = body["name"]
@@ -675,11 +708,11 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
             status_code=409,
         )
 
-    # If vm_quota is defined, kick off auto-provisioning for all teams
-    if event.vm_quota:
+    # A GameNet event is not public until lockdown and connectivity checks pass.
+    if event.infrastructure:
         from api.models import Team
 
-        vm_quota = json.loads(event.vm_quota)
+        infrastructure = json.loads(event.infrastructure)
         teams = db.query(Team).filter(Team.event_id == event_id).all()
 
         if not teams:
@@ -688,26 +721,37 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
                 status_code=422,
             )
 
-        total_vms = sum(spec["count"] for spec in vm_quota.values()) * len(teams)
+        from builder.base_loader import load_all_bases
+        from builder.infrastructure_validation import infrastructure_summary, validate_infrastructure
+        valid_base_ids = {base.id for base in load_all_bases() if not base.disabled}
+        try:
+            live_vpcs = await _live_vpc_counts()
+        except Exception:
+            return JSONResponse({"error": "Could not verify live Vultr VPC capacity"}, status_code=502)
+        errors = validate_infrastructure(infrastructure, valid_base_ids, team_count=len(teams),
+                                         live_vpcs_by_region=live_vpcs)
+        if errors:
+            return JSONResponse({"error": "Invalid infrastructure", "details": errors}, status_code=422)
+        summary = infrastructure_summary(infrastructure, len(teams))
 
-        from api.routes.vm import _provision_event_vms
+        from api.services.gamenet import allocate_event_networks
+        from api.services.gamenet_provisioning import ensure_vm_placeholders, provision_event_gamenets
+        allocate_event_networks(db, event, teams, infrastructure)
+        ensure_vm_placeholders(db, event, infrastructure)
 
         from api.models import utcnow
-        event.started_at = utcnow()
-        event.ends_at = (
-            event.started_at + timedelta(minutes=event.time_limit_minutes)
-            if event.time_limit_minutes else None
-        )
-        event.status = "open"
-        event.open = True
+        event.started_at = None
+        event.ends_at = None
+        event.status = "provisioning"
+        event.open = False
         db.commit()
 
-        asyncio.create_task(asyncio.to_thread(_provision_event_vms, event_id))
+        asyncio.create_task(asyncio.to_thread(provision_event_gamenets, event_id))
 
         return {
-            "status": "started",
+            "status": "provisioning",
             "provisioning": True,
-            "vm_count": total_vms,
+            "vm_count": summary["vms"],
             "ends_at": event.ends_at.isoformat() if event.ends_at else None,
         }
 
@@ -764,6 +808,23 @@ async def event_provision_status(
     }
 
 
+@router.post("/events/{event_id}/retry-provisioning")
+async def retry_event_provisioning(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter_by(id=event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "provision_failed" or not event.infrastructure:
+        return JSONResponse({"error": "only failed GameNet provisioning can be retried"}, status_code=409)
+    from api.services.gamenet_provisioning import provision_event_gamenets
+    event.status, event.open = "provisioning", False
+    db.commit()
+    asyncio.create_task(asyncio.to_thread(provision_event_gamenets, event.id))
+    return {"status": "provisioning"}
+
+
 @router.post("/events/{event_id}/plan-preview")
 async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
@@ -776,29 +837,47 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
 
     try:
         quota = body.quota if body.quota is not None else json.loads(event.quota)
-        vm_quota = body.vm_quota if body.vm_quota is not None else (json.loads(event.vm_quota) if event.vm_quota else None)
+        infrastructure = body.infrastructure if body.infrastructure is not None else (json.loads(event.infrastructure) if event.infrastructure else None)
     except (json.JSONDecodeError, TypeError) as e:
         return JSONResponse({"error": f"invalid quota JSON: {e}"}, status_code=422)
 
-    if not vm_quota:
-        return JSONResponse({"error": "no vm_quota configured"}, status_code=422)
+    if not infrastructure:
+        return JSONResponse({"error": "no infrastructure configured"}, status_code=422)
 
-    from builder.vm_quota_validation import validate_vm_quota
+    from builder.infrastructure_validation import validate_infrastructure
     from builder.base_loader import load_all_bases
     valid_base_ids = {b.id for b in load_all_bases() if not b.disabled}
-    vm_quota_errors = validate_vm_quota(vm_quota, valid_base_ids)
-    if vm_quota_errors:
-        return JSONResponse({"error": "invalid vm_quota", "details": vm_quota_errors}, status_code=422)
+    infrastructure_errors = validate_infrastructure(infrastructure, valid_base_ids)
+    if infrastructure_errors:
+        return JSONResponse({"error": "invalid infrastructure", "details": infrastructure_errors}, status_code=422)
 
-    from api.models import Team
+    from builder.infrastructure_validation import infrastructure_summary, site_subnets
     teams = db.query(Team).filter(Team.event_id == event_id).all()
     if not teams:
         return JSONResponse({"error": "no teams defined"}, status_code=422)
-
+    infrastructure_counts = infrastructure_summary(infrastructure, len(teams))
+    address_plan = []
+    # Preview addresses are illustrative; committed allocation is global and
+    # occurs atomically when provisioning starts.
+    from ipaddress import ip_network
+    blocks = iter(ip_network("10.128.0.0/9").subnets(new_prefix=20))
+    for team in teams:
+        for site in infrastructure["sites"]:
+            cidr = str(next(blocks))
+            infra_subnet, zones = site_subnets(cidr, len(site["zones"]))
+            address_plan.append({
+                "team": team.name, "site_key": site["key"], "site": site["name"],
+                "region": site["region"], "cidr": cidr, "infrastructure_subnet": infra_subnet,
+                "zones": [{"key": definition["key"], "role": definition["team"],
+                           "subnet": subnet, "gateway": gateway}
+                          for definition, (subnet, gateway) in zip(site["zones"], zones)],
+            })
     from builder.module_loader import load_all_modules
     from builder.selector import select_modules
     from builder.plan_sizing import plan_for_vm
     from builder.attack_tree import build_attack_tree, serialize_tree
+    from builder.base_loader import load_base_type
+    from builder.infrastructure_validation import gamenet_hostname
 
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
@@ -825,15 +904,13 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                             "monthly_cost": p["monthly_cost"],
                         })
                         plan_costs[p["id"]] = p["monthly_cost"]
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                _log.warning("Failed to parse Vultr plans response: %s", e)
-        except Exception as e:
-            _log.warning("Failed to fetch Vultr plans: %s", e)
-
-    _TEAM_COLORS = [
-        "#e040fb", "#00bcd4", "#69f0ae", "#ff6d00", "#2979ff",
-        "#ff4081", "#ffea00", "#00e5ff", "#76ff03", "#ff6e40",
-    ]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                available_plans = []
+                plan_costs = {}
+        except Exception:
+            # A preview remains useful without a live provider price response.
+            available_plans = []
+            plan_costs = {}
 
     team_count = len(teams)
     first_team = teams[0] if teams else None
@@ -848,29 +925,51 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     total_attack_paths = 0
     total_cost = 0.0
 
-    for type_key, spec in vm_quota.items():
-        role = spec.get("role", "target")
-        count_per_team = int(spec.get("count", 1))
-        default_plan = spec.get("default_plan", "vc2-1c-1gb")
-        region = spec.get("region", "")
-        base_type_id = spec.get("base_type")
-        from builder.base_loader import load_base_type as _load_base_type
-        _base_type_obj = _load_base_type(base_type_id) if base_type_id else None
-        os_name = spec.get("os", "") or (_base_type_obj.os if _base_type_obj else "")
-        icon_name = (_base_type_obj.icon if _base_type_obj else None)
+    machine_types = [{
+        "type_key": "vpn_gateway", "role": "infrastructure", "count": 1,
+        "spec": infrastructure["vpn_gateway"], "region": infrastructure["vpn_gateway"]["region"],
+        "hostname": lambda team, index: gamenet_hostname(event_id, team.id, "gateway"),
+    }]
+    for site in infrastructure["sites"]:
+        machine_types.append({
+            "type_key": f"{site['key']}_firewall", "role": "infrastructure", "count": 1,
+            "spec": site["firewall"], "region": site["region"],
+            "hostname": lambda team, index, site_key=site["key"]: gamenet_hostname(event_id, team.id, site_key, "fw"),
+        })
+        for zone in site["zones"]:
+            for endpoint in zone["endpoints"]:
+                machine_types.append({
+                    "type_key": f"{site['key']}_{zone['key']}_{endpoint['key']}",
+                    "role": "attacker" if zone["team"] == "red" else "target",
+                    "count": endpoint["count"], "spec": endpoint, "region": site["region"],
+                    "hostname": lambda team, index, site_key=site["key"], zone_key=zone["key"], endpoint_key=endpoint["key"]:
+                        gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key, index + 1),
+                })
+
+    for definition in machine_types:
+        type_key = definition["type_key"]
+        role = definition["role"]
+        count_per_team = definition["count"]
+        spec = definition["spec"]
+        default_plan = spec["default_plan"]
+        region = definition["region"]
+        base_type_id = spec["base_type"]
+        base_type = load_base_type(base_type_id)
+        os_name = base_type.os
+        icon_name = base_type.icon
 
         vms = []
 
         for team in teams:
             for i in range(count_per_team):
-                hostname = f"ctf-e{event_id}-t{team.id}-{type_key}-{i + 1}"
+                hostname = definition["hostname"](team, i)
 
                 if role == "target":
                     try:
-                        selected = select_modules(quota, library_list, base_type_id=None)
+                        selected = select_modules(quota, library_list, base_type_id=base_type_id)
                     except ValueError as e:
                         return JSONResponse({"error": str(e)}, status_code=422)
-                    sized_plan = plan_for_vm(None, selected, default_plan, available_plans) if available_plans else default_plan
+                    sized_plan = plan_for_vm(base_type, selected, default_plan, available_plans)
                     module_objs = [library[m.id] for m in selected if m.id in library]
                     tree = build_attack_tree(module_objs)
                     serialized_tree = serialize_tree(tree)
@@ -953,7 +1052,8 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
 
     return {
         "summary": {
-            "total_vms": sum(t["total_count"] for t in vm_types),
+            **infrastructure_counts,
+            "total_vms": infrastructure_counts["vms"],
             "teams": len(teams),
             "estimated_monthly_cost": round(total_cost, 2),
             "total_modules": total_modules,
@@ -963,6 +1063,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         "vm_types": vm_types,
         "topology": {"nodes": topology_nodes, "links": topology_links},
         "warnings": warnings,
+        "address_plan": address_plan,
+        "infrastructure": infrastructure,
+        "total_cost": round(total_cost, 2),
     }
 
 

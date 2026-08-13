@@ -15,9 +15,6 @@ from api.models import Team, TeamTrainingCredential, VM, utcnow
 from api.services.secrets import decrypt_secret, encrypt_secret
 
 TRAINING_USERNAME = "ctf-trainee"
-VERIFIER_USERNAME = "ctf-verifier"
-
-
 def _keypair() -> tuple[str, str]:
     key = Ed25519PrivateKey.generate()
     private = key.private_bytes(Encoding.PEM, PrivateFormat.OpenSSH, NoEncryption()).decode()
@@ -69,6 +66,27 @@ def _deploy(vm: VM, db: Session, credential: TeamTrainingCredential) -> bool:
             client.close()
 
 
+def _revoke(vm: VM, db: Session, credential: TeamTrainingCredential) -> bool:
+    """Remove a candidate credential when an initial deployment is aborted."""
+    from api.services.ssh_connection import connect_vm
+    client = None
+    try:
+        client = connect_vm(vm, db)
+        public = shlex.quote(credential.public_key)
+        command = (
+            f"key_file=/home/{TRAINING_USERNAME}/.ssh/authorized_keys; "
+            f"if [ -f \"$key_file\" ] && grep -Fq -- {public} \"$key_file\"; then "
+            f"rm -f \"$key_file\"; passwd -l {TRAINING_USERNAME} >/dev/null 2>&1 || true; fi"
+        )
+        _, stdout, _ = client.exec_command(command, timeout=20)
+        return stdout.channel.recv_exit_status() == 0
+    except Exception:
+        return False
+    finally:
+        if client:
+            client.close()
+
+
 def provision_team_credential(db: Session, credential: TeamTrainingCredential) -> dict:
     vms = db.query(VM).filter(VM.team_id == credential.team_id, VM.status == "active").all()
     succeeded, failed = [], []
@@ -91,8 +109,15 @@ def rotate_team_credential(db: Session, team: Team) -> tuple[TeamTrainingCredent
     if failed:
         rollback_failed = []
         if team.training_credential:
+            # A failed deployment may still have replaced authorized_keys or
+            # changed the password before a later command failed. Restore the
+            # old credential on every attempted VM, not only reported successes.
             for vm in active_vms:
-                if vm.id in succeeded and not _deploy(vm, db, team.training_credential):
+                if not _deploy(vm, db, team.training_credential):
+                    rollback_failed.append(vm.id)
+        else:
+            for vm in active_vms:
+                if not _revoke(vm, db, candidate):
                     rollback_failed.append(vm.id)
         return team.training_credential, {"rotated": False, "succeeded_vm_ids": succeeded,
                                           "failed_vm_ids": failed, "rollback_failed_vm_ids": rollback_failed}

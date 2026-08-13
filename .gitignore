@@ -1,4 +1,7 @@
 ctf.db
+*.db-shm
+*.db-wal
+data/
 __pycache__/
 .env
 base/.env

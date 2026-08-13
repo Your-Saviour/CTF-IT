@@ -1,211 +1,81 @@
 (function () {
   const difficulties = ['easy', 'medium', 'hard'];
-  const editorState = new WeakMap();
-
-  function option(value, label) {
-    const node = document.createElement('option');
-    node.value = value;
-    node.textContent = label;
-    return node;
-  }
+  const DEFAULT_INFRASTRUCTURE = {
+    vpn_gateway: {base_type: 'ubuntu_24_server', default_plan: 'vc2-1c-1gb', region: 'ewr', listen_port: 51820},
+    sites: [{key: 'head_office', name: 'Head Office', region: 'ewr',
+      firewall: {base_type: 'opnsense', default_plan: 'vc2-2c-4gb'},
+      zones: [
+        {key: 'corporate', name: 'Corporate', team: 'blue', endpoints: [
+          {key: 'workstation', base_type: 'ubuntu_24_server', count: 2, default_plan: 'vc2-1c-1gb'}]},
+        {key: 'red_team', name: 'Red Team', team: 'red', endpoints: []}
+      ]}]
+  };
 
   function quotaFromGrid(form) {
     const quota = {};
     form.querySelectorAll('.module-quota-row').forEach(row => {
       quota[row.dataset.type] = {};
-      difficulties.forEach(level => {
-        quota[row.dataset.type][level] = Number(row.querySelector(`[data-difficulty="${level}"]`).value) || 0;
-      });
+      difficulties.forEach(level => { quota[row.dataset.type][level] = Number(row.querySelector(`[data-difficulty="${level}"]`).value) || 0; });
     });
     return quota;
   }
-
   function quotaToGrid(form, quota) {
-    form.querySelectorAll('.module-quota-row').forEach(row => {
-      difficulties.forEach(level => {
-        row.querySelector(`[data-difficulty="${level}"]`).value = quota?.[row.dataset.type]?.[level] || 0;
-      });
-    });
+    form.querySelectorAll('.module-quota-row').forEach(row => difficulties.forEach(level => {
+      row.querySelector(`[data-difficulty="${level}"]`).value = quota?.[row.dataset.type]?.[level] || 0;
+    }));
   }
-
-  function addVmRow(form, baseTypes, key, spec) {
-    const template = form.querySelector('#vm-quota-row-template');
-    const row = template.content.firstElementChild.cloneNode(true);
-    const baseSelect = row.querySelector('[name="vm_base_type"]');
-    baseSelect.appendChild(option('', 'Select base image'));
-    baseTypes.forEach(base => baseSelect.appendChild(option(base.id, base.name)));
-    row.querySelector('[name="vm_type_name"]').value = key || '';
-    baseSelect.value = spec?.base_type || '';
-    row.querySelector('[name="vm_count"]').value = spec?.count || 1;
-    row.querySelector('[name="vm_role"]').value = spec?.role || 'target';
-    row.querySelector('[name="vm_plan"]').value = spec?.default_plan || '';
-    row.querySelector('[name="vm_region"]').value = spec?.region || '';
-    row.querySelector('[data-remove-vm]').addEventListener('click', () => row.remove());
-    form.querySelector('#vm-quota-rows').appendChild(row);
+  function renderRail(form) {
+    const rail = form.querySelector('#gamenet-rail');
+    try {
+      const data = JSON.parse(form.querySelector('#infrastructure-json').value || '{}');
+      const sites = Array.isArray(data.sites) ? data.sites : [];
+      const endpoints = sites.reduce((sum, site) => sum + (site.zones || []).reduce((zoneSum, zone) =>
+        zoneSum + (zone.endpoints || []).reduce((n, endpoint) => n + Number(endpoint.count || 0), 0), 0);
+      rail.innerHTML = `<div class="gamenet-node gateway"><strong>VPN gateway</strong><span>${escapeText(data.vpn_gateway?.region || 'region required')} · UDP ${escapeText(data.vpn_gateway?.listen_port || '')}</span></div>` +
+        sites.map(site => `<div class="gamenet-site"><div class="gamenet-node firewall"><strong>${escapeText(site.name || site.key)}</strong><span>${escapeText(site.region || 'region required')} · /20 · OPNsense</span></div>${(site.zones || []).map(zone => `<div class="gamenet-node zone ${zone.team === 'red' ? 'red' : 'blue'}"><strong>${escapeText(zone.name || zone.key)}</strong><span>${escapeText(zone.team)} · ${(zone.endpoints || []).reduce((n, endpoint) => n + Number(endpoint.count || 0), 0)} endpoints · /24</span></div>`).join('')}</div>`).join('') +
+        `<div class="gamenet-total"><strong>${sites.length}</strong> sites <strong>${endpoints}</strong> endpoints per team</div>`;
+    } catch (_) { rail.innerHTML = '<p class="status failed">Infrastructure JSON is invalid.</p>'; }
   }
-
-  function vmQuotaFromRows(form) {
-    const quota = {};
-    for (const row of form.querySelectorAll('.vm-quota-row')) {
-      const key = row.querySelector('[name="vm_type_name"]').value.trim().replace(/\s+/g, '_');
-      const baseType = row.querySelector('[name="vm_base_type"]').value;
-      if (!key && !baseType) continue;
-      if (!key) throw new Error('Each VM configuration needs a type name.');
-      if (!baseType) throw new Error(`Select a base image for ${key}.`);
-      const spec = {
-        base_type: baseType,
-        count: Number(row.querySelector('[name="vm_count"]').value) || 1,
-        role: row.querySelector('[name="vm_role"]').value,
-      };
-      const plan = row.querySelector('[name="vm_plan"]').value.trim();
-      const region = row.querySelector('[name="vm_region"]').value.trim();
-      if (plan) spec.default_plan = plan;
-      if (region) spec.region = region;
-      quota[key] = spec;
-    }
-    return quota;
-  }
-
-  function vmQuotaToRows(form, baseTypes, quota) {
-    form.querySelector('#vm-quota-rows').replaceChildren();
-    Object.entries(quota || {}).forEach(([key, spec]) => addVmRow(form, baseTypes, key, spec));
-  }
-
-  function bindAdvancedToggle(form, buttonSelector, structuredSelector, rawSelector, readStructured, writeStructured) {
-    const button = form.querySelector(buttonSelector);
-    const structured = form.querySelector(structuredSelector);
-    const raw = form.querySelector(rawSelector);
-    button.addEventListener('click', () => {
-      const openingRaw = raw.hidden;
-      if (openingRaw) {
-        try {
-          raw.value = JSON.stringify(readStructured(), null, 2);
-        } catch (error) {
-          window.showToast(error.message);
-          return;
-        }
-        structured.hidden = true;
-        raw.hidden = false;
-        button.textContent = 'Use form editor';
-        button.dataset.raw = 'true';
-      } else {
-        try {
-          writeStructured(JSON.parse(raw.value || '{}'));
-        } catch (_) {
-          window.showToast('Fix the invalid JSON before returning to the form.');
-          return;
-        }
-        raw.hidden = true;
-        structured.hidden = false;
-        button.textContent = 'Edit raw JSON';
-        button.dataset.raw = 'false';
-      }
-    });
-  }
+  function escapeText(value) { const node = document.createElement('span'); node.textContent = String(value ?? ''); return node.innerHTML; }
 
   window.setupEventEditor = async function (form, api) {
-    const quotaGrid = form.querySelector('#module-quota-grid');
-    const [moduleResponse, baseResponse] = await Promise.all([fetch(api + '/modules'), fetch(api + '/base-types')]);
-    const modules = moduleResponse.ok ? await moduleResponse.json() : [];
-    const baseTypes = baseResponse.ok ? await baseResponse.json() : [];
-    const moduleTypes = [...new Set(modules.map(module => module.type))].sort();
-
-    quotaGrid.replaceChildren();
-    moduleTypes.forEach(type => {
-      const row = document.createElement('div');
-      row.className = 'module-quota-row';
-      row.dataset.type = type;
-      const label = document.createElement('span');
-      label.className = 'quota-type-name';
-      label.textContent = type.replaceAll('_', ' ');
-      row.appendChild(label);
-      difficulties.forEach(level => {
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.value = '0';
-        input.dataset.difficulty = level;
-        input.setAttribute('aria-label', `${type} ${level} modules`);
-        row.appendChild(input);
-      });
-      quotaGrid.appendChild(row);
+    const response = await fetch(api + '/modules');
+    const modules = response.ok ? await response.json() : [];
+    const types = [...new Set(modules.map(module => module.type))].sort();
+    const grid = form.querySelector('#module-quota-grid'); grid.replaceChildren();
+    types.forEach(type => {
+      const row = document.createElement('div'); row.className = 'module-quota-row'; row.dataset.type = type;
+      row.innerHTML = `<span class="quota-type-name">${escapeText(type.replaceAll('_', ' '))}</span>`;
+      difficulties.forEach(level => { const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.value = '0'; input.dataset.difficulty = level; input.setAttribute('aria-label', `${type} ${level} modules`); row.appendChild(input); });
+      grid.appendChild(row);
     });
-    if (!moduleTypes.length) quotaGrid.innerHTML = '<p class="form-help">No module types are currently available.</p>';
-
-    form.querySelector('[data-add-vm]').addEventListener('click', () => addVmRow(form, baseTypes, '', {}));
-    bindAdvancedToggle(form, '[data-module-json-toggle]', '#module-quota-structured', '#module-quota-json',
-      () => quotaFromGrid(form), quota => quotaToGrid(form, quota));
-    bindAdvancedToggle(form, '[data-vm-json-toggle]', '#vm-quota-structured', '#vm-quota-json',
-      () => vmQuotaFromRows(form), quota => vmQuotaToRows(form, baseTypes, quota));
-    editorState.set(form, { baseTypes });
-    form.dataset.editorReady = 'true';
+    form.querySelector('#infrastructure-json').addEventListener('input', () => renderRail(form));
+    form.querySelector('[data-module-json-toggle]').addEventListener('click', event => {
+      const raw = form.querySelector('#module-quota-json'), structured = form.querySelector('#module-quota-structured');
+      if (raw.hidden) { raw.value = JSON.stringify(quotaFromGrid(form), null, 2); raw.hidden = false; structured.hidden = true; event.target.dataset.raw = 'true'; event.target.textContent = 'Use form editor'; }
+      else { try { quotaToGrid(form, JSON.parse(raw.value || '{}')); raw.hidden = true; structured.hidden = false; event.target.dataset.raw = 'false'; event.target.textContent = 'Edit raw JSON'; } catch (_) { window.showToast('Module quota JSON is invalid.'); } }
+    });
+    form.dataset.editorReady = 'true'; window.resetEventEditor(form);
   };
-
   window.populateEventEditor = function (form, event) {
-    if (form.dataset.editorReady !== 'true') throw new Error('The event editor is still loading.');
-    const { baseTypes } = editorState.get(form);
-    form.reset();
-    window.resetEventEditor(form);
-    form.elements.name.value = event.name || '';
-    form.elements.description.value = event.description || '';
-    form.elements.welcome_message.value = event.welcome_message || '';
-    form.elements.time_limit_minutes.value = event.time_limit_minutes || '';
-
-    const knownTypes = new Set([...form.querySelectorAll('.module-quota-row')].map(row => row.dataset.type));
-    const advancedQuota = Object.keys(event.quota || {}).some(key => !knownTypes.has(key));
-    if (advancedQuota) {
-      form.querySelector('#module-quota-structured').hidden = true;
-      const raw = form.querySelector('#module-quota-json');
-      raw.hidden = false;
-      raw.value = JSON.stringify(event.quota || {}, null, 2);
-      const toggle = form.querySelector('[data-module-json-toggle]');
-      toggle.dataset.raw = 'true';
-      toggle.textContent = 'Use form editor';
-    } else {
-      quotaToGrid(form, event.quota || {});
-    }
-    vmQuotaToRows(form, baseTypes, event.vm_quota || {});
+    form.reset(); quotaToGrid(form, event.quota || {});
+    form.elements.name.value = event.name || ''; form.elements.description.value = event.description || '';
+    form.elements.welcome_message.value = event.welcome_message || ''; form.elements.time_limit_minutes.value = event.time_limit_minutes || '';
+    form.querySelector('#infrastructure-json').value = JSON.stringify(event.infrastructure || DEFAULT_INFRASTRUCTURE, null, 2);
+    form.querySelector('#infrastructure-json').disabled = event.status !== 'draft'; renderRail(form);
   };
-
   window.readEventEditor = function (form) {
-    if (form.dataset.editorReady !== 'true') throw new Error('The event editor is still loading.');
-    let quota;
-    let vmQuota;
-    try {
-      quota = form.querySelector('[data-module-json-toggle]').dataset.raw === 'true'
-        ? JSON.parse(form.querySelector('#module-quota-json').value || '{}')
-        : quotaFromGrid(form);
-      vmQuota = form.querySelector('[data-vm-json-toggle]').dataset.raw === 'true'
-        ? JSON.parse(form.querySelector('#vm-quota-json').value || '{}')
-        : vmQuotaFromRows(form);
-    } catch (error) {
-      if (error instanceof SyntaxError) throw new Error('Advanced quota JSON is invalid.');
-      throw error;
-    }
-    const payload = {
-      name: form.elements.name.value.trim(),
-      description: form.elements.description.value.trim() || null,
+    let infrastructure, quota;
+    try { infrastructure = JSON.parse(form.querySelector('#infrastructure-json').value); quota = form.querySelector('[data-module-json-toggle]').dataset.raw === 'true' ? JSON.parse(form.querySelector('#module-quota-json').value || '{}') : quotaFromGrid(form); }
+    catch (_) { throw new Error('Fix invalid JSON before saving.'); }
+    return {name: form.elements.name.value.trim(), description: form.elements.description.value.trim() || null,
       welcome_message: form.elements.welcome_message.value.trim() || null,
       time_limit_minutes: form.elements.time_limit_minutes.value ? Number(form.elements.time_limit_minutes.value) : null,
-      quota,
-    };
-    if (Object.keys(vmQuota).length) payload.vm_quota = vmQuota;
-    return payload;
+      quota, infrastructure};
   };
-
   window.resetEventEditor = function (form) {
     form.querySelectorAll('.module-quota-row input').forEach(input => { input.value = '0'; });
-    form.querySelector('#vm-quota-rows').replaceChildren();
-    for (const [buttonSelector, structuredSelector, rawSelector] of [
-      ['[data-module-json-toggle]', '#module-quota-structured', '#module-quota-json'],
-      ['[data-vm-json-toggle]', '#vm-quota-structured', '#vm-quota-json'],
-    ]) {
-      const button = form.querySelector(buttonSelector);
-      button.dataset.raw = 'false';
-      button.textContent = 'Edit raw JSON';
-      form.querySelector(structuredSelector).hidden = false;
-      form.querySelector(rawSelector).hidden = true;
-      form.querySelector(rawSelector).value = '';
-    }
+    form.querySelector('#infrastructure-json').disabled = false;
+    form.querySelector('#infrastructure-json').value = JSON.stringify(DEFAULT_INFRASTRUCTURE, null, 2); renderRail(form);
   };
 })();

@@ -1,6 +1,7 @@
 import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import bcrypt
 import pytest
@@ -10,11 +11,13 @@ from sqlalchemy.orm import sessionmaker
 
 from api.database import Base, get_db
 from api.main import app
-from api.models import Event, HintReveal, Team, TeamTrainingCredential, User, VerificationAttempt, VM, VMModule
+from api.models import Event, HintReveal, PlatformSettings, Team, TeamTrainingCredential, User, VerificationAttempt, VM, VMModule
 from api.routes import auth
 from api.services.secrets import decrypt_secret, encrypt_secret
 from api.services.verification import InvalidSpecification, VerificationResult, capture_baseline, validate_spec, verify_assignment, verify_spec
 from api.services.training_credentials import generate_credential, rotate_team_credential
+from api.services.training_provisioning import finalize_training_vm
+from api.services.verifier_account import provision_verifier
 from builder.catalogue_validation import validate_catalogue
 from builder.module_loader import load_all_modules
 from builder.preset_loader import load_presets, validate_presets
@@ -94,6 +97,28 @@ def test_training_payload_and_scoreboard_are_team_and_event_safe(training_app):
                for row in board["teams"])
 
 
+def test_tampered_gt_removes_existing_vm_points_from_scoreboard(training_app):
+    client, sessions, data = training_app
+    db = sessions()
+    assignment = db.get(VMModule, data["alpha_module"].id)
+    assignment.status = "completed"
+    assignment.completed = True
+    db.add(PlatformSettings(key=f"verifier_vm_{assignment.vm_id}", value="tampered"))
+    db.commit()
+
+    payload = client.get("/api/me/training").json()
+    board = client.get("/api/scoreboard").json()
+    alpha = next(row for row in board["teams"] if row["team_id"] == data["alpha"].id)
+    assert payload["score"]["total"] == 0
+    assert payload["score"]["completed"] == 0
+    assert alpha["total_score"] == 0
+    assignment.status = "pending"
+    assignment.completed = False
+    db.query(PlatformSettings).filter_by(key=f"verifier_vm_{assignment.vm_id}").delete()
+    db.commit()
+    db.close()
+
+
 def test_identifier_tampering_cannot_cross_team(training_app):
     client, _, data = training_app
     vm_id = data["bravo_vm"].id
@@ -146,6 +171,14 @@ def test_participant_invitation_requires_matching_team_when_enabled(training_app
     created = client.post("/admin/api/invitations", json={"event_id": data["event"].id,
         "team_id": data["alpha"].id, "role": "participant"})
     assert created.status_code == 200
+
+
+def test_compose_does_not_override_root_learner_training_setting():
+    root = Path(__file__).resolve().parents[1]
+    for compose in (root / "docker-compose.yml", root / "deploy" / "docker-compose.yml"):
+        source = compose.read_text()
+        assert "env_file:" in source
+        assert "LEARNER_TRAINING_ENABLED=${LEARNER_TRAINING_ENABLED:-false}" not in source
 
 
 def test_state_transitions_remove_and_restore_points(tmp_path):
@@ -210,13 +243,77 @@ def test_credential_rotation_rolls_back_partial_deployment(training_app):
     extra = VM(hostname="alpha-two", ip_address="192.0.2.12", status="active",
                team_id=team.id, event_id=team.event_id)
     db.add(extra); db.commit()
-    with patch("api.services.training_credentials._deploy", side_effect=[True, False, True]) as deploy:
+    with patch("api.services.training_credentials._deploy", side_effect=[True, False, True, True]) as deploy:
         credential, report = rotate_team_credential(db, team)
     assert report["rotated"] is False
     assert report["rollback_failed_vm_ids"] == []
     assert credential.private_key_encrypted == original
-    assert deploy.call_count == 3
+    assert deploy.call_count == 4
+    assert {call.args[0].id for call in deploy.call_args_list[2:]} == {
+        vm.id for vm in team.vms if vm.status == "active"
+    }
     db.close()
+
+
+def test_initial_credential_failure_revokes_candidate_everywhere(training_app):
+    _, sessions, data = training_app
+    db = sessions()
+    team = Team(name="Unprovisioned", event_id=data["event"].id)
+    db.add(team); db.flush()
+    vms = [
+        VM(hostname=f"new-{index}", ip_address=f"192.0.2.{20 + index}", status="active",
+           team_id=team.id, event_id=team.event_id)
+        for index in range(2)
+    ]
+    db.add_all(vms); db.commit()
+    with patch("api.services.training_credentials._deploy", side_effect=[True, False]), \
+         patch("api.services.training_credentials._revoke", side_effect=[True, True]) as revoke:
+        credential, report = rotate_team_credential(db, team)
+    assert credential is None
+    assert report["rotated"] is False
+    assert report["rollback_failed_vm_ids"] == []
+    assert {call.args[0].id for call in revoke.call_args_list} == {vm.id for vm in vms}
+    db.close()
+
+
+def test_goal_only_vm_still_receives_restricted_verifier(training_app):
+    _, sessions, data = training_app
+    db = sessions()
+    vm = db.get(VM, data["alpha_vm"].id)
+    db.query(VMModule).filter(VMModule.vm_id == vm.id).delete()
+    db.commit()
+    with patch("api.services.training_provisioning.provision_verifier", return_value=True) as provision:
+        report = finalize_training_vm(db, vm)
+    provision.assert_called_once_with(vm, db)
+    assert report == {"verifier": "provisioned", "credential": "not_applicable", "baselines": 0}
+    db.close()
+
+
+@pytest.mark.parametrize(("exit_status", "expected", "marker_value"), [
+    (0, True, "provisioned"),
+    (1, False, "failed"),
+])
+def test_gt_provisioning_is_fail_fast_and_updates_readiness(exit_status, expected, marker_value):
+    vm = VM(id=41, ip_address="192.0.2.41", team_id=1, event_id=1)
+    marker = MagicMock(value="provisioned")
+    db = MagicMock()
+    db.query.return_value.filter_by.return_value.first.return_value = marker
+    client = MagicMock()
+    stdout = MagicMock()
+    stdout.channel.recv_exit_status.return_value = exit_status
+    client.exec_command.return_value = (MagicMock(), stdout, MagicMock())
+
+    with patch("api.services.verifier_account.get_or_create_verifier_keypair",
+               return_value=("private", "ssh-ed25519 AAAAtest")), \
+         patch("api.services.ssh_connection.connect_vm", return_value=client):
+        assert provision_verifier(vm, db) is expected
+
+    command = client.exec_command.call_args.args[0]
+    assert command.startswith("set -eu; ")
+    assert "/tmp/ctf-gt-seal" in command
+    assert "/usr/local/sbin/ctf-audit-gateway --seal" not in command
+    assert client.open_sftp.return_value.put.call_count == 2
+    assert marker.value == marker_value
 
 
 @pytest.mark.parametrize("spec", [
@@ -299,6 +396,21 @@ def test_infrastructure_failure_is_not_a_task_failure():
     result = asyncio.run(verify_spec({"type":"file_exists","path":"/a"}, vm,
                                      ssh_executor=unavailable))
     assert result.result == "unavailable" and result.error_code == "target_unavailable"
+
+
+def test_gt_integrity_failure_disables_scoring_before_task_check():
+    calls = []
+
+    async def tampered(spec):
+        calls.append(spec)
+        return 3, ""
+
+    vm = VM(id=999, ip_address="192.0.2.20", team_id=1, event_id=1)
+    result = asyncio.run(verify_spec({"type":"file_exists","path":"/a"}, vm,
+                                     ssh_executor=tampered))
+    assert result.result == "unavailable"
+    assert result.error_code == "checker_integrity_failed"
+    assert calls == [{"type": "integrity"}]
 
 
 def test_catalogue_and_presets_meet_release_contract():

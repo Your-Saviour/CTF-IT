@@ -70,6 +70,11 @@ async def lifespan(app: FastAPI):
                 "attack_tree_json": "TEXT",
                 "vm_type": "VARCHAR(64)",
                 "base_type": "VARCHAR(64)",
+                "role": "VARCHAR(24)",
+                "site_id": "INTEGER REFERENCES sites(id)",
+                "zone_id": "INTEGER REFERENCES zones(id)",
+                "public_ip": "VARCHAR(45)",
+                "private_ip": "VARCHAR(45)",
                 "vpc_ip": "VARCHAR(45)",
                 "admin_password": "VARCHAR(128)",
                 "ssh_host_key": "VARCHAR(512)",
@@ -82,7 +87,7 @@ async def lifespan(app: FastAPI):
             for col, typ in {
                 "semaphore_project_id": "INTEGER",
                 "semaphore_key_id": "INTEGER",
-                "vm_quota": "TEXT",
+                "infrastructure": "TEXT",
                 "started_at": "DATETIME",
                 "ends_at": "DATETIME",
             }.items():
@@ -148,6 +153,15 @@ async def lifespan(app: FastAPI):
             if event.open:
                 event.status = "open"
         db.commit()
+
+        # In-process provisioning workers cannot survive an API restart. Keep
+        # interrupted GameNets closed until an administrator explicitly retries.
+        interrupted_events = db.query(Event).filter(Event.status == "provisioning").all()
+        for event in interrupted_events:
+            event.status = "provision_failed"
+            event.open = False
+        if interrupted_events:
+            db.commit()
 
         # Create default event if none exists
         if not db.query(Event).first():
@@ -363,7 +377,11 @@ async def list_open_events(db: Session = Depends(get_db)):
     expire_due_events(db)
     events = (
         db.query(Event)
-        .filter(Event.status == "open")
+        # A fresh installation deliberately seeds its first event as a draft so
+        # normal lifecycle timestamps and provisioning are only set by the
+        # explicit admin start action. The initial administrator still needs an
+        # event to bind their account to before that action is available.
+        .filter(Event.status.in_(("draft", "open")))
         .order_by(Event.created_at.desc())
         .all()
     )

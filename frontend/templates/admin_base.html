@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ page_title|default('Administration') }} · CTF Platform{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="/static/admin.css?v=5">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/admin.css?v=6">{% endblock %}
 {% block extra_style %}{% block admin_style %}{% endblock %}{% endblock %}
 {% block body_class %}admin-app{% endblock %}
 {% block site_nav %}{% endblock %}
@@ -41,4 +41,4 @@
   </div>
 </div>
 {% endblock %}
-{% block extra_script %}<script src="/static/admin.js"></script>{% block admin_script %}{% endblock %}{% endblock %}
+{% block extra_script %}<script src="/static/admin.js?v=2"></script>{% block admin_script %}{% endblock %}{% endblock %}

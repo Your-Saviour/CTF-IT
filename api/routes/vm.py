@@ -272,6 +272,11 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db), in
         "vm_type": vm.vm_type,
         "base_type": vm.base_type,
         "vpc_ip": vm.vpc_ip,
+        "role": vm.role,
+        "site_id": vm.site_id,
+        "zone_id": vm.zone_id,
+        "public_ip": vm.public_ip,
+        "private_ip": vm.private_ip,
     }
 
     # Only include password when explicitly requested
@@ -673,6 +678,8 @@ def _run_provision(vm_id: int) -> None:
                     ssh_user=vm.ssh_user or "root",
                     ssh_port=vm.ssh_port or 22,
                     key_id=key_id,
+                    proxy_host=(vm.zone.site and db.query(VM).filter(VM.id == vm.zone.site.firewall_vm_id).first().public_ip)
+                    if vm.zone_id and vm.zone and vm.zone.site else None,
                 )
                 repo_id = client.create_repository(
                     project_id,
@@ -760,6 +767,8 @@ def _run_provision(vm_id: int) -> None:
                 ssh_user=vm.ssh_user or "root",
                 ssh_port=vm.ssh_port or 22,
                 key_id=key_id,
+                proxy_host=(vm.zone.site and db.query(VM).filter(VM.id == vm.zone.site.firewall_vm_id).first().public_ip)
+                if vm.zone_id and vm.zone and vm.zone.site else None,
             )
             repo_id = client.create_repository(
                 project_id,

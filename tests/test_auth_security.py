@@ -120,6 +120,34 @@ def test_first_admin_requires_bootstrap_token(tmp_path):
         db_file.unlink(missing_ok=True)
 
 
+def test_initial_admin_can_select_seeded_draft_event(tmp_path):
+    client, session_type, engine, db_file = _client_and_session(tmp_path)
+    db = session_type()
+    try:
+        event = Event(name="Seeded Draft", quota="{}", status="draft", open=False)
+        db.add(event)
+        db.commit()
+
+        response = client.get("/api/events")
+        assert response.status_code == 200
+        assert response.json() == [{
+            "id": event.id,
+            "name": "Seeded Draft",
+            "description": None,
+            "welcome_message": None,
+        }]
+
+        db.add(User(username="existing", password_hash="unused", event_id=event.id))
+        db.commit()
+        assert client.get("/api/events").json() == []
+    finally:
+        db.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+        db_file.unlink(missing_ok=True)
+
+
 def test_login_rate_limit_after_five_failures(tmp_path):
     client, _, engine, db_file = _client_and_session(tmp_path)
     auth._login_attempts.clear()

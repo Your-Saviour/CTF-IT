@@ -116,13 +116,19 @@ class SemaphoreClient:
         ssh_user: str,
         ssh_port: int,
         key_id: int,
+        proxy_host: str | None = None,
+        proxy_user: str = "root",
     ) -> int:
         """Create a static inventory for one host and return its ID."""
         port_arg = f" ansible_port={ssh_port}" if ssh_port != 22 else ""
+        proxy_arg = (
+            f" -o ProxyJump={proxy_user}@{proxy_host}"
+            if proxy_host else ""
+        )
         inventory_ini = (
             f"[targets]\n"
             f"{ip} ansible_user={ssh_user}{port_arg} "
-            f"ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'\n"
+            f"ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new{proxy_arg}'\n"
         )
         resp = self._client.post(
             f"/api/project/{project_id}/inventory",

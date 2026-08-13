@@ -29,6 +29,9 @@ class User(Base):
 
     event: Mapped["Event"] = relationship(back_populates="users")
     team: Mapped["Team"] = relationship(back_populates="users")
+    vpn_credential: Mapped["VPNCredential"] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class AccountToken(Base):
@@ -71,7 +74,7 @@ class Event(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     quota: Mapped[str] = mapped_column(Text, nullable=False)
-    vm_quota: Mapped[str] = mapped_column(Text, nullable=True)
+    infrastructure: Mapped[str] = mapped_column(Text, nullable=True)
     open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
     status: Mapped[str] = mapped_column(String(16), default="draft")
     description: Mapped[str] = mapped_column(Text, nullable=True)
@@ -88,6 +91,7 @@ class Event(Base):
     users: Mapped[list["User"]] = relationship(back_populates="event")
     teams: Mapped[list["Team"]] = relationship(back_populates="event")
     vms: Mapped[list["VM"]] = relationship(back_populates="event")
+    sites: Mapped[list["Site"]] = relationship(back_populates="event", cascade="all, delete-orphan")
 
 
 class Team(Base):
@@ -108,6 +112,93 @@ class Team(Base):
     training_credential: Mapped["TeamTrainingCredential"] = relationship(
         back_populates="team", uselist=False, cascade="all, delete-orphan"
     )
+    sites: Mapped[list["Site"]] = relationship(back_populates="team", cascade="all, delete-orphan")
+    vpn_gateway: Mapped["TeamVPNGateway"] = relationship(
+        back_populates="team", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class TeamVPNGateway(Base):
+    __tablename__ = "team_vpn_gateways"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False, unique=True)
+    vm_id: Mapped[int] = mapped_column(ForeignKey("vms.id"), nullable=True, unique=True)
+    listen_port: Mapped[int] = mapped_column(Integer, nullable=False, default=51820)
+    vpn_address: Mapped[str] = mapped_column(String(45), nullable=False, unique=True)
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    private_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    platform_public_key: Mapped[str] = mapped_column(Text, nullable=True)
+    platform_private_key_encrypted: Mapped[str] = mapped_column(Text, nullable=True)
+    platform_address: Mapped[str] = mapped_column(String(45), nullable=True, unique=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    team: Mapped["Team"] = relationship(back_populates="vpn_gateway")
+
+
+class VPNCredential(Base):
+    __tablename__ = "vpn_credentials"
+    __table_args__ = (UniqueConstraint("team_id", "address", name="uq_vpn_team_address"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, unique=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    address: Mapped[str] = mapped_column(String(45), nullable=False, unique=True)
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    private_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="vpn_credential")
+
+
+class Site(Base):
+    __tablename__ = "sites"
+    __table_args__ = (
+        UniqueConstraint("team_id", "key", name="uq_site_team_key"),
+        UniqueConstraint("allocated_cidr", name="uq_site_allocated_cidr"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    region: Mapped[str] = mapped_column(String(16), nullable=False)
+    allocated_cidr: Mapped[str] = mapped_column(String(43), nullable=False)
+    infrastructure_subnet: Mapped[str] = mapped_column(String(43), nullable=False)
+    vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    firewall_vm_id: Mapped[int] = mapped_column(
+        ForeignKey("vms.id", name="fk_sites_firewall_vm_id", use_alter=True), nullable=True
+    )
+    tunnel_public_key: Mapped[str] = mapped_column(Text, nullable=True)
+    tunnel_private_key_encrypted: Mapped[str] = mapped_column(Text, nullable=True)
+    tunnel_address: Mapped[str] = mapped_column(String(45), nullable=True, unique=True)
+    tunnel_status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    event: Mapped["Event"] = relationship(back_populates="sites")
+    team: Mapped["Team"] = relationship(back_populates="sites")
+    zones: Mapped[list["Zone"]] = relationship(back_populates="site", cascade="all, delete-orphan")
+
+
+class Zone(Base):
+    __tablename__ = "zones"
+    __table_args__ = (UniqueConstraint("site_id", "key", name="uq_zone_site_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    team_role: Mapped[str] = mapped_column(String(8), nullable=False)
+    subnet: Mapped[str] = mapped_column(String(43), nullable=False, unique=True)
+    gateway_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    site: Mapped["Site"] = relationship(back_populates="zones")
+    vms: Mapped[list["VM"]] = relationship(back_populates="zone")
 
 
 class TeamTrainingCredential(Base):
@@ -162,6 +253,12 @@ class VM(Base):
     # Base type ID used when provisioned (e.g. "ubuntu_24_server")
     base_type: Mapped[str] = mapped_column(String(64), nullable=True)
 
+    role: Mapped[str] = mapped_column(String(24), nullable=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), nullable=True)
+    zone_id: Mapped[int] = mapped_column(ForeignKey("zones.id"), nullable=True)
+    public_ip: Mapped[str] = mapped_column(String(45), nullable=True)
+    private_ip: Mapped[str] = mapped_column(String(45), nullable=True)
+
     # VPC networking
     vpc_ip: Mapped[str] = mapped_column(String(45), nullable=True)
     # OPNsense admin password (firewall VMs only)
@@ -171,6 +268,7 @@ class VM(Base):
     event: Mapped["Event"] = relationship(back_populates="vms")
     modules: Mapped[list["VMModule"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
     goals: Mapped[list["VMGoal"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
+    zone: Mapped["Zone"] = relationship(back_populates="vms")
 
 
 class PlatformSettings(Base):

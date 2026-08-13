@@ -5,6 +5,7 @@ import os
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,39 @@ from api.services.verifier_account import scoring_enabled_vm_ids
 from builder.module_loader import load_all_modules
 
 router = APIRouter(prefix="/api", tags=["learner"])
+
+
+@router.get("/me/gamenet")
+async def gamenet_status(request: Request, db: Session = Depends(get_db)):
+    user, error = _denied(request, db)
+    if error:
+        return error
+    gateway = user.team.vpn_gateway
+    credential = user.vpn_credential
+    return {
+        "ready": bool(gateway and gateway.status == "active" and credential and credential.status == "active"),
+        "status": gateway.status if gateway else "not_provisioned",
+        "configuration_url": "/api/me/gamenet/config" if gateway and gateway.status == "active" else None,
+    }
+
+
+@router.get("/me/gamenet/config")
+async def download_gamenet_config(request: Request, db: Session = Depends(get_db)):
+    user, error = _denied(request, db)
+    if error:
+        return error
+    from api.services.gamenet import render_user_config
+    try:
+        config = render_user_config(db, user)
+    except RuntimeError:
+        return JSONResponse({"error": "GameNet VPN is not ready"}, status_code=503,
+                            headers={"Cache-Control": "no-store"})
+    db.add(AdminAudit(actor_id=user.id, target_user_id=user.id, action="gamenet_config_downloaded",
+                      metadata_json=json.dumps({"team_id": user.team_id})))
+    db.commit()
+    return PlainTextResponse(config, media_type="application/x-wireguard-profile",
+                             headers={"Cache-Control": "no-store, private", "Pragma": "no-cache",
+                                      "Content-Disposition": 'attachment; filename="gamenet.conf"'})
 
 
 def enabled() -> bool:
@@ -102,9 +136,9 @@ async def my_training(request: Request, db: Session = Depends(get_db)):
         "event": {"id": event.id, "name": event.name, "status": event.status,
                   "description": event.description, "ends_at": event.ends_at.isoformat() if event.ends_at else None},
         "team": {"id": user.team.id, "name": user.team.name},
-        "vms": [{"id": vm.id, "hostname": vm.hostname, "address": vm.ip_address,
+        "vms": [{"id": vm.id, "hostname": vm.hostname, "address": vm.private_ip or vm.ip_address,
                  "ssh_port": vm.ssh_port or 22, "status": vm.status,
-                 "connection_command": f"ssh -p {vm.ssh_port or 22} ctf-trainee@{vm.ip_address}",
+                 "connection_command": f"ssh -p {vm.ssh_port or 22} ctf-trainee@{vm.private_ip or vm.ip_address}",
                  "modules": [_module_payload(item, definitions[item.module_id], reveals.get(item.id, set()))
                              for item in sorted(by_vm[vm.id], key=lambda value: value.id)]} for vm in vms],
         "score": _score(db, user, visible),
@@ -136,7 +170,7 @@ async def team_access(request: Request, db: Session = Depends(get_db)):
         "public_key": credential.public_key,
         "sudo_password": decrypt_secret(credential.sudo_password_encrypted),
         "connections": [{"vm_id": vm.id, "hostname": vm.hostname,
-                         "command": f"ssh -i ./ctf-team-key -p {vm.ssh_port or 22} {credential.username}@{vm.ip_address}"}
+                         "command": f"ssh -i ./ctf-team-key -p {vm.ssh_port or 22} {credential.username}@{vm.private_ip or vm.ip_address}"}
                         for vm in vms],
     }, headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"})
 
