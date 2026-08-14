@@ -17,7 +17,7 @@ from sqlalchemy.orm import object_session
 from api.database import SessionLocal
 from api.models import Event, Site, Team, VM, VMGoal, VMModule, VPNCredential, Zone, utcnow
 from api.services.gamenet_provider import (
-    GameNetProviderError, VultrGameNetProvider, bootstrap_opnsense, configure_endpoint_network,
+    GameNetProviderError, VultrGameNetProvider, bootstrap_opnsense, configure_endpoint_network, configure_snapshot_opnsense,
     configure_gateway, configure_site_wireguard, endpoint_cloud_init, install_local_wireguard, render_opnsense_config,
     ssh_command, tcp_closed, ubuntu_cloud_init, update_vm_addresses, upload_text,
 )
@@ -182,6 +182,8 @@ def create_gateways(db, event, infrastructure):
 
 def create_site_firewalls(db, event, infrastructure):
     _require_provider()
+    from api.services.opnsense_images import active_image
+    image = active_image(db)
     definitions = {site["key"]: site for site in infrastructure["sites"]}
     for site in db.query(Site).filter_by(event_id=event.id):
         if not site.vpc_id:
@@ -195,14 +197,29 @@ def create_site_firewalls(db, event, infrastructure):
                     base_type=spec["base_type"], vultr_plan=spec["default_plan"], vultr_region=site.region)
             db.add(vm); db.flush(); site.firewall_vm_id = vm.id
         if not vm.vultr_id or not vm.public_ip:
-            _create_provider_instance(vm, public=True, vpc_ids=[site.vpc_id])
+            if not image:
+                raise RuntimeError("No active validated OPNsense image. Open /admin/settings to build and activate one.")
+            vm.opnsense_image_id, vm.opnsense_release, vm.opnsense_snapshot_id = image.id, image.version, image.snapshot_id
+            _create_provider_instance(vm, public=True, vpc_ids=[site.vpc_id],
+                                      image_source={"snapshot_id": image.snapshot_id})
             vm.vpc_ip = vm.private_ip
             vm.private_ip = str(ip_network(site.allocated_cidr).network_address + 1)
         if not vm.public_ip or not vm.private_ip:
             raise RuntimeError("site firewall requires both public WAN and private VPC addresses")
         vm.ip_address = vm.private_ip
         if vm.status != "active":
-            bootstrap_opnsense(site, vm)
+            # Legacy records that already have an instance but no provenance
+            # finish their original conversion path; all new instances use the snapshot.
+            if vm.opnsense_snapshot_id:
+                configure_snapshot_opnsense(site, vm, vm.opnsense_release)
+                duplicate = db.query(VM).filter(
+                    VM.id != vm.id, VM.ssh_host_key == vm.ssh_host_key,
+                    VM.role == "site_firewall", VM.ssh_host_key.is_not(None),
+                ).first()
+                if duplicate:
+                    raise GameNetProviderError("snapshot clones presented the same SSH host key")
+            else:
+                bootstrap_opnsense(site, vm)
             vm.status = "active"
 
 
@@ -282,12 +299,13 @@ def _provider():
     return VultrGameNetProvider()
 
 
-def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None):
+def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None, image_source=None):
     provider = _provider()
     try:
         instance = provider.create_instance(
             vm, public=public, vpc_ids=vpc_ids,
-            user_data=user_data if user_data is not None else ubuntu_cloud_init(),
+            user_data=(user_data if user_data is not None else ubuntu_cloud_init()) if not image_source else None,
+            image_source=image_source,
         )
         if public:
             update_vm_addresses(vm, instance, public=True)

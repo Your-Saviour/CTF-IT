@@ -87,7 +87,7 @@ class VultrGameNetProvider:
             raise GameNetProviderError(f"existing VPC {vpc.get('id')} does not match {site.allocated_cidr} in {site.region}")
 
     def create_instance(self, vm: VM, *, public: bool, vpc_ids: list[str] | None = None,
-                        user_data: str | None = None) -> dict:
+                        user_data: str | None = None, image_source: dict | None = None) -> dict:
         if vm.vultr_id:
             instance = self._request("GET", f"/instances/{vm.vultr_id}").get("instance")
             if instance:
@@ -100,13 +100,20 @@ class VultrGameNetProvider:
 
         _, public_key = get_or_create_platform_keypair(object_session(vm))
         ssh_key_id = self._ensure_ssh_key("ctf-platform", public_key)
-        base = load_base_type(vm.base_type)
         body = {
             "region": vm.vultr_region, "plan": vm.vultr_plan,
-            "os_id": self._resolve_os_id(base.os), "label": vm.hostname, "hostname": vm.hostname,
+            "label": vm.hostname, "hostname": vm.hostname,
             "sshkey_id": [ssh_key_id], "enable_ipv6": False, "backups": "disabled",
             "ddos_protection": False,
         }
+        if image_source and image_source.get("snapshot_id"):
+            body["snapshot_id"] = image_source["snapshot_id"]
+            # Snapshot contains the platform key; Vultr's OS key injection is
+            # intentionally not relied upon for custom snapshots.
+            body.pop("sshkey_id", None)
+        else:
+            base = load_base_type(vm.base_type)
+            body["os_id"] = self._resolve_os_id(base.os)
         if vpc_ids:
             body["attach_vpc"] = vpc_ids
             body["enable_vpc"] = True
@@ -395,6 +402,35 @@ def bootstrap_opnsense(site: Site, vm: VM) -> None:
             last_detail = str(exc)
         time.sleep(POLL_SECONDS)
     raise GameNetProviderError(f"OPNsense bootstrap did not complete: {last_detail[:300]}")
+
+
+def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> None:
+    """Apply unique site state to an already validated OPNsense snapshot."""
+    db = object_session(vm)
+    _, public_key = get_or_create_platform_keypair(db)
+    if not vm.admin_password:
+        password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(24))
+        from api.services.secrets import encrypt_secret
+        vm.admin_password = encrypt_secret(password); db.flush()
+    else:
+        password = decrypt_secret(vm.admin_password)
+    config = render_opnsense_config(site, vm, public_key, password, temporary_management=True)
+    upload_text(vm, "/conf/config.xml", config)
+    command = ("test -x /usr/local/sbin/configctl && opnsense-version -v && "
+               "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && "
+               "configctl service reload all")
+    code, output, error = ssh_command(vm, command, timeout=180, connect_timeout=300)
+    if code or expected_version not in output:
+        raise GameNetProviderError(f"snapshot OPNsense validation failed: {(error or output)[:300]}")
+    host = vm.public_ip or vm.ip_address
+    if host:
+        transport = paramiko.Transport((host, vm.ssh_port or 22))
+        try:
+            transport.start_client(timeout=15)
+            key = transport.get_remote_server_key()
+            vm.ssh_host_key = f"{key.get_name()} {key.get_base64()}"
+        finally:
+            transport.close()
 
 
 def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,

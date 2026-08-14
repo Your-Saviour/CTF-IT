@@ -8,13 +8,13 @@ from typing import Optional
 from urllib.parse import urljoin
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import AccountToken, AdminAudit, Event, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
+from api.models import AccountToken, AdminAudit, Event, OpnsenseImage, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
 from api.routes.auth import _token_digest, get_current_user
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
@@ -63,6 +63,15 @@ class BulkVerificationRequest(BaseModel):
     team_id: Optional[int] = None
 
 
+class OpnsenseSyncRequest(BaseModel):
+    version: str
+
+
+class OpnsenseRetireRequest(BaseModel):
+    delete_artifacts: bool = False
+    confirm: bool = False
+
+
 def require_admin(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
     if not user or not user.is_admin:
@@ -81,6 +90,138 @@ def _audit(db: Session, actor: User, action: str, target: User | None = None, **
 
 def _active_admin_count(db: Session) -> int:
     return db.query(User).filter(User.is_admin.is_(True), User.active.is_(True)).count()
+
+
+def _run_image_job(image_id: int, operation: str):
+    from api.database import SessionLocal
+    from api.services.opnsense_images import complete_install, sync_to_awaiting_install
+    session = SessionLocal()
+    try:
+        (complete_install if operation == "complete" else sync_to_awaiting_install)(session, image_id)
+    finally:
+        session.close()
+
+
+@router.get("/opnsense-images")
+async def list_opnsense_images(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    from api.services.opnsense_images import image_payload
+    domain = os.environ.get("DOMAIN", "")
+    rows = db.query(OpnsenseImage).order_by(OpnsenseImage.created_at.desc()).all()
+    result = []
+    for row in rows:
+        payload = image_payload(row)
+        payload["console_url"] = (f"https://my.vultr.com/subs/?SUBID={row.builder_instance_id}" if row.builder_instance_id else None)
+        payload["builder_config_url"] = (f"https://ctf.{domain}/opnsense-builder-config/{row.builder_config_token}/config.xml"
+                                         if row.builder_config_token and domain else None)
+        payload["instructions"] = ("Install OPNsense to the VM disk. Assign WAN=vtnet0 and LAN=vtnet1. "
+                                   "Then fetch the generated builder configuration URL to /conf/config.xml and reboot.")
+        result.append(payload)
+    return result
+
+
+@router.post("/opnsense-images/sync")
+async def sync_opnsense_image(body: OpnsenseSyncRequest, request: Request, background: BackgroundTasks,
+                              db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    from api.services.opnsense_images import ImageWorkflowError, new_image
+    try:
+        image = new_image(db, body.version)
+    except (ValueError, ImageWorkflowError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409 if isinstance(exc, ImageWorkflowError) else 422)
+    _audit(db, admin, "opnsense_image_sync", image_id=image.id, version=image.version); db.commit()
+    background.add_task(_run_image_job, image.id, "sync")
+    return JSONResponse({"id": image.id, "status": image.status}, status_code=202)
+
+
+@router.post("/opnsense-images/{image_id}/installer-complete")
+async def opnsense_installer_complete(image_id: int, request: Request, background: BackgroundTasks,
+                                      db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    image = db.get(OpnsenseImage, image_id)
+    if not image:
+        return JSONResponse({"error": "image not found"}, status_code=404)
+    if image.status != "awaiting_install":
+        return JSONResponse({"error": "image is not awaiting installation"}, status_code=409)
+    _audit(db, admin, "opnsense_installer_complete", image_id=image.id); db.commit()
+    background.add_task(_run_image_job, image.id, "complete")
+    return JSONResponse({"id": image.id, "status": "validating"}, status_code=202)
+
+
+@router.post("/opnsense-images/{image_id}/resume")
+async def resume_opnsense_image(image_id: int, request: Request, background: BackgroundTasks,
+                                db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    image = db.get(OpnsenseImage, image_id)
+    if not image:
+        return JSONResponse({"error": "image not found"}, status_code=404)
+    if image.status != "interrupted":
+        return JSONResponse({"error": "only an interrupted job can be resumed"}, status_code=409)
+    operation = "complete" if image.phase in {"validating", "snapshotting"} else "sync"
+    _audit(db, admin, "opnsense_image_resume", image_id=image.id, phase=image.phase); db.commit()
+    background.add_task(_run_image_job, image.id, operation)
+    return JSONResponse({"id": image.id, "status": "resuming"}, status_code=202)
+
+
+@router.post("/opnsense-images/{image_id}/activate")
+async def activate_opnsense_image(image_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    image = db.get(OpnsenseImage, image_id)
+    if not image:
+        return JSONResponse({"error": "image not found"}, status_code=404)
+    if image.status not in {"ready", "active"} or not image.validated_at or not image.snapshot_id:
+        return JSONResponse({"error": "only a validated ready image can be activated"}, status_code=409)
+    for old in db.query(OpnsenseImage).filter(OpnsenseImage.status == "active", OpnsenseImage.id != image.id):
+        old.status = old.phase = "ready"; old.activated_at = None
+    setting = db.query(PlatformSettings).filter_by(key="active_opnsense_image_id").first()
+    if not setting:
+        setting = PlatformSettings(key="active_opnsense_image_id", value=str(image.id)); db.add(setting)
+    else:
+        setting.value = str(image.id)
+    image.status = image.phase = "active"; image.activated_at = utcnow()
+    _audit(db, admin, "opnsense_image_activate", image_id=image.id, snapshot_id=image.snapshot_id); db.commit()
+    return {"id": image.id, "status": image.status}
+
+
+@router.post("/opnsense-images/{image_id}/retire")
+async def retire_opnsense_image(image_id: int, body: OpnsenseRetireRequest, request: Request,
+                                db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    image = db.get(OpnsenseImage, image_id)
+    if not image:
+        return JSONResponse({"error": "image not found"}, status_code=404)
+    if body.delete_artifacts and not body.confirm:
+        return JSONResponse({"error": "artifact deletion requires confirm=true"}, status_code=409)
+    if body.delete_artifacts and db.query(VM).filter_by(opnsense_image_id=image.id).first():
+        return JSONResponse({"error": "artifacts cannot be deleted while firewall records reference this image"}, status_code=409)
+    if image.status in {"downloading", "verifying", "decompressing", "importing", "validating", "snapshotting"}:
+        return JSONResponse({"error": "a running job cannot be retired"}, status_code=409)
+    setting = db.query(PlatformSettings).filter_by(key="active_opnsense_image_id").first()
+    if setting and setting.value == str(image.id):
+        db.delete(setting)
+    if body.delete_artifacts:
+        from api.services.opnsense_images import VultrImageClient, cleanup_local, cleanup_remote
+        client = VultrImageClient()
+        try:
+            cleanup_remote(image, client, preserve_snapshot=False)
+        finally:
+            client.close()
+        cleanup_local(image)
+    image.status = image.phase = "retired"; image.retired_at = utcnow(); image.builder_config_token = None
+    _audit(db, admin, "opnsense_image_retire", image_id=image.id, artifacts_deleted=body.delete_artifacts); db.commit()
+    return {"id": image.id, "status": image.status}
 
 
 def _user_payload(user: User, audit_summary=None):
@@ -711,6 +852,14 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     # A GameNet event is not public until lockdown and connectivity checks pass.
     if event.infrastructure:
         from api.models import Team
+        from api.services.opnsense_images import active_image
+
+        if not active_image(db):
+            return JSONResponse({
+                "error": "No active validated OPNsense image",
+                "detail": "Build and activate an OPNsense image before provisioning GameNet firewalls.",
+                "settings_url": "/admin/settings#opnsense-images",
+            }, status_code=409)
 
         infrastructure = json.loads(event.infrastructure)
         teams = db.query(Team).filter(Team.event_id == event_id).all()

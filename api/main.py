@@ -7,7 +7,7 @@ from contextlib import suppress
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -162,6 +162,9 @@ async def lifespan(app: FastAPI):
             event.open = False
         if interrupted_events:
             db.commit()
+
+        from api.services.opnsense_images import interrupt_running_jobs
+        interrupt_running_jobs(db)
 
         # Create default event if none exists
         if not db.query(Event).first():
@@ -366,6 +369,18 @@ app.include_router(learner.router)
 app.include_router(service_credentials.router)
 app.include_router(vm.router)
 app.include_router(vm_goals.router)
+
+
+@app.get("/opnsense-builder-config/{token}/config.xml")
+async def opnsense_builder_config(token: str, db: Session = Depends(get_db)):
+    """One-purpose token endpoint consumed from the isolated builder console."""
+    from api.models import OpnsenseImage
+    from api.services.opnsense_images import generic_builder_config
+    image = db.query(OpnsenseImage).filter_by(builder_config_token=token, status="awaiting_install").first()
+    if not image:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return Response(generic_builder_config(db), media_type="application/xml",
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/api/events")

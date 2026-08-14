@@ -10,6 +10,8 @@ Do not run this procedure as part of ordinary unit tests.
 - `bash -n quickstart.sh` passes.
 - Production Compose renders successfully from example configuration.
 - DNS credentials and Vultr credentials are scoped to disposable resources.
+- `CTF_CONTROL_PLANE_CIDR` is the disposable control host's IPv4 CIDR and the
+  host has at least 3 GB of free temporary image storage.
 - The operator has recorded the cloud project, domain, region, and expected maximum spend.
 
 ## Deployment
@@ -32,7 +34,13 @@ Do not run this procedure as part of ordinary unit tests.
 
 ## Event exercise
 
-Create one event with one team and a quota containing one `firewall`, one `target`, and one `attacker` VM.
+Before creating the event, build the intended OPNsense release under **Admin →
+Settings → OPNsense images**. Complete the console installation with
+WAN=`vtnet0` and LAN=`vtnet1`, load the generated generic configuration, mark
+the installer complete, and activate the resulting validated snapshot.
+
+Record the total build duration. Then create one GameNet event with at least
+one team and its site endpoints.
 
 Verify:
 
@@ -43,12 +51,22 @@ Verify:
 5. Caldera receives the target agent and can run the exported adversary.
 6. Provisioning status and errors are visible in the admin UI.
 7. `deface_website`, `install_c2`, and `exfil_shadow` can each transition from pending to achieved and then defended.
+8. Every site firewall records the activated OPNsense release and snapshot ID,
+   has a distinct SSH host key, and reaches active state without invoking the
+   legacy `opnsense-bootstrap` conversion.
+
+For the release acceptance run, provision at least five firewalls from the
+same snapshot. Record ready time for each deployment; target median under
+10 minutes and p95 under 15 minutes. If snapshot restoration alone exceeds the
+target, retain the validated image workflow and track a warm pool separately.
 
 ## Teardown
 
 - Destroy all created VMs through the platform.
 - Confirm Cloudflare DNS records are removed.
 - Confirm the team VPC is removed after its final VM.
+- Retire the disposable OPNsense image with confirmed artifact deletion only
+  after all firewall records that reference it have been removed.
 - Confirm no Semaphore task remains running.
 - Record any resource that required manual cleanup.
 

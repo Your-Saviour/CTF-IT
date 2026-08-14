@@ -21,9 +21,9 @@ Provisioning state is available from `GET /admin/vms/{id}/provision-status` and 
 
 ## Vultr event provisioning
 
-When `VULTR_API_KEY` and an event `vm_quota` are configured, starting the event creates VMs for each team. Supported roles are:
+When `VULTR_API_KEY` and GameNet infrastructure are configured, starting the event creates VMs for each team. A validated OPNsense snapshot must first be built and activated under **Admin → Settings → OPNsense images**. New firewall provisioning fails before allocating event resources when no active image exists.
 
-- `firewall`: creates the team VPC and OPNsense gateway first;
+- `site_firewall`: restores the active OPNsense snapshot, attaches the site VPC, and applies unique site configuration;
 - `target`: attaches to the team VPC, assigns modules, and provisions through Semaphore;
 - `attacker`: creates a bare VM without module deployment.
 
@@ -33,4 +33,6 @@ The admin event page polls the aggregate provision-status endpoint until every V
 
 - The first explicit connection test enrolls the VM's SSH host key. Later key changes are rejected and require an administrator to investigate before re-enrollment.
 - External provisioning depends on Vultr, Semaphore, and optionally Cloudflare availability.
+- The one-time OPNsense builder requires a valid `CTF_CONTROL_PLANE_CIDR`, at
+  least 3 GB of temporary storage, and an interactive Vultr console install.
 - Live provisioning and teardown require the manual release smoke test in `deploy/testing_plan.md`.

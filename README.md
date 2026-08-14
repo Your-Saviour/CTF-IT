@@ -93,6 +93,22 @@ CLOUDFLARE_API_TOKEN=your-token   # Auto-creates DNS A records on VM creation
 CLOUDFLARE_DOMAIN=example.com
 ```
 
+GameNet firewall provisioning also requires a managed OPNsense snapshot:
+
+```bash
+CTF_CONTROL_PLANE_CIDR=203.0.113.10/32  # Public source CIDR allowed to SSH to the temporary builder
+GAMENET_FIREWALL_PLAN=vc2-2c-4gb       # Builder and firewall baseline
+OPNSENSE_MIRROR_BASE=https://pkg.opnsense.org/releases/mirror/
+```
+
+`CTF_CONTROL_PLANE_CIDR` must be an IPv4 CIDR and should be restricted to the
+deployment host or management network. The image workflow refuses to create a
+Vultr firewall group when this value is missing or invalid. The production
+Compose stack mounts a persistent image volume into the API and exposes only a
+random, temporary ISO path through a read-only Nginx sidecar. Allow roughly
+3 GB of free space for the compressed image, decompressed ISO, and atomic
+temporary files.
+
 The root `.env` configures API secrets and integrations. The production stack
 uses its dedicated PostgreSQL service; root `DATABASE_URL` is only used by the
 local development Compose stack.
@@ -430,34 +446,19 @@ Requires `VULTR_API_KEY` and `VULTR_DEFAULT_REGION` in root `.env`.
 
 To destroy: VM detail page → **Destroy on Vultr** — runs `playbooks/destroy-vm.yml`, removes the Vultr instance, deletes the DNS record, and removes the VM from the database.
 
-### VM quota (auto-provisioning on event start)
+### GameNet auto-provisioning on event start
 
-Define a `vm_quota` JSON on an event to automatically provision all VMs when the event starts.
+An event with GameNet infrastructure materialises its team VPN gateways, site
+firewalls, private zones, and endpoints when the event starts. The platform
+validates Vultr VPC capacity and requires an active managed OPNsense image
+before allocating cloud resources. Provisioning then creates gateways and site
+VPCs, restores site firewalls from the active snapshot, configures private
+endpoints, establishes WireGuard routing, applies modules, locks down public
+ingress, and runs connectivity checks before opening the event.
 
-```json
-{
-  "ubuntu_target": {
-    "os": "Ubuntu 24.04 LTS x64",
-    "default_plan": "vc2-1c-2gb",
-    "count": 3,
-    "role": "target",
-    "region": "ewr"
-  },
-  "red_team": {
-    "os": "Ubuntu 24.04 LTS x64",
-    "default_plan": "vc2-2c-4gb",
-    "count": 1,
-    "role": "attacker"
-  }
-}
-```
-
-| Role | Behaviour |
-|---|---|
-| `target` | Modules assigned, Ansible playbook deployed after VM creation. Plan auto-sized from module `min_ram_mb`/`min_vcpu` requirements. |
-| `attacker` | Bare OS only, no modules. Goes directly to `active` after Vultr creation. |
-
-`POST /admin/api/events/{id}/start` triggers auto-provisioning when `vm_quota` is present.
+`POST /admin/api/events/{id}/start` triggers this workflow when the event has
+GameNet infrastructure. An event remains closed in `provisioning` or
+`provision_failed` until every acceptance check passes.
 
 **Provisioning status:**
 
@@ -474,6 +475,43 @@ learner → team VPN edge → site tunnel → site edge/firewall → private zon
 The public WireGuard gateway is the team's access hub, not a member of any site. Learners receive one profile for all sites assigned to their team. Every site's OPNsense instance remains that site's independent internet edge and security boundary; routing policy blocks direct site-to-site endpoint traffic even though the team DNS service can discover names in every site.
 
 Newly provisioned GameNets use platform-managed DNS. Each site firewall serves `<site-key>.gamenet.test` on private LAN and WireGuard interfaces, and the team VPN edge conditionally forwards those zones while resolving public names. Endpoint names have the form `<endpoint-key>-<ordinal>.<zone-key>.<site-key>.gamenet.test`; underscores in keys become hyphens. Existing active GameNets must be destroyed and reprovisioned to receive this DNS configuration.
+
+### Managed OPNsense images
+
+New GameNet firewalls are restored from an administrator-validated Vultr
+snapshot. They are not converted from FreeBSD during ordinary event
+provisioning. Existing, already-created legacy firewall records can finish the
+old bootstrap path, but there is no fallback for a new event: starting a
+GameNet without an active validated image fails before event cloud resources
+are allocated.
+
+Build and activate an image from **Admin → Settings → OPNsense images**:
+
+1. Enter a major release such as `26.7` and select **Sync release**. The API
+   downloads only from `OPNSENSE_MIRROR_BASE`, verifies the published SHA-256,
+   decompresses the ISO, and verifies its signature against the reviewed
+   release public key in the repository.
+2. Wait for `awaiting_install`, open the displayed Vultr console, and install
+   OPNsense to the VM disk. Assign WAN=`vtnet0` and LAN=`vtnet1`.
+3. Fetch the displayed one-time builder configuration URL to
+   `/conf/config.xml`, then reboot the builder.
+4. Select **Installer complete**. The platform validates the version, disk,
+   interfaces, SSH, and `configctl`; removes host-specific state; creates the
+   snapshot; and validates a test deployment.
+5. When the image is `ready`, select **Activate**. Activation is explicit and
+   affects only newly created firewalls. Existing firewalls are unchanged.
+
+Only one image job and one active image are permitted. If the API restarts
+during a phase, the job becomes `interrupted` and must be resumed from the
+settings page. A validated snapshot remains `ready` if temporary builder
+cleanup encounters a Vultr error; the warning and remaining artifact IDs are
+retained for later cleanup instead of invalidating the snapshot. Retiring an
+image deactivates it. Destructive artifact removal requires confirmation and
+is refused while firewall records reference the image.
+
+Each firewall records the image release and snapshot ID used to create it.
+Per-site configuration and a unique administrator password are applied after
+restore, and provisioning rejects duplicate SSH host keys between clones.
 
 `/admin/topology` — interactive D3 force-directed graph showing the event → team → VM hierarchy.
 

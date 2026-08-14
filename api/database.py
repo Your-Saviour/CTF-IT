@@ -42,7 +42,7 @@ def get_db():
 
 def init_db():
     from api.models import (  # noqa: F401
-        AccountToken, AdminAudit, Event, HintReveal, PlatformSettings, ServiceCredential,
+        AccountToken, AdminAudit, Event, HintReveal, OpnsenseImage, PlatformSettings, ServiceCredential,
         Site, Team, TeamTrainingCredential, TeamVPNGateway, User, VerificationAttempt,
         VM, VMGoal, VMModule, VPNCredential, Zone,
     )

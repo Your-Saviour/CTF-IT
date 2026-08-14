@@ -52,6 +52,24 @@ def test_production_api_uses_postgres() -> None:
     assert any("DATABASE_URL=postgresql+psycopg://" in value for value in api_environment)
 
 
+def test_opnsense_iso_sidecar_shares_read_only_volume_and_has_priority_route() -> None:
+    services = _services()
+    api = services["api"]
+    iso = services["opnsense-iso"]
+    assert "ctf-opnsense_iso:/var/lib/ctf-opnsense" in api["volumes"]
+    assert "ctf-opnsense_iso:/srv/opnsense:ro" in iso["volumes"]
+    labels = iso["labels"]
+    assert any("PathPrefix(`/vultr-iso/`)" in label for label in labels)
+    assert "traefik.http.routers.ctf-opnsense-iso.priority=200" in labels
+
+
+def test_iso_nginx_allows_only_read_methods_and_disables_listing() -> None:
+    config = (ROOT / "deploy" / "nginx" / "opnsense-iso.conf").read_text()
+    assert "limit_except GET" in config
+    assert "autoindex off" in config
+    assert "location / { return 404; }" in config
+
+
 def test_caldera_ssh_host_key_is_mounted_read_only() -> None:
     caldera = _services()["caldera"]
     assert "./caldera/config/ssh_host_key:/usr/src/app/conf/ssh_host_key:ro" in caldera["volumes"]

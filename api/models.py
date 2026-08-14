@@ -263,6 +263,9 @@ class VM(Base):
     vpc_ip: Mapped[str] = mapped_column(String(45), nullable=True)
     # OPNsense admin password (firewall VMs only)
     admin_password: Mapped[str] = mapped_column(String(128), nullable=True)
+    opnsense_image_id: Mapped[int] = mapped_column(ForeignKey("opnsense_images.id"), nullable=True)
+    opnsense_release: Mapped[str] = mapped_column(String(16), nullable=True)
+    opnsense_snapshot_id: Mapped[str] = mapped_column(String(64), nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
@@ -277,6 +280,37 @@ class PlatformSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class OpnsenseImage(Base):
+    """Auditable state for one administrator-managed OPNsense snapshot build."""
+
+    __tablename__ = "opnsense_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version: Mapped[str] = mapped_column(String(16), nullable=False)
+    artifact_url: Mapped[str] = mapped_column(Text, nullable=False)
+    checksum_url: Mapped[str] = mapped_column(Text, nullable=False)
+    signature_url: Mapped[str] = mapped_column(Text, nullable=False)
+    compressed_sha256: Mapped[str] = mapped_column(String(64), nullable=True)
+    iso_sha256: Mapped[str] = mapped_column(String(64), nullable=True)
+    vultr_iso_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    builder_instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    builder_vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    builder_firewall_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    test_instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    snapshot_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    route_token: Mapped[str] = mapped_column(String(128), nullable=True)
+    builder_config_token: Mapped[str] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="downloading")
+    phase: Mapped[str] = mapped_column(String(32), nullable=False, default="downloading")
+    error_detail: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    validated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    retired_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    build_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=True)
 
 
 class VMModule(Base):
