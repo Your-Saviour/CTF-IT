@@ -415,15 +415,42 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> No
     else:
         password = decrypt_secret(vm.admin_password)
     config = render_opnsense_config(site, vm, public_key, password, temporary_management=True)
-    upload_text(vm, "/conf/config.xml", config)
-    command = ("/bin/sh -c 'rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder "
-               "/usr/local/etc/rc.syshook.d/start/99-ctf-builder; "
-               "pfctl -e >/dev/null 2>&1 || true; "
-               "test -x /usr/local/sbin/configctl && opnsense-version -v && "
-               "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && "
-               "configctl service reload all'")
-    code, output, error = ssh_command(vm, command, timeout=180, connect_timeout=300)
-    if code or expected_version not in output:
+    upload_text(vm, "/tmp/ctf-site-config.xml", config)
+    php = ('require_once("config.inc"); require_once("util.inc"); '
+           '$c=\\OPNsense\\Core\\Config::getInstance(); '
+           'if(!$c->restoreBackup("/tmp/ctf-site-config.xml")){exit(1);} $c->forceReload();')
+    apply_script = "\n".join([
+        "#!/bin/sh", "set -eu", f"/usr/local/bin/php -r {shlex.quote(php)}",
+        "/usr/local/sbin/pluginctl -M", "/usr/local/opnsense/scripts/auth/sync_user.php -u root",
+        "rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder /usr/local/etc/rc.syshook.d/start/99-ctf-builder",
+        "/usr/local/sbin/configctl interface reconfigure lan",
+        "/usr/local/sbin/configctl interface reconfigure wan",
+        "/usr/local/sbin/configctl openssh restart", "/usr/local/sbin/configctl filter reload",
+        "rm -f /tmp/ctf-site-config.xml", "echo ready > /conf/ctf-site-ready",
+    ]) + "\n"
+    upload_text(vm, "/tmp/ctf-apply.sh", apply_script, mode=0o700)
+    code, _, error = ssh_command(
+        vm, "nohup /bin/sh /tmp/ctf-apply.sh >/tmp/ctf-apply.log 2>&1 </dev/null &", timeout=30
+    )
+    if code:
+        raise GameNetProviderError(f"failed to launch snapshot configuration: {error[:300]}")
+    deadline = time.monotonic() + 600
+    output = error = ""
+    while time.monotonic() < deadline:
+        try:
+            code, output, error = ssh_command(
+                vm,
+                "test -f /conf/ctf-site-ready && opnsense-version -v && "
+                "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && "
+                "pfctl -sr | grep -F 'Allow management SSH'",
+                timeout=60, connect_timeout=60,
+            )
+            if code == 0 and expected_version in output:
+                break
+        except Exception as exc:
+            error = str(exc)
+        time.sleep(POLL_SECONDS)
+    else:
         raise GameNetProviderError(f"snapshot OPNsense validation failed: {(error or output)[:300]}")
     host = vm.public_ip or vm.ip_address
     if host:
@@ -448,6 +475,7 @@ def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
         opnsense_lan_subnet=network.prefixlen,
         opnsense_admin_password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode(),
         opnsense_ssh_pubkey=public_key, temporary_management=temporary_management,
+        opnsense_management_cidr=os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32"),
     )
 
 

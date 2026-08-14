@@ -118,7 +118,8 @@ async def list_opnsense_images(request: Request, db: Session = Depends(get_db)):
                                          if row.builder_config_token and domain else None)
         payload["instructions"] = ("Install OPNsense to the VM disk. Assign WAN=vtnet0 and LAN=vtnet1. "
                                    "Fetch the generated setup URL to /tmp/ctf-builder.php and run it with "
-                                   "/usr/local/bin/php. Do not replace /conf/config.xml or reboot manually; "
+                                   "/usr/local/bin/php. The script identifies LAN from Vultr's VPC MAC and applies "
+                                   "the authoritative WAN/LAN mapping. Do not replace /conf/config.xml or reboot manually; "
                                    "then select Installer complete.")
         result.append(payload)
     return result

@@ -495,11 +495,12 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
    OPNsense to the VM disk. Assign WAN=`vtnet0` and LAN=`vtnet1`.
 3. Fetch the displayed one-time setup URL to `/tmp/ctf-builder.php` and run it
    with `/usr/local/bin/php`. The script merges settings through OPNsense's
-   `write_config()` API; never replace `/conf/config.xml` directly. It enables
-   the OPNsense `openssh` service with the platform key and keeps WAN on DHCP.
-   A temporary boot hook provides builder SSH while the Vultr firewall limits
-   access to `CTF_CONTROL_PLANE_CIDR`. Do not reboot manually; select
-   **Installer complete** when the script reports success.
+   `write_config()` API; never replace `/conf/config.xml` directly. It matches
+   the LAN device to Vultr's reported VPC MAC, enables `openssh`, synchronizes
+   the root account, and installs an OPNsense 26.7 MVC firewall rule limited to
+   `CTF_CONTROL_PLANE_CIDR`. It applies the official interface, SSH, and filter
+   actions immediately. Do not reboot manually; select **Installer complete**
+   only when the script reports success.
 4. Select **Installer complete**. The platform validates the version, disk,
    interfaces, SSH, and `configctl`; removes host-specific state; creates the
    snapshot; and validates a test deployment.
@@ -517,8 +518,11 @@ is refused while firewall records reference the image.
 Each firewall records the image release and snapshot ID used to create it.
 Per-site configuration and a unique administrator password are applied after
 restore, and provisioning rejects duplicate SSH host keys between clones.
-The temporary builder-access hook and WAN rule are removed when that per-site
-configuration is applied.
+The temporary builder management rule is replaced when the per-site
+configuration is applied. Installer completion refuses to reboot until the
+effective interface MACs, public address, default route, key authentication,
+SSH settings, and PF rule have all been validated; the same checks run again
+after reboot and on the snapshot test deployment.
 
 `/admin/topology` — interactive D3 force-directed graph showing the event → team → VM hierarchy.
 

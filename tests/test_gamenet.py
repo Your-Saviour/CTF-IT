@@ -73,6 +73,11 @@ def test_opnsense_config_encodes_authorized_key(db_session):
     rendered = render_opnsense_config(site, vm, "ssh-ed25519 TEST", "password", temporary_management=True)
     assert "<authorizedkeys>c3NoLWVkMjU1MTkgVEVTVA==</authorizedkeys>" in rendered
     assert "<active_interface>lan</active_interface>" in rendered
+    assert "<OPNsense>" in rendered
+    assert "<source_net>127.0.0.1/32</source_net>" in rendered
+    assert "<description>Allow management SSH</description>" in rendered
+    assert "<filter/>" in rendered
+    assert "<filter>" not in rendered
 
 
 def test_managed_dns_names_normalize_keys_and_preserve_endpoint_ordinals(db_session):

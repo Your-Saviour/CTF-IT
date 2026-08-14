@@ -12,7 +12,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     ImageWorkflowError, VultrImageClient, active_image, artifact_urls, cleanup_validated_image, decompress_bz2,
-    generic_builder_setup_script,
+    _builder_validation_command, generic_builder_setup_script,
     interrupt_running_jobs, parse_published_checksum, stream_download, validate_release,
 )
 
@@ -80,28 +80,46 @@ def test_iso_route_directory_is_traversable_by_read_only_sidecar():
     assert "route_dir.chmod(0o755)" in source
 
 
-def test_builder_setup_uses_opnsense_config_api_and_persistent_access_hook(monkeypatch):
+def test_builder_setup_uses_official_apply_paths_and_vpc_mac(monkeypatch):
     monkeypatch.setattr("api.services.opnsense_images.get_or_create_platform_keypair",
                         lambda _db: ("private", "ssh-ed25519 TEST"))
-    script = generic_builder_setup_script(None)
+    script = generic_builder_setup_script(None, lan_mac="5a:00:00:00:00:02", control_plane_cidr="192.0.2.8/32")
     assert 'require_once("config.inc")' in script
     assert 'write_config("Configure CTF OPNsense image builder")' in script
-    assert '$config["interfaces"]["wan"]["if"] = "vtnet0"' in script
-    assert '$config["interfaces"]["lan"]["if"] = "vtnet1"' in script
-    assert 'rc.syshook.d/start/99-ctf-builder' in script
-    assert "service openssh onestart" in script
-    assert "/sbin/pfctl -d" in script
+    assert '$lan_mac = "5a:00:00:00:00:02"' in script
+    assert '$config["interfaces"]["wan"]["if"] = $wan_if' in script
+    assert '$config["interfaces"]["lan"]["if"] = $lan_if' in script
+    assert '$config["OPNsense"]["Firewall"]["Filter"]["rules"]' in script
+    assert '"source_net" => "192.0.2.8/32"' in script
+    assert "sync_user.php -u root" in script
+    assert "configctl interface reconfigure wan" in script
+    assert "configctl openssh restart" in script
+    assert "configctl filter reload" in script
+    assert "pfctl -d" not in script
 
 
-def test_detach_iso_is_idempotent_but_still_reboots(monkeypatch):
+def test_detach_iso_uses_official_endpoint_and_is_idempotent(monkeypatch):
     client = object.__new__(VultrImageClient)
     calls = []
-    monkeypatch.setattr(client, "instance", lambda _instance_id: {"iso_id": None})
-    monkeypatch.setattr(client, "request", lambda method, path, **kwargs: calls.append((method, path, kwargs)))
+    def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        return {"iso_status": {"iso_id": None}}
+    monkeypatch.setattr(client, "request", request)
 
-    client.detach_iso_and_reboot(SimpleNamespace(builder_instance_id="builder-1"))
+    client.detach_iso(SimpleNamespace(builder_instance_id="builder-1"))
 
-    assert calls == [("POST", "/instances/builder-1/reboot", {})]
+    assert calls == [("GET", "/instances/builder-1/iso", {})]
+
+
+def test_builder_validation_checks_effective_network_ssh_and_pf_state():
+    command = _builder_validation_command(
+        public_ip="198.51.100.10", lan_mac="5a:00:00:00:00:02", version="26.7"
+    )
+    assert "198.51.100.10" in command
+    assert "5a:00:00:00:00:02" in command
+    assert "permitrootlogin" in command
+    assert "pfctl -sr" in command
+    assert "route -n get default" in command
 
 
 def test_vultr_get_retries_transient_server_errors(monkeypatch):
