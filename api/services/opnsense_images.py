@@ -402,6 +402,10 @@ def sync_to_awaiting_install(db: Session, image_id: int, *, vultr_factory=VultrI
                 raise ImageWorkflowError("DOMAIN is required for Vultr ISO import")
             route_dir = ISO_DIR / "public" / image.route_token
             route_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            # The Nginx sidecar runs as an unprivileged user and mounts this
+            # volume read-only. The random token is the access boundary; the
+            # directory must remain traversable for GET/HEAD to reach the file.
+            route_dir.chmod(0o755)
             public_iso = route_dir / iso.name
             public_iso.unlink(missing_ok=True)
             os.link(iso, public_iso)

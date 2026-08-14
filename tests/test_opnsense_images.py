@@ -73,6 +73,11 @@ def test_invalid_control_plane_cidr_creates_no_firewall(monkeypatch, cidr):
     assert calls == []
 
 
+def test_iso_route_directory_is_traversable_by_read_only_sidecar():
+    source = Path("api/services/opnsense_images.py").read_text()
+    assert "route_dir.chmod(0o755)" in source
+
+
 def test_cleanup_failure_preserves_ready_validated_snapshot(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
