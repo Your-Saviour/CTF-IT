@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import AdminAudit, HintReveal, Team, User, VerificationAttempt, VM, VMGoal, VMModule
 from api.services.authorization import learner_assignment, participant
+from api.services.gamenet import site_dns_zone, vm_dns_name
 from api.services.secrets import decrypt_secret
 from api.services.verification import verify_assignment
 from api.services.verifier_account import scoring_enabled_vm_ids
@@ -31,6 +32,11 @@ async def gamenet_status(request: Request, db: Session = Depends(get_db)):
         "ready": bool(gateway and gateway.status == "active" and credential and credential.status == "active"),
         "status": gateway.status if gateway else "not_provisioned",
         "configuration_url": "/api/me/gamenet/config" if gateway and gateway.status == "active" else None,
+        "resolver_address": gateway.vpn_address if gateway else None,
+        "site_dns_zones": [
+            {"site_key": site.key, "zone": site_dns_zone(site)}
+            for site in sorted(user.team.sites, key=lambda item: item.order)
+        ],
     }
 
 
@@ -137,8 +143,9 @@ async def my_training(request: Request, db: Session = Depends(get_db)):
                   "description": event.description, "ends_at": event.ends_at.isoformat() if event.ends_at else None},
         "team": {"id": user.team.id, "name": user.team.name},
         "vms": [{"id": vm.id, "hostname": vm.hostname, "address": vm.private_ip or vm.ip_address,
+                 "dns_name": vm_dns_name(vm),
                  "ssh_port": vm.ssh_port or 22, "status": vm.status,
-                 "connection_command": f"ssh -p {vm.ssh_port or 22} ctf-trainee@{vm.private_ip or vm.ip_address}",
+                 "connection_command": f"ssh -p {vm.ssh_port or 22} ctf-trainee@{vm_dns_name(vm) or vm.private_ip or vm.ip_address}",
                  "modules": [_module_payload(item, definitions[item.module_id], reveals.get(item.id, set()))
                              for item in sorted(by_vm[vm.id], key=lambda value: value.id)]} for vm in vms],
         "score": _score(db, user, visible),
@@ -170,7 +177,8 @@ async def team_access(request: Request, db: Session = Depends(get_db)):
         "public_key": credential.public_key,
         "sudo_password": decrypt_secret(credential.sudo_password_encrypted),
         "connections": [{"vm_id": vm.id, "hostname": vm.hostname,
-                         "command": f"ssh -i ./ctf-team-key -p {vm.ssh_port or 22} {credential.username}@{vm.private_ip or vm.ip_address}"}
+                         "dns_name": vm_dns_name(vm), "address": vm.private_ip or vm.ip_address,
+                         "command": f"ssh -i ./ctf-team-key -p {vm.ssh_port or 22} {credential.username}@{vm_dns_name(vm) or vm.private_ip or vm.ip_address}"}
                         for vm in vms],
     }, headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"})
 

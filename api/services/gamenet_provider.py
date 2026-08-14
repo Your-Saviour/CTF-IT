@@ -243,7 +243,7 @@ write_files:
           $iface:
             addresses: [{private_ip}/{prefix}]
             routes: [{{to: default, via: {gateway}}}]
-            nameservers: {{addresses: [1.1.1.1, 8.8.8.8]}}
+            nameservers: {{addresses: [{gateway}]}}
       EOF
       netplan apply
 bootcmd:
@@ -412,6 +412,38 @@ def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
     )
 
 
+def _site_unbound_config(site: Site) -> str:
+    """Build a resolver bound only to this site's private interfaces."""
+    from api.services.gamenet import site_dns_zone, vm_dns_name
+    db = object_session(site)
+    lan_address = str(ip_network(site.allocated_cidr).network_address + 1)
+    records = []
+    for endpoint in db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all():
+        name = vm_dns_name(endpoint)
+        if name and endpoint.private_ip:
+            records.append(f'  local-data: "{name}. 60 IN A {endpoint.private_ip}"')
+    return "\n".join([
+        "server:", f"  interface: {lan_address}", f"  interface: {site.tunnel_address}",
+        "  interface-automatic: no", f"  access-control: {site.allocated_cidr} allow",
+        "  access-control: 10.64.0.0/10 allow", "  access-control: 0.0.0.0/0 refuse",
+        f'  local-zone: "{site_dns_zone(site)}." static', *records,
+        "forward-zone:", '  name: "."', "  forward-addr: 1.1.1.1", "  forward-addr: 8.8.8.8", "",
+    ])
+
+
+def _gateway_unbound_config(gateway: TeamVPNGateway, sites: list[Site]) -> str:
+    from api.services.gamenet import site_dns_zone
+    lines = [
+        "server:", f"  interface: {gateway.vpn_address}", "  interface-automatic: no",
+        "  access-control: 10.64.0.0/10 allow", "  access-control: 0.0.0.0/0 refuse",
+    ]
+    for site in sites:
+        lines += ["forward-zone:", f'  name: "{site_dns_zone(site)}."',
+                  f"  forward-addr: {site.tunnel_address}"]
+    lines += ["forward-zone:", '  name: "."', "  forward-addr: 1.1.1.1", "  forward-addr: 8.8.8.8", ""]
+    return "\n".join(lines)
+
+
 def configure_gateway(gateway: TeamVPNGateway, vm: VM, sites: list[Site], participants: list[VPNCredential],
                       *, management_host: str | None = None) -> None:
     private_key = decrypt_secret(gateway.private_key_encrypted)
@@ -435,11 +467,13 @@ def configure_gateway(gateway: TeamVPNGateway, vm: VM, sites: list[Site], partic
         lines += ["[Peer]", f"PublicKey = {credential.public_key}",
                   f"AllowedIPs = {credential.address}/32", ""]
     upload_text(vm, "/etc/wireguard/gamenet.conf", "\n".join(lines), host=management_host)
+    upload_text(vm, "/etc/unbound/unbound.conf.d/gamenet.conf", _gateway_unbound_config(gateway, sites),
+                host=management_host)
     command = (
-        "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard iptables && "
+        "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard iptables unbound && "
         "systemctl enable wg-quick@gamenet && "
         "if wg show gamenet >/dev/null 2>&1; then wg-quick strip gamenet >/tmp/gamenet.stripped && wg syncconf gamenet /tmp/gamenet.stripped; "
-        "else systemctl start wg-quick@gamenet; fi"
+        "else systemctl start wg-quick@gamenet; fi && systemctl enable --now unbound && systemctl restart unbound"
     )
     code, _, error = ssh_command(vm, command, host=management_host, timeout=300)
     if code:
@@ -458,10 +492,13 @@ def configure_site_wireguard(site: Site, firewall: VM, gateway: TeamVPNGateway, 
     upload_text(firewall, "/usr/local/etc/wireguard/wg0.conf", config)
     block_rules = "\n".join(f"block quick from {site.allocated_cidr} to {cidr}" for cidr in blocked)
     pf_rules = "\n".join([
-        block_rules, f"pass quick on wg0 from 10.64.0.0/10 to {site.allocated_cidr} keep state",
+        block_rules,
+        f"pass quick on wg0 proto {{ udp tcp }} from 10.64.0.0/10 to {site.tunnel_address} port 53 keep state",
+        f"pass quick on wg0 from 10.64.0.0/10 to {site.allocated_cidr} keep state",
         f"pass quick from {site.allocated_cidr} to any keep state",
     ])
     upload_text(firewall, "/usr/local/etc/gamenet.pf", pf_rules)
+    upload_text(firewall, "/usr/local/etc/unbound.opnsense.d/gamenet.conf", _site_unbound_config(site))
     startup = """#!/bin/sh
 # PROVIDE: gamenet
 # REQUIRE: NETWORKING
@@ -489,7 +526,7 @@ run_rc_command "$1"
     # POSIX sh to avoid csh's "Ambiguous output redirect" parsing.
     site_command = (
         "test -x /usr/bin/wg && "
-        "(service gamenet stop >/dev/null 2>&1 || true) && service gamenet start"
+        "(service gamenet stop >/dev/null 2>&1 || true) && service gamenet start && configctl unbound restart"
     )
     command = f"sh -c {shlex.quote(site_command)}"
     code, _, error = ssh_command(firewall, command, timeout=300)
@@ -502,7 +539,7 @@ def configure_endpoint_network(vm: VM, site: Site, firewall: VM) -> None:
     command = (
         "iface=$(ip -o -4 addr show | awk '$4 ~ /^10\\./ {print $2; exit}'); "
         "test -n \"$iface\" || iface=$(ip route show default | awk '{print $5; exit}'); "
-        f"printf 'network:\n  version: 2\n  ethernets:\n    %s:\n      addresses: [{vm.private_ip}/{network.prefixlen}]\n      routes: [{{to: default, via: {str(network.network_address + 1)}}}]\n      nameservers: {{addresses: [1.1.1.1, 8.8.8.8]}}\n' \"$iface\" > /etc/netplan/90-gamenet.yaml; "
+        f"printf 'network:\n  version: 2\n  ethernets:\n    %s:\n      addresses: [{vm.private_ip}/{network.prefixlen}]\n      routes: [{{to: default, via: {str(network.network_address + 1)}}}]\n      nameservers: {{addresses: [{str(network.network_address + 1)}]}}\n' \"$iface\" > /etc/netplan/90-gamenet.yaml; "
         "nohup sh -c 'sleep 2; netplan apply' >/var/log/gamenet-netplan.log 2>&1 &"
     )
     code, _, error = ssh_command(vm, command, host=vm.private_ip, jump=firewall)

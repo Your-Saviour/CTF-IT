@@ -31,8 +31,8 @@
       const sites = Array.isArray(data.sites) ? data.sites : [];
       const endpoints = sites.reduce((sum, site) => sum + (site.zones || []).reduce((zoneSum, zone) =>
         zoneSum + (zone.endpoints || []).reduce((n, endpoint) => n + Number(endpoint.count || 0), 0), 0);
-      rail.innerHTML = `<div class="gamenet-node gateway"><strong>VPN gateway</strong><span>${escapeText(data.vpn_gateway?.region || 'region required')} · UDP ${escapeText(data.vpn_gateway?.listen_port || '')}</span></div>` +
-        sites.map(site => `<div class="gamenet-site"><div class="gamenet-node firewall"><strong>${escapeText(site.name || site.key)}</strong><span>${escapeText(site.region || 'region required')} · /20 · OPNsense</span></div>${(site.zones || []).map(zone => `<div class="gamenet-node zone ${zone.team === 'red' ? 'red' : 'blue'}"><strong>${escapeText(zone.name || zone.key)}</strong><span>${escapeText(zone.team)} · ${(zone.endpoints || []).reduce((n, endpoint) => n + Number(endpoint.count || 0), 0)} endpoints · /24</span></div>`).join('')}</div>`).join('') +
+      rail.innerHTML = `<div class="gamenet-node gateway"><strong>Team VPN edge</strong><span>Access hub · ${escapeText(data.vpn_gateway?.region || 'region required')} · UDP ${escapeText(data.vpn_gateway?.listen_port || '')}</span></div>` +
+        sites.map(site => `<div class="gamenet-site"><div class="gamenet-node firewall"><strong>Site edge/firewall · ${escapeText(site.name || site.key)}</strong><span>${escapeText(site.region || 'region required')} · /20 · OPNsense</span></div>${(site.zones || []).map(zone => `<div class="gamenet-node zone ${zone.team === 'red' ? 'red' : 'blue'}"><strong>${escapeText(zone.name || zone.key)}</strong><span>${escapeText(zone.team)} · ${(zone.endpoints || []).reduce((n, endpoint) => n + Number(endpoint.count || 0), 0)} endpoints · /24</span></div>`).join('')}</div>`).join('') +
         `<div class="gamenet-total"><strong>${sites.length}</strong> sites <strong>${endpoints}</strong> endpoints per team</div>`;
     } catch (_) { rail.innerHTML = '<p class="status failed">Infrastructure JSON is invalid.</p>'; }
   }

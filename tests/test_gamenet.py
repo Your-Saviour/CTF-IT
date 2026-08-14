@@ -11,7 +11,10 @@ from sqlalchemy.pool import StaticPool
 from api.database import Base
 from api.models import Event, Site, Team, User, VM, VPNCredential
 from api.routes.admin import PlanPreviewRequest, overview, plan_preview
-from api.services.gamenet import allocate_event_networks, ensure_user_vpn_credential
+from api.services.gamenet import (
+    allocate_event_networks, ensure_user_vpn_credential, render_user_config,
+    site_dns_zone, vm_dns_name,
+)
 from api.services.gamenet_provider import VultrGameNetProvider, render_opnsense_config, ubuntu_cloud_init
 from api.services.gamenet_provisioning import ensure_vm_placeholders
 from api.services.secrets import decrypt_secret
@@ -69,6 +72,39 @@ def test_opnsense_config_encodes_authorized_key(db_session):
     db_session.add(vm); db_session.flush()
     rendered = render_opnsense_config(site, vm, "ssh-ed25519 TEST", "password", temporary_management=True)
     assert "<authorizedkeys>c3NoLWVkMjU1MTkgVEVTVA==</authorizedkeys>" in rendered
+    assert "<active_interface>lan</active_interface>" in rendered
+
+
+def test_managed_dns_names_normalize_keys_and_preserve_endpoint_ordinals(db_session):
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    endpoints = [vm for vm in ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+                 if vm.role == "blue_endpoint"]
+    assert site_dns_zone(db_session.query(Site).one()) == "head-office.gamenet.test"
+    assert [vm_dns_name(vm) for vm in endpoints] == [
+        "workstation-1.corporate.head-office.gamenet.test",
+        "workstation-2.corporate.head-office.gamenet.test",
+    ]
+
+
+def test_user_profile_routes_and_uses_team_resolver(monkeypatch, db_session):
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    gateway = team.vpn_gateway
+    gateway.status = "active"
+    gateway_vm = db_session.get(VM, gateway.vm_id)
+    gateway_vm.public_ip = "192.0.2.10"
+    user = User(username="learner", password_hash="x", event_id=event.id, team_id=team.id)
+    db_session.add(user); db_session.flush()
+    monkeypatch.setattr("api.services.gamenet._sync_team_gateway_if_active", lambda *_: None)
+    config = render_user_config(db_session, user)
+    assert f"DNS = {gateway.vpn_address}" in config
+    assert f"AllowedIPs = {gateway.vpn_address}/32, {team.sites[0].allocated_cidr}" in config
 
 
 def test_opnsense_bootstrap_waits_through_pre_reboot_window(monkeypatch, db_session):
@@ -191,6 +227,7 @@ def test_site_wireguard_runs_redirects_under_posix_shell(monkeypatch):
     commands = []
     uploads = {}
     monkeypatch.setattr("api.services.gamenet_provider.decrypt_secret", lambda value: value)
+    monkeypatch.setattr("api.services.gamenet_provider._site_unbound_config", lambda _site: "resolver-config")
     monkeypatch.setattr(
         "api.services.gamenet_provider.upload_text",
         lambda _vm, path, content, **_kwargs: uploads.update({path: content}),
@@ -205,6 +242,24 @@ def test_site_wireguard_runs_redirects_under_posix_shell(monkeypatch):
     assert "/usr/bin/wg setconf wg0" in startup
     assert "/sbin/ifconfig wg0 inet 10.64.0.3/32 alias" in startup
     assert "wg-quick" not in startup
+    assert "port 53" in uploads["/usr/local/etc/gamenet.pf"]
+    assert uploads["/usr/local/etc/unbound.opnsense.d/gamenet.conf"] == "resolver-config"
+
+
+def test_site_resolver_is_private_and_contains_managed_records(db_session):
+    from api.services.gamenet_provider import _site_unbound_config
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    site = db_session.query(Site).one()
+    rendered = _site_unbound_config(site)
+    assert f"interface: {site.tunnel_address}" in rendered
+    assert "interface-automatic: no" in rendered
+    assert "access-control: 0.0.0.0/0 refuse" in rendered
+    assert 'local-zone: "head-office.gamenet.test." static' in rendered
+    assert 'workstation-1.corporate.head-office.gamenet.test. 60 IN A' in rendered
 
 
 def test_infrastructure_rejects_duplicates_exhaustion_and_vpc_capacity():

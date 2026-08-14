@@ -465,6 +465,16 @@ Define a `vm_quota` JSON on an event to automatically provision all VMs when the
 
 ### Network topology
 
+GameNet uses a retained hub-and-spoke access design:
+
+```text
+learner → team VPN edge → site tunnel → site edge/firewall → private zones
+```
+
+The public WireGuard gateway is the team's access hub, not a member of any site. Learners receive one profile for all sites assigned to their team. Every site's OPNsense instance remains that site's independent internet edge and security boundary; routing policy blocks direct site-to-site endpoint traffic even though the team DNS service can discover names in every site.
+
+Newly provisioned GameNets use platform-managed DNS. Each site firewall serves `<site-key>.gamenet.test` on private LAN and WireGuard interfaces, and the team VPN edge conditionally forwards those zones while resolving public names. Endpoint names have the form `<endpoint-key>-<ordinal>.<zone-key>.<site-key>.gamenet.test`; underscores in keys become hyphens. Existing active GameNets must be destroyed and reprovisioned to receive this DNS configuration.
+
 `/admin/topology` — interactive D3 force-directed graph showing the event → team → VM hierarchy.
 
 - Hover for IP, OS, and module progress bar

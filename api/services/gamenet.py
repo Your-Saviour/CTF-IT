@@ -18,6 +18,33 @@ SITE_POOL = ip_network("10.128.0.0/9")
 VPN_POOL = ip_network("10.64.0.0/10")
 
 
+def dns_label(value: str) -> str:
+    """Convert an infrastructure key to its managed DNS label."""
+    return value.replace("_", "-").lower()
+
+
+def site_dns_zone(site: Site) -> str:
+    return f"{dns_label(site.key)}.gamenet.test"
+
+
+def vm_dns_name(vm) -> str | None:
+    """Return the stable site-local name for an endpoint VM."""
+    if not vm.zone or not vm.vm_type:
+        return None
+    peers = sorted(
+        (candidate for candidate in vm.zone.vms if candidate.vm_type == vm.vm_type),
+        key=lambda candidate: candidate.id,
+    )
+    try:
+        ordinal = peers.index(vm) + 1
+    except ValueError:
+        return None
+    return ".".join((
+        f"{dns_label(vm.vm_type)}-{ordinal}", dns_label(vm.zone.key),
+        site_dns_zone(vm.zone.site),
+    ))
+
+
 def generate_wireguard_keypair() -> tuple[str, str]:
     private = X25519PrivateKey.generate()
     private_raw = private.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
@@ -124,10 +151,11 @@ def render_user_config(db: Session, user: User) -> str:
     endpoint = gateway_vm.public_ip if gateway_vm else None
     if not endpoint:
         raise RuntimeError("GameNet VPN is not ready")
-    routes = [site.allocated_cidr for site in db.query(Site).filter_by(team_id=user.team_id).order_by(Site.order)]
+    routes = [gateway.vpn_address + "/32"]
+    routes += [site.allocated_cidr for site in db.query(Site).filter_by(team_id=user.team_id).order_by(Site.order)]
     return "\n".join([
         "[Interface]", f"PrivateKey = {decrypt_secret(credential.private_key_encrypted)}",
-        f"Address = {credential.address}/32", "", "[Peer]", f"PublicKey = {gateway.public_key}",
+        f"Address = {credential.address}/32", f"DNS = {gateway.vpn_address}", "", "[Peer]", f"PublicKey = {gateway.public_key}",
         f"Endpoint = {endpoint}:{gateway.listen_port}", f"AllowedIPs = {', '.join(routes)}",
         "PersistentKeepalive = 25", "",
     ])

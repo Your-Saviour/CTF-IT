@@ -291,6 +291,7 @@ body.admin-app input:-webkit-autofill {
 .gamenet-node span { color: var(--text-muted); text-align: right; }
 .gamenet-site { margin: 8px 0 0 24px; padding-left: 15px; border-left: 1px solid var(--green); }
 .gamenet-node.gateway, .gamenet-node.firewall { border-color: rgba(0,230,118,.45); }
+.gamenet-node.gateway::after { content: ""; position: absolute; left: 35px; bottom: -9px; height: 8px; border-left: 1px solid var(--green); }
 .gamenet-node.zone.blue { border-left: 3px solid #00e676; }
 .gamenet-node.zone.red { border-left: 3px solid #ff3b30; }
 .gamenet-total { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-muted); }

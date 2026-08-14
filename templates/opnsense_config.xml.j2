@@ -141,6 +141,12 @@
     </outbound>
   </nat>
   <dhcpd/>
+  <unbound>
+    <enable>1</enable>
+    <active_interface>lan</active_interface>
+    <outgoing_interface>wan</outgoing_interface>
+    <dnssec>1</dnssec>
+  </unbound>
   <snmpd>
     <syslocation/>
     <syscontact/>
