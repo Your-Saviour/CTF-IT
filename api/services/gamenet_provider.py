@@ -416,9 +416,11 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> No
         password = decrypt_secret(vm.admin_password)
     config = render_opnsense_config(site, vm, public_key, password, temporary_management=True)
     upload_text(vm, "/conf/config.xml", config)
-    command = ("test -x /usr/local/sbin/configctl && opnsense-version -v && "
+    command = ("/bin/sh -c 'rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder; "
+               "pfctl -e >/dev/null 2>&1 || true; "
+               "test -x /usr/local/sbin/configctl && opnsense-version -v && "
                "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && "
-               "configctl service reload all")
+               "configctl service reload all'")
     code, output, error = ssh_command(vm, command, timeout=180, connect_timeout=300)
     if code or expected_version not in output:
         raise GameNetProviderError(f"snapshot OPNsense validation failed: {(error or output)[:300]}")

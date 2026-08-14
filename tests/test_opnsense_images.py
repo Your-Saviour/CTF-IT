@@ -11,6 +11,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     ImageWorkflowError, VultrImageClient, active_image, artifact_urls, cleanup_validated_image, decompress_bz2,
+    generic_builder_config,
     interrupt_running_jobs, parse_published_checksum, stream_download, validate_release,
 )
 
@@ -76,6 +77,15 @@ def test_invalid_control_plane_cidr_creates_no_firewall(monkeypatch, cidr):
 def test_iso_route_directory_is_traversable_by_read_only_sidecar():
     source = Path("api/services/opnsense_images.py").read_text()
     assert "route_dir.chmod(0o755)" in source
+
+
+def test_builder_config_enables_ssh_and_temporary_wan_rule(monkeypatch):
+    monkeypatch.setattr("api.services.opnsense_images.get_or_create_platform_keypair",
+                        lambda _db: ("private", "ssh-ed25519 TEST"))
+    config = generic_builder_config(None)
+    assert "<enabled>1</enabled>" in config
+    assert "<interface>wan</interface>" in config
+    assert "<port>22</port>" in config
 
 
 def test_cleanup_failure_preserves_ready_validated_snapshot(monkeypatch):

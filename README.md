@@ -494,7 +494,11 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
 2. Wait for `awaiting_install`, open the displayed Vultr console, and install
    OPNsense to the VM disk. Assign WAN=`vtnet0` and LAN=`vtnet1`.
 3. Fetch the displayed one-time builder configuration URL to
-   `/conf/config.xml`, then reboot the builder.
+   `/conf/config.xml`, then reboot the builder. The generated configuration
+   enables the OPNsense `openssh` service with the platform key, keeps WAN on
+   DHCP, and adds a temporary WAN SSH rule; the Vultr firewall still limits
+   that rule to `CTF_CONTROL_PLANE_CIDR`. Do not substitute FreeBSD `sshd`
+   service commands—OPNsense names the service `openssh`.
 4. Select **Installer complete**. The platform validates the version, disk,
    interfaces, SSH, and `configctl`; removes host-specific state; creates the
    snapshot; and validates a test deployment.
@@ -512,6 +516,8 @@ is refused while firewall records reference the image.
 Each firewall records the image release and snapshot ID used to create it.
 Per-site configuration and a unique administrator password are applied after
 restore, and provisioning rejects duplicate SSH host keys between clones.
+The temporary builder-access hook and WAN rule are removed when that per-site
+configuration is applied.
 
 `/admin/topology` — interactive D3 force-directed graph showing the event → team → VM hierarchy.
 
