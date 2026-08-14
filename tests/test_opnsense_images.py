@@ -12,7 +12,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     ImageWorkflowError, VultrImageClient, active_image, artifact_urls, cleanup_validated_image, decompress_bz2,
-    _builder_validation_command, complete_install, generic_builder_setup_script,
+    _builder_validation_command, _wait_for_builder_validation, complete_install, generic_builder_setup_script,
     interrupt_running_jobs, parse_published_checksum, stream_download, validate_release,
 )
 
@@ -47,6 +47,20 @@ def test_download_rejects_redirect_and_removes_partial(tmp_path):
     with httpx.Client(transport=transport) as client, pytest.raises(ImageWorkflowError):
         stream_download(client, "https://mirror.invalid/image", tmp_path / "image")
     assert not (tmp_path / "image.part").exists()
+
+
+def test_installed_validation_retries_live_media_transition(monkeypatch):
+    attempts = iter([
+        (1, "", "medium was live"),
+        (0, "26.7\n", ""),
+    ])
+    monkeypatch.setattr("api.services.opnsense_images.POLL_SECONDS", 0)
+    monkeypatch.setattr("api.services.opnsense_images._builder_ssh", lambda *_args, **_kwargs: next(attempts))
+
+    assert _wait_for_builder_validation(
+        None, "198.51.100.10", "check", version="26.7",
+        label="first installed-disk validation",
+    ) == "26.7\n"
 
 
 def test_only_validated_active_image_is_returned_and_jobs_interrupt():
@@ -205,6 +219,12 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(monkey
         def delete(self, kind, identifier): events.append(f"deleted:{kind}:{identifier}")
 
     monkeypatch.setenv("CTF_CONTROL_PLANE_CIDR", "192.0.2.8/32")
+    validation_media = []
+    from api.services.opnsense_images import _builder_validation_command as real_validation_command
+    def record_validation_command(**kwargs):
+        validation_media.append(kwargs["installed"])
+        return real_validation_command(**kwargs)
+    monkeypatch.setattr("api.services.opnsense_images._builder_validation_command", record_validation_command)
     monkeypatch.setattr("api.services.opnsense_images._builder_ssh", lambda *_args, **_kwargs: (0, "26.7", ""))
     monkeypatch.setattr("api.services.opnsense_images._boot_id", lambda *_args: "boot")
     monkeypatch.setattr("api.services.opnsense_images._wait_for_new_boot", lambda *_args: None)
@@ -216,5 +236,7 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(monkey
 
     assert image.status == "ready"
     assert image.snapshot_id == "snapshot-id"
+    assert validation_media and all(validation_media)
+    assert events[:2] == ["iso-detached", "reboot"]
     assert events.index("halt") < events.index("stopped") < events.index("snapshot")
     assert events.count("clone-created") == 2

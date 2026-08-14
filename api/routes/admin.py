@@ -122,9 +122,10 @@ async def list_opnsense_images(request: Request, db: Session = Depends(get_db)):
                                    "reports a WAN-only builder, and immediately run opnsense-installer from that same "
                                    "shell. Install to the VM disk. Do not "
                                    "assign a LAN, detach the ISO, reboot, or request a snapshot manually. When the "
-                                   "installer finishes, leave the VM running and select Installer complete; the "
-                                   "platform will validate the live state, detach the ISO, perform two installed-disk "
-                                   "boot validations, shut down, and only then snapshot it.")
+                                   "installer finishes it may automatically reboot back into the attached live ISO; "
+                                   "this is expected. Select Installer complete at the live-mode prompt. The platform "
+                                   "will detach the ISO, perform two installed-disk boot validations, shut down, and "
+                                   "only then snapshot it.")
         result.append(payload)
     return result
 

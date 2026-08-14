@@ -501,10 +501,11 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
    It contains no reusable password and deliberately has no LAN or VPC state.
    From the same root shell, run `opnsense-installer` so the configured live
    system is cloned to disk. Do not detach the ISO or reboot manually.
-4. When installation finishes, leave the VM running and select **Installer
-   complete**. The platform first validates the configured live state, waits
-   for Vultr to confirm ISO detachment, boots from the writable installed disk,
-   and repeats the full validation across two boots. It then removes persistent
+4. When installation finishes, OPNsense 26.7 may automatically reboot back into
+   the still-attached live ISO; this is expected. Leave the VM at that live-mode
+   prompt and select **Installer complete**. The platform waits for Vultr to
+   confirm ISO detachment, boots from the writable installed disk, and performs
+   the full validation across two distinct boots. It then removes persistent
    host keys from `/conf/sshd`, shuts down cleanly, confirms the VM is stopped,
    creates the snapshot, and validates two disposable clones with distinct SSH
    host keys. Any failed check blocks snapshot creation and leaves the builder
@@ -526,10 +527,11 @@ restore. A clone first boots and validates with WAN only; the site VPC is then
 attached, and its Vultr-reported MAC is mapped to the guest interface before
 LAN configuration is generated. Provisioning rejects duplicate SSH host keys.
 The temporary builder management rule is replaced when the per-site
-configuration is applied. Installer completion refuses to reboot until the
-effective interface MACs, public address, default route, key authentication,
-SSH settings, and PF rule have all been validated; the same checks run across
-two installed-disk boots and on both snapshot test deployments.
+configuration is applied. After ISO detachment, installer completion validates
+the effective interface mapping, public address, default route, key
+authentication, SSH settings, PF rule, build nonce, and installed media across
+two installed-disk boots and on both snapshot test deployments. Snapshot
+creation remains blocked until all builder checks pass.
 
 The workflow is aligned with the upstream [OPNsense installation
 guidance](https://docs.opnsense.org/manual/install.html), the OPNsense 26.7

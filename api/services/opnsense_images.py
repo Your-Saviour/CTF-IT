@@ -545,6 +545,23 @@ def _builder_ssh(db: Session, host: str, command: str, timeout: int = 120) -> tu
     raise ImageWorkflowError(f"builder SSH did not become ready: {last_error}")
 
 
+def _wait_for_builder_validation(db: Session, host: str, command: str, *,
+                                 version: str, label: str) -> str:
+    """Wait through an installer/live-media transition for the disk check to pass."""
+    deadline = time.monotonic() + POLL_TIMEOUT
+    last_detail = "validation command did not run"
+    while time.monotonic() < deadline:
+        try:
+            code, output, error = _builder_ssh(db, host, command)
+            if code == 0 and version in output:
+                return output
+            last_detail = (error or output or f"exit status {code}")[:300]
+        except Exception as exc:
+            last_detail = redact_error(exc)[:300]
+        time.sleep(POLL_SECONDS)
+    raise ImageWorkflowError(f"{label} failed: {last_detail}")
+
+
 def _builder_validation_command(*, public_ip: str, version: str,
                                 control_plane_cidr: str, build_nonce: str,
                                 installed: bool) -> str:
@@ -629,36 +646,29 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
             raise ImageWorkflowError("builder has no public address")
         if not image.builder_config_token:
             raise ImageWorkflowError("builder validation nonce is missing")
-        check = _builder_validation_command(
-            public_ip=host, version=image.version,
-            control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
-            build_nonce=image.builder_config_token, installed=False,
-        )
-        # The administrator must still be in the configured live system. The
-        # installer clones that configuration to disk; the platform owns reboot.
-        code, output, error = _builder_ssh(db, host, check)
-        if code or image.version not in output:
-            raise ImageWorkflowError(f"pre-detach live-system validation failed: {(error or output)[:300]}")
-        previous_boot_id = _boot_id(db, host)
+        # OPNsense 26.7's installer automatically reboots when cloning finishes.
+        # It can therefore return to the still-attached live ISO before this job
+        # starts. Detach first, then accept only the persisted installed system.
         client.detach_iso(image)
         client.reboot(image.builder_instance_id)
-        _wait_for_new_boot(db, host, previous_boot_id)
         check = _builder_validation_command(
             public_ip=host, version=image.version,
             control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
             build_nonce=image.builder_config_token, installed=True,
         )
-        code, output, error = _builder_ssh(db, host, check)
-        if code or image.version not in output:
-            raise ImageWorkflowError(f"installed-disk validation failed: {(error or output)[:300]}")
+        _wait_for_builder_validation(
+            db, host, check, version=image.version,
+            label="first installed-disk validation",
+        )
         # A second complete cold-boot validation proves this is persistent
         # state, not a one-shot installer transition.
         previous_boot_id = _boot_id(db, host)
         client.reboot(image.builder_instance_id)
         _wait_for_new_boot(db, host, previous_boot_id)
-        code, output, error = _builder_ssh(db, host, check)
-        if code or image.version not in output:
-            raise ImageWorkflowError(f"second installed-disk validation failed: {(error or output)[:300]}")
+        _wait_for_builder_validation(
+            db, host, check, version=image.version,
+            label="second installed-disk validation",
+        )
         sanitize_inner = ("rm -f /conf/sshd/ssh_host_* "
                           "/var/db/dhclient.leases.* /root/.*history /root/.sh_history; "
                           "find /var/log -type f -exec sh -c ': > \"$1\"' _ {} \\;; "
