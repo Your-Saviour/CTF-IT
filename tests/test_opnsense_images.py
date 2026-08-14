@@ -125,12 +125,22 @@ def test_detach_iso_uses_official_endpoint_and_is_idempotent(monkeypatch):
         return {"iso_status": {"iso_id": None}}
     monkeypatch.setattr(client, "request", request)
 
-    client.detach_iso(SimpleNamespace(builder_instance_id="builder-1"))
+    assert client.detach_iso(SimpleNamespace(builder_instance_id="builder-1")) is False
 
     assert calls == [
         ("GET", "/instances/builder-1/iso", {}),
         ("GET", "/instances/builder-1/iso", {}),
     ]
+
+
+def test_reboot_uses_vultr_documented_bulk_endpoint():
+    client = object.__new__(VultrImageClient)
+    calls = []
+    client.request = lambda *args, **kwargs: calls.append((args, kwargs)) or {}
+
+    client.reboot("builder-1")
+
+    assert calls == [(('POST', '/instances/reboot'), {'json': {'instance_ids': ['builder-1']}})]
 
 
 def test_builder_validation_checks_effective_network_ssh_and_pf_state():
@@ -186,7 +196,15 @@ def test_cleanup_failure_preserves_ready_validated_snapshot(monkeypatch):
     assert "cleanup incomplete" in image.error_detail
 
 
-def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(monkeypatch):
+@pytest.mark.parametrize(
+    ("detach_started", "power_status", "expected_prefix"),
+    [
+        (True, "running", ["iso-detached", "running"]),
+        (False, "stopped", ["iso-detached", "start", "running"]),
+    ],
+)
+def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(
+        monkeypatch, detach_started, power_status, expected_prefix):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
@@ -204,8 +222,11 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(monkey
         def close(self): pass
         def wait_instance(self, identifier):
             return {"main_ip": "198.51.100.10" if identifier == "builder" else "198.51.100.20"}
-        def detach_iso(self, _image): events.append("iso-detached")
+        def instance(self, _identifier): return {"power_status": power_status}
+        def detach_iso(self, _image): events.append("iso-detached"); return detach_started
         def reboot(self, _identifier): events.append("reboot")
+        def start(self, _identifier): events.append("start")
+        def wait_running(self, _identifier): events.append("running")
         def halt(self, _identifier): events.append("halt")
         def wait_stopped(self, _identifier): events.append("stopped"); return {"server_status": "stopped"}
         def create_snapshot(self, _image):
@@ -237,6 +258,8 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(monkey
     assert image.status == "ready"
     assert image.snapshot_id == "snapshot-id"
     assert validation_media and all(validation_media)
-    assert events[:2] == ["iso-detached", "reboot"]
+    assert events[:len(expected_prefix)] == expected_prefix
+    assert events.count("reboot") == 1
+    assert events.count("start") == (0 if detach_started else 1)
     assert events.index("halt") < events.index("stopped") < events.index("snapshot")
     assert events.count("clone-created") == 2

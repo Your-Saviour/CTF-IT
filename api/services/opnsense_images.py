@@ -307,21 +307,38 @@ class VultrImageClient:
     def instance_vpcs(self, instance_id: str) -> list[dict]:
         return self.request("GET", f"/instances/{instance_id}/vpcs").get("vpcs", [])
 
-    def detach_iso(self, image: OpnsenseImage):
-        """Detach the installer and wait until Vultr confirms it is gone."""
+    def detach_iso(self, image: OpnsenseImage) -> bool:
+        """Detach the installer, returning whether Vultr initiated its automatic reboot."""
         path = f"/instances/{image.builder_instance_id}/iso"
         status = self.request("GET", path).get("iso_status", {})
-        if status.get("iso_id"):
+        was_attached = bool(status.get("iso_id"))
+        if was_attached:
             self.request("POST", f"{path}/detach")
         deadline = time.monotonic() + POLL_TIMEOUT
         while time.monotonic() < deadline:
             if not self.request("GET", path).get("iso_status", {}).get("iso_id"):
-                return
+                return was_attached
             time.sleep(POLL_SECONDS)
         raise ImageWorkflowError("timed out waiting for Vultr to detach the installer ISO")
 
     def reboot(self, instance_id: str):
-        self.request("POST", f"/instances/{instance_id}/reboot")
+        # This is the endpoint documented by Vultr for restarting Cloud Compute.
+        self.request("POST", "/instances/reboot", json={"instance_ids": [instance_id]})
+
+    def start(self, instance_id: str):
+        self.request("POST", f"/instances/{instance_id}/start")
+
+    def wait_running(self, instance_id: str) -> dict:
+        deadline = time.monotonic() + POLL_TIMEOUT
+        while time.monotonic() < deadline:
+            row = self.instance(instance_id)
+            if (row.get("status") == "active" and row.get("server_status") in {"ok", "none"}
+                    and row.get("power_status") == "running"):
+                return row
+            if row.get("status") in {"failed", "error"}:
+                raise ImageWorkflowError("Vultr builder failed while waiting for power-on")
+            time.sleep(POLL_SECONDS)
+        raise ImageWorkflowError("timed out waiting for the Vultr builder to power on")
 
     def create_snapshot(self, image: OpnsenseImage) -> str:
         return self.request("POST", "/snapshots", json={"instance_id": image.builder_instance_id,
@@ -646,11 +663,17 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
             raise ImageWorkflowError("builder has no public address")
         if not image.builder_config_token:
             raise ImageWorkflowError("builder validation nonce is missing")
-        # OPNsense 26.7's installer automatically reboots when cloning finishes.
-        # It can therefore return to the still-attached live ISO before this job
-        # starts. Detach first, then accept only the persisted installed system.
-        client.detach_iso(image)
-        client.reboot(image.builder_instance_id)
+        # OPNsense 26.7's installer can return to the still-attached live ISO.
+        # Vultr's ISO-detach operation itself reboots the instance, so issuing a
+        # second reboot here races that transition and can leave the VM stopped.
+        detach_started_boot = client.detach_iso(image)
+        if not detach_started_boot:
+            # Idempotent resume: a previous attempt may have detached the ISO but
+            # been interrupted while the VM was stopped.
+            power = client.instance(image.builder_instance_id).get("power_status")
+            if power != "running":
+                client.start(image.builder_instance_id)
+        client.wait_running(image.builder_instance_id)
         check = _builder_validation_command(
             public_ip=host, version=image.version,
             control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
@@ -664,6 +687,7 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         # state, not a one-shot installer transition.
         previous_boot_id = _boot_id(db, host)
         client.reboot(image.builder_instance_id)
+        client.wait_running(image.builder_instance_id)
         _wait_for_new_boot(db, host, previous_boot_id)
         _wait_for_builder_validation(
             db, host, check, version=image.version,

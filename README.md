@@ -503,8 +503,9 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
    system is cloned to disk. Do not detach the ISO or reboot manually.
 4. When installation finishes, OPNsense 26.7 may automatically reboot back into
    the still-attached live ISO; this is expected. Leave the VM at that live-mode
-   prompt and select **Installer complete**. The platform waits for Vultr to
-   confirm ISO detachment, boots from the writable installed disk, and performs
+   prompt and select **Installer complete**. Vultr's ISO-detach operation itself
+   reboots the VM; the platform waits for both confirmed detachment and running
+   power state, boots from the writable installed disk, and performs
    the full validation across two distinct boots. It then removes persistent
    host keys from `/conf/sshd`, shuts down cleanly, confirms the VM is stopped,
    creates the snapshot, and validates two disposable clones with distinct SSH
@@ -536,7 +537,9 @@ creation remains blocked until all builder checks pass.
 The workflow is aligned with the upstream [OPNsense installation
 guidance](https://docs.opnsense.org/manual/install.html), the OPNsense 26.7
 [`openssh` implementation](https://github.com/opnsense/core/blob/stable/26.7/src/etc/inc/plugins.inc.d/openssh.inc),
-and Vultr's documented [post-creation VPC attachment
+Vultr's documented [custom ISO detach behavior](https://docs.vultr.com/how-to-upload-and-use-custom-isos-on-vultr),
+[restart API](https://docs.vultr.com/products/compute/instances/cloud-compute/management/restart-instance),
+[post-creation VPC attachment
 API](https://docs.vultr.com/products/compute/cloud-compute/networking/vpc) and
 [clean-shutdown snapshot guidance](https://docs.vultr.com/vultr-marketplace).
 
