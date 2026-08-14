@@ -100,6 +100,16 @@ def test_detach_iso_is_idempotent_but_still_reboots(monkeypatch):
     assert calls == [("POST", "/instances/builder-1/reboot", {})]
 
 
+def test_vultr_get_retries_transient_server_errors(monkeypatch):
+    responses = [httpx.Response(500, text="temporary"), httpx.Response(200, json={"instance": {"id": "ok"}})]
+    client = object.__new__(VultrImageClient)
+    client.client = SimpleNamespace(request=lambda *_args, **_kwargs: responses.pop(0))
+    monkeypatch.setattr("api.services.opnsense_images.time.sleep", lambda _seconds: None)
+
+    assert client.request("GET", "/instances/test") == {"instance": {"id": "ok"}}
+    assert responses == []
+
+
 def test_cleanup_failure_preserves_ready_validated_snapshot(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

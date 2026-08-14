@@ -250,7 +250,14 @@ class VultrImageClient:
         self.client.close()
 
     def request(self, method: str, path: str, **kwargs) -> dict:
-        response = self.client.request(method, path, **kwargs)
+        response = None
+        for attempt in range(5):
+            response = self.client.request(method, path, **kwargs)
+            if method.upper() != "GET" or response.status_code < 500:
+                break
+            if attempt < 4:
+                time.sleep(2 ** attempt)
+        assert response is not None
         if response.status_code not in {200, 201, 202, 204}:
             raise ImageWorkflowError(f"Vultr {method} {path} failed ({response.status_code}): {response.text[:300]}")
         return response.json() if response.content else {}
