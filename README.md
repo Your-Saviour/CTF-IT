@@ -506,9 +506,11 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
    prompt and select **Installer complete**. Vultr's ISO-detach operation itself
    reboots the VM; the platform waits for both confirmed detachment and running
    power state, boots from the writable installed disk, and performs the full
-   validation. It requests the second boot through OPNsense's documented
-   `configctl system reboot` action and proves a changed boot identity before
-   repeating validation. It then removes persistent
+   validation. Because custom-installed Vultr instances can remain powered off
+   after a reboot, the platform requests a clean OPNsense shutdown with
+   `configctl system halt`, confirms `power_status=stopped`, explicitly starts
+   the VM, and proves a changed boot identity before repeating validation. It
+   then removes persistent
    host keys from `/conf/sshd`, shuts down cleanly, confirms the VM is stopped,
    creates the snapshot, and validates two disposable clones with distinct SSH
    host keys. Any failed check blocks snapshot creation and leaves the builder

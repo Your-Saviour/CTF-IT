@@ -143,6 +143,15 @@ def test_start_uses_vultr_instance_endpoint():
     assert calls == [(('POST', '/instances/builder-1/start'), {})]
 
 
+def test_wait_stopped_uses_power_status_not_server_status():
+    client = object.__new__(VultrImageClient)
+    client.instance = lambda _identifier: {
+        "status": "active", "server_status": "ok", "power_status": "stopped",
+    }
+
+    assert client.wait_stopped("builder-1")["power_status"] == "stopped"
+
+
 def test_builder_validation_checks_effective_network_ssh_and_pf_state():
     command = _builder_validation_command(
         public_ip="198.51.100.10", version="26.7", control_plane_cidr="192.0.2.8/32",
@@ -226,8 +235,7 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(
         def detach_iso(self, _image): events.append("iso-detached"); return detach_started
         def start(self, _identifier): events.append("start")
         def wait_running(self, _identifier): events.append("running")
-        def halt(self, _identifier): events.append("halt")
-        def wait_stopped(self, _identifier): events.append("stopped"); return {"server_status": "stopped"}
+        def wait_stopped(self, _identifier): events.append("stopped"); return {"power_status": "stopped"}
         def create_snapshot(self, _image):
             assert events[-1] == "stopped"
             events.append("snapshot")
@@ -262,7 +270,9 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(
     assert image.snapshot_id == "snapshot-id"
     assert validation_media and all(validation_media)
     assert events[:len(expected_prefix)] == expected_prefix
-    assert events.count("start") == (0 if detach_started else 1)
-    assert sum("configctl system reboot" in command for command in ssh_commands) == 1
-    assert events.index("halt") < events.index("stopped") < events.index("snapshot")
+    assert events.count("start") == (1 if power_status == "running" else 2)
+    assert sum("configctl system halt" in command for command in ssh_commands) == 2
+    assert not any("configctl system reboot" in command for command in ssh_commands)
+    assert events.count("stopped") == 2
+    assert events.index("stopped") < events.index("snapshot")
     assert events.count("clone-created") == 2

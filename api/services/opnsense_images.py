@@ -340,14 +340,11 @@ class VultrImageClient:
         return self.request("POST", "/snapshots", json={"instance_id": image.builder_instance_id,
                                                         "description": f"CTF OPNsense {image.version}"})["snapshot"]["id"]
 
-    def halt(self, instance_id: str):
-        self.request("POST", f"/instances/{instance_id}/halt")
-
     def wait_stopped(self, instance_id: str) -> dict:
         deadline = time.monotonic() + POLL_TIMEOUT
         while time.monotonic() < deadline:
             row = self.instance(instance_id)
-            if row.get("server_status") == "stopped":
+            if row.get("power_status") == "stopped":
                 return row
             if row.get("status") in {"failed", "error"}:
                 raise ImageWorkflowError("Vultr builder failed while stopping")
@@ -619,14 +616,14 @@ def _boot_id(db: Session, host: str) -> str:
     return output.strip()
 
 
-def _request_builder_reboot(db: Session, host: str) -> None:
-    """Request a clean reboot through OPNsense's documented configd action."""
+def _request_builder_halt(db: Session, host: str) -> None:
+    """Request a clean shutdown through OPNsense's documented configd action."""
     command = "/bin/sh -c " + shlex.quote(
-        "nohup /usr/local/sbin/configctl system reboot >/dev/null 2>&1 &"
+        "nohup /usr/local/sbin/configctl system halt >/dev/null 2>&1 &"
     )
     code, output, error = _builder_ssh(db, host, command)
     if code:
-        raise ImageWorkflowError(f"OPNsense reboot request failed: {(error or output)[:300]}")
+        raise ImageWorkflowError(f"OPNsense shutdown request failed: {(error or output)[:300]}")
 
 
 def _wait_for_new_boot(db: Session, host: str, previous_boot_id: str) -> None:
@@ -672,13 +669,13 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         # OPNsense 26.7's installer can return to the still-attached live ISO.
         # Vultr's ISO-detach operation itself reboots the instance, so issuing a
         # second reboot here races that transition and can leave the VM stopped.
-        detach_started_boot = client.detach_iso(image)
-        if not detach_started_boot:
-            # Idempotent resume: a previous attempt may have detached the ISO but
-            # been interrupted while the VM was stopped.
-            power = client.instance(image.builder_instance_id).get("power_status")
-            if power != "running":
-                client.start(image.builder_instance_id)
+        client.detach_iso(image)
+        # Both ISO detach and guest reboot can leave a custom-installed Vultr VM
+        # powered off. Starting an already-detached stopped builder is the
+        # idempotent transition into installed-disk validation.
+        power = client.instance(image.builder_instance_id).get("power_status")
+        if power != "running":
+            client.start(image.builder_instance_id)
         client.wait_running(image.builder_instance_id)
         check = _builder_validation_command(
             public_ip=host, version=image.version,
@@ -692,7 +689,10 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         # A second complete cold-boot validation proves this is persistent
         # state, not a one-shot installer transition.
         previous_boot_id = _boot_id(db, host)
-        _request_builder_reboot(db, host)
+        _request_builder_halt(db, host)
+        client.wait_stopped(image.builder_instance_id)
+        client.start(image.builder_instance_id)
+        client.wait_running(image.builder_instance_id)
         _wait_for_new_boot(db, host, previous_boot_id)
         _wait_for_builder_validation(
             db, host, check, version=image.version,
@@ -707,7 +707,7 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         code, _, error = _builder_ssh(db, host, sanitize)
         if code:
             raise ImageWorkflowError(f"builder sanitization failed: {error[:300]}")
-        client.halt(image.builder_instance_id)
+        _request_builder_halt(db, host)
         client.wait_stopped(image.builder_instance_id)
         _set_phase(db, image, "snapshotting")
         if not image.snapshot_id:
