@@ -371,15 +371,15 @@ app.include_router(vm.router)
 app.include_router(vm_goals.router)
 
 
-@app.get("/opnsense-builder-config/{token}/config.xml")
+@app.get("/opnsense-builder-config/{token}/setup.php")
 async def opnsense_builder_config(token: str, db: Session = Depends(get_db)):
     """One-purpose token endpoint consumed from the isolated builder console."""
     from api.models import OpnsenseImage
-    from api.services.opnsense_images import generic_builder_config
+    from api.services.opnsense_images import generic_builder_setup_script
     image = db.query(OpnsenseImage).filter_by(builder_config_token=token, status="awaiting_install").first()
     if not image:
         return JSONResponse({"error": "not found"}, status_code=404)
-    return Response(generic_builder_config(db), media_type="application/xml",
+    return Response(generic_builder_setup_script(db), media_type="text/plain",
                     headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 

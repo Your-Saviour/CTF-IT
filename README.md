@@ -493,12 +493,13 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
    release public key in the repository.
 2. Wait for `awaiting_install`, open the displayed Vultr console, and install
    OPNsense to the VM disk. Assign WAN=`vtnet0` and LAN=`vtnet1`.
-3. Fetch the displayed one-time builder configuration URL to
-   `/conf/config.xml`, then reboot the builder. The generated configuration
-   enables the OPNsense `openssh` service with the platform key, keeps WAN on
-   DHCP, and adds a temporary WAN SSH rule; the Vultr firewall still limits
-   that rule to `CTF_CONTROL_PLANE_CIDR`. Do not substitute FreeBSD `sshd`
-   service commands—OPNsense names the service `openssh`.
+3. Fetch the displayed one-time setup URL to `/tmp/ctf-builder.php` and run it
+   with `/usr/local/bin/php`. The script merges settings through OPNsense's
+   `write_config()` API; never replace `/conf/config.xml` directly. It enables
+   the OPNsense `openssh` service with the platform key and keeps WAN on DHCP.
+   A temporary boot hook provides builder SSH while the Vultr firewall limits
+   access to `CTF_CONTROL_PLANE_CIDR`. Do not reboot manually; select
+   **Installer complete** when the script reports success.
 4. Select **Installer complete**. The platform validates the version, disk,
    interfaces, SSH, and `configctl`; removes host-specific state; creates the
    snapshot; and validates a test deployment.

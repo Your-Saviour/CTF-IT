@@ -359,20 +359,50 @@ def _set_phase(db: Session, image: OpnsenseImage, phase: str) -> None:
     db.commit()
 
 
-def generic_builder_config(db: Session) -> str:
-    """Generic config: public key only, DHCP WAN and inert documentation LAN."""
+def generic_builder_setup_script(db: Session) -> str:
+    """Merge builder access into the installed config using OPNsense's configuration API."""
     _, public_key = get_or_create_platform_keypair(db)
+    encoded_key = base64.b64encode(public_key.strip().encode()).decode()
+    quoted_key = public_key.strip().replace("'", "'\\''")
     # Deliberately contains no password hash or reusable private credential.
-    return f"""<?xml version=\"1.0\"?>
-<opnsense><system><hostname>opnsense-template</hostname><domain>invalid</domain>
-<ssh><enabled>1</enabled><permitrootlogin>1</permitrootlogin><passwordauth>0</passwordauth></ssh>
-<user><name>root</name><authorizedkeys>{base64.b64encode(public_key.strip().encode()).decode()}</authorizedkeys></user>
-</system><interfaces><wan><if>vtnet0</if><ipaddr>dhcp</ipaddr></wan>
-<lan><if>vtnet1</if><ipaddr>192.0.2.1</ipaddr><subnet>30</subnet></lan></interfaces>
-<filter><rule><type>pass</type><interface>wan</interface><ipprotocol>inet</ipprotocol>
-<statetype>keep state</statetype><direction>in</direction><quick>1</quick><protocol>tcp</protocol>
-<source><any>1</any></source><destination><network>(self)</network><port>22</port></destination>
-<descr>Temporary builder SSH; restricted by Vultr firewall</descr></rule></filter></opnsense>"""
+    return f'''<?php
+require_once("config.inc");
+require_once("util.inc");
+global $config;
+foreach ($config["system"]["user"] as &$user) {{
+    if (($user["name"] ?? "") === "root") {{
+        $user["authorizedkeys"] = "{encoded_key}";
+        $user["disabled"] = "0";
+        $user["scope"] = "system";
+        $user["uid"] = "0";
+    }}
+}}
+unset($user);
+$config["system"]["ssh"]["enabled"] = "1";
+$config["system"]["ssh"]["port"] = "22";
+$config["system"]["ssh"]["permitrootlogin"] = "1";
+$config["system"]["ssh"]["passwordauth"] = "0";
+$config["interfaces"]["wan"]["enable"] = "1";
+$config["interfaces"]["wan"]["if"] = "vtnet0";
+$config["interfaces"]["wan"]["ipaddr"] = "dhcp";
+$config["interfaces"]["lan"]["enable"] = "1";
+$config["interfaces"]["lan"]["if"] = "vtnet1";
+$config["interfaces"]["lan"]["ipaddr"] = "192.0.2.1";
+$config["interfaces"]["lan"]["subnet"] = "30";
+write_config("Configure CTF OPNsense image builder");
+$hook = <<<'HOOK'
+#!/bin/sh
+install -d -m 700 /root/.ssh
+printf '%s\\n' '{quoted_key}' > /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+service openssh onestart >/dev/null 2>&1 || true
+/sbin/pfctl -d >/dev/null 2>&1 || true
+HOOK;
+@mkdir("/usr/local/etc/rc.syshook.d/start", 0755, true);
+file_put_contents("/usr/local/etc/rc.syshook.d/start/99-ctf-builder", $hook . "\\n");
+chmod("/usr/local/etc/rc.syshook.d/start/99-ctf-builder", 0700);
+echo "Builder configuration persisted. Return to the admin UI and select Installer complete.\\n";
+?>'''
 
 
 def sync_to_awaiting_install(db: Session, image_id: int, *, vultr_factory=VultrImageClient) -> None:
@@ -482,7 +512,8 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
             raise ImageWorkflowError("builder has no public address")
         check = ("test \"$(sysctl -n kern.disks | wc -w | tr -d ' ')\" -ge 1 && "
                  "opnsense-version -v && command -v configctl && "
-                 "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && mount | grep ' on / '")
+                 "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && mount | grep ' on / ' && "
+                 "test -x /usr/local/etc/rc.syshook.d/start/99-ctf-builder")
         code, output, error = _builder_ssh(db, host, check)
         if code or image.version not in output:
             raise ImageWorkflowError(f"builder validation failed: {(error or output)[:300]}")
@@ -490,10 +521,7 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
                           "/var/db/dhclient.leases.* /root/.*history /root/.sh_history; "
                           "find /var/log -type f -exec sh -c ': > \"$1\"' _ {} \\;; "
                           "rm -rf /tmp/* /var/tmp/* /root/.cache; "
-                          "mkdir -p /usr/local/etc/rc.syshook.d/start; "
-                          "echo IyEvYmluL3NoCi9zYmluL3BmY3RsIC1kCg== | openssl base64 -d -A > "
-                          "/usr/local/etc/rc.syshook.d/start/10-ctf-builder; "
-                          "chmod 700 /usr/local/etc/rc.syshook.d/start/10-ctf-builder; touch /firstboot; sync")
+                          "touch /firstboot; sync")
         sanitize = "/bin/sh -c " + shlex.quote(sanitize_inner)
         code, _, error = _builder_ssh(db, host, sanitize)
         if code:

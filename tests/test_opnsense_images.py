@@ -12,7 +12,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     ImageWorkflowError, VultrImageClient, active_image, artifact_urls, cleanup_validated_image, decompress_bz2,
-    generic_builder_config,
+    generic_builder_setup_script,
     interrupt_running_jobs, parse_published_checksum, stream_download, validate_release,
 )
 
@@ -80,13 +80,17 @@ def test_iso_route_directory_is_traversable_by_read_only_sidecar():
     assert "route_dir.chmod(0o755)" in source
 
 
-def test_builder_config_enables_ssh_and_temporary_wan_rule(monkeypatch):
+def test_builder_setup_uses_opnsense_config_api_and_persistent_access_hook(monkeypatch):
     monkeypatch.setattr("api.services.opnsense_images.get_or_create_platform_keypair",
                         lambda _db: ("private", "ssh-ed25519 TEST"))
-    config = generic_builder_config(None)
-    assert "<enabled>1</enabled>" in config
-    assert "<interface>wan</interface>" in config
-    assert "<port>22</port>" in config
+    script = generic_builder_setup_script(None)
+    assert 'require_once("config.inc")' in script
+    assert 'write_config("Configure CTF OPNsense image builder")' in script
+    assert '$config["interfaces"]["wan"]["if"] = "vtnet0"' in script
+    assert '$config["interfaces"]["lan"]["if"] = "vtnet1"' in script
+    assert 'rc.syshook.d/start/99-ctf-builder' in script
+    assert "service openssh onestart" in script
+    assert "/sbin/pfctl -d" in script
 
 
 def test_detach_iso_is_idempotent_but_still_reboots(monkeypatch):

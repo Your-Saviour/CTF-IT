@@ -114,10 +114,12 @@ async def list_opnsense_images(request: Request, db: Session = Depends(get_db)):
     for row in rows:
         payload = image_payload(row)
         payload["console_url"] = (f"https://my.vultr.com/subs/?SUBID={row.builder_instance_id}" if row.builder_instance_id else None)
-        payload["builder_config_url"] = (f"https://ctf.{domain}/opnsense-builder-config/{row.builder_config_token}/config.xml"
+        payload["builder_config_url"] = (f"https://ctf.{domain}/opnsense-builder-config/{row.builder_config_token}/setup.php"
                                          if row.builder_config_token and domain else None)
         payload["instructions"] = ("Install OPNsense to the VM disk. Assign WAN=vtnet0 and LAN=vtnet1. "
-                                   "Then fetch the generated builder configuration URL to /conf/config.xml and reboot.")
+                                   "Fetch the generated setup URL to /tmp/ctf-builder.php and run it with "
+                                   "/usr/local/bin/php. Do not replace /conf/config.xml or reboot manually; "
+                                   "then select Installer complete.")
         result.append(payload)
     return result
 
