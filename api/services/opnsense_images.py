@@ -533,7 +533,8 @@ def _builder_ssh(db: Session, host: str, command: str, timeout: int = 120) -> tu
     raise ImageWorkflowError(f"builder SSH did not become ready: {last_error}")
 
 
-def _builder_validation_command(*, public_ip: str, lan_mac: str, version: str) -> str:
+def _builder_validation_command(*, public_ip: str, lan_mac: str, version: str,
+                                control_plane_cidr: str) -> str:
     """Validate persisted and effective OPNsense state without changing it."""
     php = (
         'require_once("config.inc"); '
@@ -542,6 +543,7 @@ def _builder_validation_command(*, public_ip: str, lan_mac: str, version: str) -
         '$key=""; foreach($config["system"]["user"] as $u){if(($u["name"]??"")==="root")'
         '{$key=$u["authorizedkeys"]??"";}} echo $wan," ",$lan," ",strlen($key);'
     )
+    control_source = str(ip_network(control_plane_cidr, strict=False).network_address)
     inner = (
         f"set -eu; actual_version=$(opnsense-version -v); test \"$actual_version\" = {shlex.quote(version)}; "
         f"mapping=$(/usr/local/bin/php -r {shlex.quote(php)}); set -- $mapping; "
@@ -551,7 +553,8 @@ def _builder_validation_command(*, public_ip: str, lan_mac: str, version: str) -
         "test -s /root/.ssh/authorized_keys; "
         "/usr/local/sbin/sshd -T | grep -q '^permitrootlogin yes$'; "
         "/usr/local/sbin/sshd -T | grep -q '^pubkeyauthentication yes$'; "
-        "pfctl -sr | grep -F 'CTF builder SSH' >/dev/null; "
+        f"pfctl -sr | grep -F {shlex.quote('from ' + control_source + ' to')} | "
+        "grep -E 'port = (ssh|22)' >/dev/null; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
         "test -x /usr/local/sbin/configctl; mount | grep ' on / ' >/dev/null; echo \"$actual_version\""
     )
@@ -576,7 +579,10 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         vpc = next((row for row in vpcs if row.get("id") == image.builder_vpc_id), None)
         if not vpc or not vpc.get("mac_address"):
             raise ImageWorkflowError("builder VPC NIC metadata is missing")
-        check = _builder_validation_command(public_ip=host, lan_mac=vpc["mac_address"], version=image.version)
+        check = _builder_validation_command(
+            public_ip=host, lan_mac=vpc["mac_address"], version=image.version,
+            control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
+        )
         # Do not reboot a builder that has not first proven its persisted and effective configuration.
         code, output, error = _builder_ssh(db, host, check)
         if code or image.version not in output:
@@ -612,7 +618,8 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         if not test_vpc or not test_vpc.get("mac_address"):
             raise ImageWorkflowError("snapshot validation VPC NIC metadata is missing")
         test_check = _builder_validation_command(
-            public_ip=test_host, lan_mac=test_vpc["mac_address"], version=image.version
+            public_ip=test_host, lan_mac=test_vpc["mac_address"], version=image.version,
+            control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
         )
         code, output, _ = _builder_ssh(db, test_host, test_check)
         if code or image.version not in output:

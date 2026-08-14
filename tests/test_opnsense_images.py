@@ -113,12 +113,14 @@ def test_detach_iso_uses_official_endpoint_and_is_idempotent(monkeypatch):
 
 def test_builder_validation_checks_effective_network_ssh_and_pf_state():
     command = _builder_validation_command(
-        public_ip="198.51.100.10", lan_mac="5a:00:00:00:00:02", version="26.7"
+        public_ip="198.51.100.10", lan_mac="5a:00:00:00:00:02", version="26.7",
+        control_plane_cidr="192.0.2.8/32",
     )
     assert "198.51.100.10" in command
     assert "5a:00:00:00:00:02" in command
     assert "permitrootlogin" in command
     assert "pfctl -sr" in command
+    assert "from 192.0.2.8 to" in command
     assert "route -n get default" in command
 
 
