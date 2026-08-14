@@ -1,6 +1,7 @@
 import bz2
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -86,6 +87,17 @@ def test_builder_config_enables_ssh_and_temporary_wan_rule(monkeypatch):
     assert "<enabled>1</enabled>" in config
     assert "<interface>wan</interface>" in config
     assert "<port>22</port>" in config
+
+
+def test_detach_iso_is_idempotent_but_still_reboots(monkeypatch):
+    client = object.__new__(VultrImageClient)
+    calls = []
+    monkeypatch.setattr(client, "instance", lambda _instance_id: {"iso_id": None})
+    monkeypatch.setattr(client, "request", lambda method, path, **kwargs: calls.append((method, path, kwargs)))
+
+    client.detach_iso_and_reboot(SimpleNamespace(builder_instance_id="builder-1"))
+
+    assert calls == [("POST", "/instances/builder-1/reboot", {})]
 
 
 def test_cleanup_failure_preserves_ready_validated_snapshot(monkeypatch):

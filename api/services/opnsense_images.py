@@ -297,7 +297,9 @@ class VultrImageClient:
         return self.request("GET", f"/instances/{instance_id}")["instance"]
 
     def detach_iso_and_reboot(self, image: OpnsenseImage):
-        self.request("PATCH", f"/instances/{image.builder_instance_id}", json={"iso_id": None})
+        instance = self.instance(image.builder_instance_id)
+        if instance.get("iso_id"):
+            self.request("PATCH", f"/instances/{image.builder_instance_id}", json={"iso_id": None})
         self.request("POST", f"/instances/{image.builder_instance_id}/reboot")
 
     def create_snapshot(self, image: OpnsenseImage) -> str:
