@@ -133,14 +133,14 @@ def test_detach_iso_uses_official_endpoint_and_is_idempotent(monkeypatch):
     ]
 
 
-def test_reboot_uses_vultr_documented_bulk_endpoint():
+def test_start_uses_vultr_instance_endpoint():
     client = object.__new__(VultrImageClient)
     calls = []
     client.request = lambda *args, **kwargs: calls.append((args, kwargs)) or {}
 
-    client.reboot("builder-1")
+    client.start("builder-1")
 
-    assert calls == [(('POST', '/instances/reboot'), {'json': {'instance_ids': ['builder-1']}})]
+    assert calls == [(('POST', '/instances/builder-1/start'), {})]
 
 
 def test_builder_validation_checks_effective_network_ssh_and_pf_state():
@@ -224,7 +224,6 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(
             return {"main_ip": "198.51.100.10" if identifier == "builder" else "198.51.100.20"}
         def instance(self, _identifier): return {"power_status": power_status}
         def detach_iso(self, _image): events.append("iso-detached"); return detach_started
-        def reboot(self, _identifier): events.append("reboot")
         def start(self, _identifier): events.append("start")
         def wait_running(self, _identifier): events.append("running")
         def halt(self, _identifier): events.append("halt")
@@ -246,7 +245,11 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(
         validation_media.append(kwargs["installed"])
         return real_validation_command(**kwargs)
     monkeypatch.setattr("api.services.opnsense_images._builder_validation_command", record_validation_command)
-    monkeypatch.setattr("api.services.opnsense_images._builder_ssh", lambda *_args, **_kwargs: (0, "26.7", ""))
+    ssh_commands = []
+    def successful_ssh(_db, _host, command, **_kwargs):
+        ssh_commands.append(command)
+        return 0, "26.7", ""
+    monkeypatch.setattr("api.services.opnsense_images._builder_ssh", successful_ssh)
     monkeypatch.setattr("api.services.opnsense_images._boot_id", lambda *_args: "boot")
     monkeypatch.setattr("api.services.opnsense_images._wait_for_new_boot", lambda *_args: None)
     fingerprints = iter(["host-key-1", "host-key-2"])
@@ -259,7 +262,7 @@ def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(
     assert image.snapshot_id == "snapshot-id"
     assert validation_media and all(validation_media)
     assert events[:len(expected_prefix)] == expected_prefix
-    assert events.count("reboot") == 1
     assert events.count("start") == (0 if detach_started else 1)
+    assert sum("configctl system reboot" in command for command in ssh_commands) == 1
     assert events.index("halt") < events.index("stopped") < events.index("snapshot")
     assert events.count("clone-created") == 2

@@ -321,10 +321,6 @@ class VultrImageClient:
             time.sleep(POLL_SECONDS)
         raise ImageWorkflowError("timed out waiting for Vultr to detach the installer ISO")
 
-    def reboot(self, instance_id: str):
-        # This is the endpoint documented by Vultr for restarting Cloud Compute.
-        self.request("POST", "/instances/reboot", json={"instance_ids": [instance_id]})
-
     def start(self, instance_id: str):
         self.request("POST", f"/instances/{instance_id}/start")
 
@@ -623,6 +619,16 @@ def _boot_id(db: Session, host: str) -> str:
     return output.strip()
 
 
+def _request_builder_reboot(db: Session, host: str) -> None:
+    """Request a clean reboot through OPNsense's documented configd action."""
+    command = "/bin/sh -c " + shlex.quote(
+        "nohup /usr/local/sbin/configctl system reboot >/dev/null 2>&1 &"
+    )
+    code, output, error = _builder_ssh(db, host, command)
+    if code:
+        raise ImageWorkflowError(f"OPNsense reboot request failed: {(error or output)[:300]}")
+
+
 def _wait_for_new_boot(db: Session, host: str, previous_boot_id: str) -> None:
     deadline = time.monotonic() + POLL_TIMEOUT
     while time.monotonic() < deadline:
@@ -686,8 +692,7 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         # A second complete cold-boot validation proves this is persistent
         # state, not a one-shot installer transition.
         previous_boot_id = _boot_id(db, host)
-        client.reboot(image.builder_instance_id)
-        client.wait_running(image.builder_instance_id)
+        _request_builder_reboot(db, host)
         _wait_for_new_boot(db, host, previous_boot_id)
         _wait_for_builder_validation(
             db, host, check, version=image.version,
