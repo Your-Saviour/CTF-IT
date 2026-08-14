@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import socket
 from ipaddress import ip_network
 from sqlalchemy.orm import object_session
@@ -18,8 +19,8 @@ from api.database import SessionLocal
 from api.models import Event, Site, Team, VM, VMGoal, VMModule, VPNCredential, Zone, utcnow
 from api.services.gamenet_provider import (
     GameNetProviderError, VultrGameNetProvider, bootstrap_opnsense, configure_endpoint_network, configure_snapshot_opnsense,
-    configure_gateway, configure_site_wireguard, endpoint_cloud_init, install_local_wireguard, render_opnsense_config,
-    ssh_command, tcp_closed, ubuntu_cloud_init, update_vm_addresses, upload_text,
+    configure_gateway, configure_site_wireguard, endpoint_cloud_init, install_local_wireguard,
+    ssh_command, tcp_closed, ubuntu_cloud_init, update_vm_addresses, upload_text, validate_snapshot_wan,
 )
 from api.services.secrets import decrypt_secret
 from builder.infrastructure_validation import gamenet_hostname
@@ -200,9 +201,12 @@ def create_site_firewalls(db, event, infrastructure):
             if not image:
                 raise RuntimeError("No active validated OPNsense image. Open /admin/settings to build and activate one.")
             vm.opnsense_image_id, vm.opnsense_release, vm.opnsense_snapshot_id = image.id, image.version, image.snapshot_id
-            _create_provider_instance(vm, public=True, vpc_ids=[site.vpc_id],
+            _create_provider_instance(vm, public=True,
                                       image_source={"snapshot_id": image.snapshot_id})
-            vm.vpc_ip = vm.private_ip
+            validate_snapshot_wan(vm, vm.opnsense_release)
+        if vm.opnsense_snapshot_id and not vm.vpc_ip:
+            attachment = _attach_provider_vpc(vm, site.vpc_id)
+            vm.vpc_ip = attachment["ip_address"]
             vm.private_ip = str(ip_network(site.allocated_cidr).network_address + 1)
         if not vm.public_ip or not vm.private_ip:
             raise RuntimeError("site firewall requires both public WAN and private VPC addresses")
@@ -211,7 +215,10 @@ def create_site_firewalls(db, event, infrastructure):
             # Legacy records that already have an instance but no provenance
             # finish their original conversion path; all new instances use the snapshot.
             if vm.opnsense_snapshot_id:
-                configure_snapshot_opnsense(site, vm, vm.opnsense_release)
+                attachment = _attach_provider_vpc(vm, site.vpc_id)
+                configure_snapshot_opnsense(
+                    site, vm, vm.opnsense_release, lan_mac=attachment["mac_address"]
+                )
                 duplicate = db.query(VM).filter(
                     VM.id != vm.id, VM.ssh_host_key == vm.ssh_host_key,
                     VM.role == "site_firewall", VM.ssh_host_key.is_not(None),
@@ -326,6 +333,14 @@ def _create_provider_vpc(site):
         provider.close()
 
 
+def _attach_provider_vpc(vm, vpc_id):
+    provider = _provider()
+    try:
+        return provider.attach_vpc(vm, vpc_id)
+    finally:
+        provider.close()
+
+
 def _configure_site_tunnel(site):
     db = object_session(site)
     firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
@@ -401,13 +416,20 @@ def _apply_final_firewall_groups(event, infrastructure):
 
 def _remove_temporary_management_access(event):
     db = object_session(event)
-    _, public_key = __import__("api.services.ssh_keys", fromlist=["get_or_create_platform_keypair"]).get_or_create_platform_keypair(db)
     for site in db.query(Site).filter_by(event_id=event.id):
         firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
-        password = decrypt_secret(firewall.admin_password)
-        config = render_opnsense_config(site, firewall, public_key, password, temporary_management=False)
-        upload_text(firewall, "/conf/config.xml", config, host=firewall.private_ip)
-        code, _, error = ssh_command(firewall, "configctl service reload all", host=firewall.private_ip)
+        php = '''require_once("config.inc"); global $config;
+$rules=$config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"]??[];
+$config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"]=array_values(array_filter(
+    $rules, fn($item)=>!in_array($item["description"]??"", ["Allow management SSH","Allow management HTTPS"])
+));
+$config["system"]["ssh"]["interfaces"]="lan";
+write_config("Remove temporary public management access");'''
+        command = "/bin/sh -c " + shlex.quote(
+            f"/usr/local/bin/php -r {shlex.quote(php)} && "
+            "/usr/local/sbin/configctl filter reload && /usr/local/sbin/configctl openssh restart"
+        )
+        code, _, error = ssh_command(firewall, command, host=firewall.private_ip)
         if code:
             raise GameNetProviderError(f"failed to remove temporary OPNsense management rules: {error[:300]}")
 

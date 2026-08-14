@@ -491,19 +491,24 @@ Build and activate an image from **Admin → Settings → OPNsense images**:
    downloads only from `OPNSENSE_MIRROR_BASE`, verifies the published SHA-256,
    decompresses the ISO, and verifies its signature against the reviewed
    release public key in the repository.
-2. Wait for `awaiting_install`, open the displayed Vultr console, and install
-   OPNsense to the VM disk. Assign WAN=`vtnet0` and LAN=`vtnet1`.
-3. Fetch the displayed one-time setup URL to `/tmp/ctf-builder.php` and run it
-   with `/usr/local/bin/php`. The script merges settings through OPNsense's
-   `write_config()` API; never replace `/conf/config.xml` directly. It matches
-   the LAN device to Vultr's reported VPC MAC, enables `openssh`, synchronizes
-   the root account, and installs an OPNsense 26.7 MVC firewall rule limited to
-   `CTF_CONTROL_PLANE_CIDR`. It applies the official interface, SSH, and filter
-   actions immediately. Do not reboot manually; select **Installer complete**
-   only when the script reports success.
-4. Select **Installer complete**. The platform validates the version, disk,
-   interfaces, SSH, and `configctl`; removes host-specific state; creates the
-   snapshot; and validates a test deployment.
+2. Wait for `awaiting_install` and open the Vultr console. In the live system,
+   use interface assignment once: no VLANs, leave LAN blank, and assign the
+   builder's only VirtIO NIC as WAN using DHCP.
+3. Before installing, fetch the displayed one-time setup URL to
+   `/tmp/ctf-builder.php` and run it with `/usr/local/bin/php`. The script uses
+   OPNsense's `write_config()` API to create a WAN-only, key-only golden
+   configuration and a management rule limited to `CTF_CONTROL_PLANE_CIDR`.
+   It contains no reusable password and deliberately has no LAN or VPC state.
+   From the same root shell, run `opnsense-installer` so the configured live
+   system is cloned to disk. Do not detach the ISO or reboot manually.
+4. When installation finishes, leave the VM running and select **Installer
+   complete**. The platform first validates the configured live state, waits
+   for Vultr to confirm ISO detachment, boots from the writable installed disk,
+   and repeats the full validation across two boots. It then removes persistent
+   host keys from `/conf/sshd`, shuts down cleanly, confirms the VM is stopped,
+   creates the snapshot, and validates two disposable clones with distinct SSH
+   host keys. Any failed check blocks snapshot creation and leaves the builder
+   available for diagnosis.
 5. When the image is `ready`, select **Activate**. Activation is explicit and
    affects only newly created firewalls. Existing firewalls are unchanged.
 
@@ -517,12 +522,21 @@ is refused while firewall records reference the image.
 
 Each firewall records the image release and snapshot ID used to create it.
 Per-site configuration and a unique administrator password are applied after
-restore, and provisioning rejects duplicate SSH host keys between clones.
+restore. A clone first boots and validates with WAN only; the site VPC is then
+attached, and its Vultr-reported MAC is mapped to the guest interface before
+LAN configuration is generated. Provisioning rejects duplicate SSH host keys.
 The temporary builder management rule is replaced when the per-site
 configuration is applied. Installer completion refuses to reboot until the
 effective interface MACs, public address, default route, key authentication,
-SSH settings, and PF rule have all been validated; the same checks run again
-after reboot and on the snapshot test deployment.
+SSH settings, and PF rule have all been validated; the same checks run across
+two installed-disk boots and on both snapshot test deployments.
+
+The workflow is aligned with the upstream [OPNsense installation
+guidance](https://docs.opnsense.org/manual/install.html), the OPNsense 26.7
+[`openssh` implementation](https://github.com/opnsense/core/blob/stable/26.7/src/etc/inc/plugins.inc.d/openssh.inc),
+and Vultr's documented [post-creation VPC attachment
+API](https://docs.vultr.com/products/compute/cloud-compute/networking/vpc) and
+[clean-shutdown snapshot guidance](https://docs.vultr.com/vultr-marketplace).
 
 `/admin/topology` — interactive D3 force-directed graph showing the event → team → VM hierarchy.
 

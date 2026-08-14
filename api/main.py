@@ -375,20 +375,13 @@ app.include_router(vm_goals.router)
 async def opnsense_builder_config(token: str, db: Session = Depends(get_db)):
     """One-purpose token endpoint consumed from the isolated builder console."""
     from api.models import OpnsenseImage
-    from api.services.opnsense_images import ImageWorkflowError, VultrImageClient, generic_builder_setup_script
+    from api.services.opnsense_images import generic_builder_setup_script
     image = db.query(OpnsenseImage).filter_by(builder_config_token=token, status="awaiting_install").first()
     if not image:
         return JSONResponse({"error": "not found"}, status_code=404)
-    client = VultrImageClient()
-    try:
-        vpcs = client.instance_vpcs(image.builder_instance_id)
-    finally:
-        client.close()
-    vpc = next((row for row in vpcs if row.get("id") == image.builder_vpc_id), None)
-    if not vpc or not vpc.get("mac_address"):
-        raise ImageWorkflowError("Vultr did not report the builder VPC NIC MAC")
     return Response(generic_builder_setup_script(
-        db, lan_mac=vpc["mac_address"], control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"]
+        db, control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
+        build_nonce=image.builder_config_token,
     ), media_type="text/plain",
                     headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 

@@ -12,7 +12,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     ImageWorkflowError, VultrImageClient, active_image, artifact_urls, cleanup_validated_image, decompress_bz2,
-    _builder_validation_command, generic_builder_setup_script,
+    _builder_validation_command, complete_install, generic_builder_setup_script,
     interrupt_running_jobs, parse_published_checksum, stream_download, validate_release,
 )
 
@@ -80,19 +80,24 @@ def test_iso_route_directory_is_traversable_by_read_only_sidecar():
     assert "route_dir.chmod(0o755)" in source
 
 
-def test_builder_setup_uses_official_apply_paths_and_vpc_mac(monkeypatch):
+def test_builder_setup_creates_key_only_wan_config_before_install(monkeypatch):
     monkeypatch.setattr("api.services.opnsense_images.get_or_create_platform_keypair",
                         lambda _db: ("private", "ssh-ed25519 TEST"))
-    script = generic_builder_setup_script(None, lan_mac="5a:00:00:00:00:02", control_plane_cidr="192.0.2.8/32")
+    script = generic_builder_setup_script(
+        None, control_plane_cidr="192.0.2.8/32", build_nonce="one-time-token"
+    )
     assert 'require_once("config.inc")' in script
-    assert 'write_config("Configure CTF OPNsense image builder")' in script
-    assert '$lan_mac = "5a:00:00:00:00:02"' in script
-    assert '$config["interfaces"]["wan"]["if"] = $wan_if' in script
-    assert '$config["interfaces"]["lan"]["if"] = $lan_if' in script
+    assert 'write_config("Configure CTF WAN-only OPNsense image builder")' in script
+    assert "count($devices) !== 1" in script
+    assert '$config["interfaces"] = ["wan" =>' in script
+    assert '"interfaces" => "wan"' in script
+    assert 'passwordauth' not in script.lower()
+    assert '$user["password"]' in script
     assert '$config["OPNsense"]["Firewall"]["Filter"]["rules"]' in script
     assert '"source_net" => "192.0.2.8/32"' in script
     assert "sync_user.php -u root" in script
     assert "configctl interface reconfigure wan" in script
+    assert "configctl interface reconfigure lan" not in script
     assert "configctl openssh restart" in script
     assert "configctl filter reload" in script
     assert "pfctl -d" not in script
@@ -108,17 +113,23 @@ def test_detach_iso_uses_official_endpoint_and_is_idempotent(monkeypatch):
 
     client.detach_iso(SimpleNamespace(builder_instance_id="builder-1"))
 
-    assert calls == [("GET", "/instances/builder-1/iso", {})]
+    assert calls == [
+        ("GET", "/instances/builder-1/iso", {}),
+        ("GET", "/instances/builder-1/iso", {}),
+    ]
 
 
 def test_builder_validation_checks_effective_network_ssh_and_pf_state():
     command = _builder_validation_command(
-        public_ip="198.51.100.10", lan_mac="5a:00:00:00:00:02", version="26.7",
-        control_plane_cidr="192.0.2.8/32",
+        public_ip="198.51.100.10", version="26.7", control_plane_cidr="192.0.2.8/32",
+        build_nonce="one-time-token", installed=True,
     )
     assert "198.51.100.10" in command
-    assert "5a:00:00:00:00:02" in command
+    assert "is_install_media" in command
+    assert "has_lan" in command
     assert "permitrootlogin" in command
+    assert "passwordauthentication no" in command
+    assert "kbdinteractiveauthentication no" in command
     assert "pfctl -sr" in command
     assert "from 192.0.2.8 to" in command
     assert "route -n get default" in command
@@ -159,3 +170,51 @@ def test_cleanup_failure_preserves_ready_validated_snapshot(monkeypatch):
     assert image.test_instance_id == "test-id"
     assert image.builder_instance_id is None
     assert "cleanup incomplete" in image.error_detail
+
+
+def test_snapshot_is_blocked_until_builder_is_stopped_and_two_clones_pass(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, expire_on_commit=False)()
+    urls = artifact_urls("26.7")
+    image = OpnsenseImage(
+        version="26.7", artifact_url=urls["artifact"], checksum_url=urls["checksum"],
+        signature_url=urls["signature"], status="awaiting_install", phase="awaiting_install",
+        builder_instance_id="builder", vultr_iso_id="iso", builder_firewall_group_id="firewall",
+        builder_config_token="one-time-token",
+    )
+    session.add(image); session.commit()
+    events = []
+
+    class Client:
+        def close(self): pass
+        def wait_instance(self, identifier):
+            return {"main_ip": "198.51.100.10" if identifier == "builder" else "198.51.100.20"}
+        def detach_iso(self, _image): events.append("iso-detached")
+        def reboot(self, _identifier): events.append("reboot")
+        def halt(self, _identifier): events.append("halt")
+        def wait_stopped(self, _identifier): events.append("stopped"); return {"server_status": "stopped"}
+        def create_snapshot(self, _image):
+            assert events[-1] == "stopped"
+            events.append("snapshot")
+            return "snapshot-id"
+        def wait_snapshot(self, _identifier): events.append("snapshot-complete")
+        def create_test_instance(self, _image):
+            events.append("clone-created")
+            return f"clone-{events.count('clone-created')}"
+        def delete(self, kind, identifier): events.append(f"deleted:{kind}:{identifier}")
+
+    monkeypatch.setenv("CTF_CONTROL_PLANE_CIDR", "192.0.2.8/32")
+    monkeypatch.setattr("api.services.opnsense_images._builder_ssh", lambda *_args, **_kwargs: (0, "26.7", ""))
+    monkeypatch.setattr("api.services.opnsense_images._boot_id", lambda *_args: "boot")
+    monkeypatch.setattr("api.services.opnsense_images._wait_for_new_boot", lambda *_args: None)
+    fingerprints = iter(["host-key-1", "host-key-2"])
+    monkeypatch.setattr("api.services.opnsense_images._ssh_host_fingerprint", lambda *_args: next(fingerprints))
+    monkeypatch.setattr("api.services.opnsense_images.cleanup_local", lambda *_args, **_kwargs: None)
+
+    complete_install(session, image.id, vultr_factory=Client)
+
+    assert image.status == "ready"
+    assert image.snapshot_id == "snapshot-id"
+    assert events.index("halt") < events.index("stopped") < events.index("snapshot")
+    assert events.count("clone-created") == 2

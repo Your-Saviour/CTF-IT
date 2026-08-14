@@ -98,25 +98,24 @@ class VultrGameNetProvider:
                 object_session(vm).commit()
                 return self._instance_with_vpc(self._wait_instance(instance["id"]), vpc_ids)
 
-        _, public_key = get_or_create_platform_keypair(object_session(vm))
-        ssh_key_id = self._ensure_ssh_key("ctf-platform", public_key)
         body = {
             "region": vm.vultr_region, "plan": vm.vultr_plan,
             "label": vm.hostname, "hostname": vm.hostname,
-            "sshkey_id": [ssh_key_id], "enable_ipv6": False, "backups": "disabled",
+            "enable_ipv6": False, "backups": "disabled",
             "ddos_protection": False,
         }
         if image_source and image_source.get("snapshot_id"):
             body["snapshot_id"] = image_source["snapshot_id"]
             # Snapshot contains the platform key; Vultr's OS key injection is
             # intentionally not relied upon for custom snapshots.
-            body.pop("sshkey_id", None)
         else:
+            _, public_key = get_or_create_platform_keypair(object_session(vm))
+            ssh_key_id = self._ensure_ssh_key("ctf-platform", public_key)
+            body["sshkey_id"] = [ssh_key_id]
             base = load_base_type(vm.base_type)
             body["os_id"] = self._resolve_os_id(base.os)
         if vpc_ids:
             body["attach_vpc"] = vpc_ids
-            body["enable_vpc"] = True
         if not public:
             # Vultr's VPC-only compute flag removes both public NICs. It is not
             # equivalent to disable_public_ipv4, which can still expose IPv6.
@@ -128,6 +127,23 @@ class VultrGameNetProvider:
         object_session(vm).commit()
         result = self._wait_instance(instance["id"])
         return self._instance_with_vpc(result, vpc_ids)
+
+    def attach_vpc(self, vm: VM, vpc_id: str) -> dict:
+        """Attach a VPC after WAN-only snapshot boot and return its observed NIC metadata."""
+        path = f"/instances/{vm.vultr_id}/vpcs"
+        attached = self._request("GET", path, params={"per_page": 100}).get("vpcs", [])
+        selected = next((row for row in attached if row.get("id") == vpc_id), None)
+        if not selected:
+            self._request("POST", f"{path}/attach", json={"vpc_id": vpc_id})
+            self._wait_instance(vm.vultr_id)
+        deadline = time.monotonic() + CREATE_TIMEOUT
+        while time.monotonic() < deadline:
+            attached = self._request("GET", path, params={"per_page": 100}).get("vpcs", [])
+            selected = next((row for row in attached if row.get("id") == vpc_id), None)
+            if selected and selected.get("mac_address") and selected.get("ip_address"):
+                return selected
+            time.sleep(POLL_SECONDS)
+        raise GameNetProviderError(f"VPC {vpc_id} attachment metadata did not become ready")
 
     def _instance_with_vpc(self, result: dict, vpc_ids: list[str] | None) -> dict:
         if vpc_ids:
@@ -404,7 +420,55 @@ def bootstrap_opnsense(site: Site, vm: VM) -> None:
     raise GameNetProviderError(f"OPNsense bootstrap did not complete: {last_detail[:300]}")
 
 
-def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> None:
+def validate_snapshot_wan(vm: VM, expected_version: str) -> None:
+    """Prove a fresh snapshot clone is installed, WAN-only and key-only."""
+    php = ('require_once("config.inc"); require_once("util.inc"); '
+           '$wan=$config["interfaces"]["wan"]["if"]??""; '
+           'echo $wan," ",(isset($config["interfaces"]["lan"])?"lan":"nolAN")," ",'
+           '(is_install_media()?"live":"disk");')
+    command = "/bin/sh -c " + shlex.quote(
+        f"set -eu; set -- $(/usr/local/bin/php -r {shlex.quote(php)}); "
+        "wan_if=$1; test \"$2\" = nolAN; test \"$3\" = disk; "
+        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
+        "test \"$#\" -eq 1; test \"$1\" = \"$wan_if\"; "
+        f"test \"$(opnsense-version -v)\" = {shlex.quote(expected_version)}; "
+        "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
+        "/usr/local/sbin/sshd -T | grep -q '^permitrootlogin yes$'; "
+        "/usr/local/sbin/sshd -T | grep -q '^pubkeyauthentication yes$'; "
+        "/usr/local/sbin/sshd -T | grep -q '^passwordauthentication no$'; "
+        "pfctl -sr | grep -E 'port = (ssh|22)' >/dev/null"
+    )
+    code, output, error = ssh_command(vm, command, timeout=120, connect_timeout=CREATE_TIMEOUT)
+    if code:
+        raise GameNetProviderError(f"WAN-only snapshot validation failed: {(error or output)[:300]}")
+    host = vm.public_ip or vm.ip_address
+    transport = paramiko.Transport((host, vm.ssh_port or 22))
+    try:
+        transport.start_client(timeout=15)
+        key = transport.get_remote_server_key()
+        vm.ssh_host_key = f"{key.get_name()} {key.get_base64()}"
+    finally:
+        transport.close()
+
+
+def _snapshot_interface_mapping(vm: VM, lan_mac: str) -> tuple[str, str]:
+    expected_mac = lan_mac.lower()
+    command = "/bin/sh -c " + shlex.quote(
+        "set -eu; wan_if=$(route -n get default | awk '/interface:/{print $2}'); lan_if=''; "
+        "for candidate in $(ifconfig -l); do "
+        "mac=$(ifconfig \"$candidate\" 2>/dev/null | awk '/ether/{print tolower($2); exit}'); "
+        f"if [ \"$mac\" = {shlex.quote(expected_mac)} ]; then lan_if=$candidate; fi; done; "
+        "test -n \"$wan_if\"; test -n \"$lan_if\"; test \"$wan_if\" != \"$lan_if\"; "
+        "printf '%s %s\\n' \"$wan_if\" \"$lan_if\""
+    )
+    code, output, error = ssh_command(vm, command, timeout=120, connect_timeout=CREATE_TIMEOUT)
+    parts = output.strip().split()
+    if code or len(parts) != 2:
+        raise GameNetProviderError(f"could not map Vultr VPC MAC inside OPNsense: {(error or output)[:300]}")
+    return parts[0], parts[1]
+
+
+def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, lan_mac: str) -> None:
     """Apply unique site state to an already validated OPNsense snapshot."""
     db = object_session(vm)
     _, public_key = get_or_create_platform_keypair(db)
@@ -414,7 +478,11 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> No
         vm.admin_password = encrypt_secret(password); db.flush()
     else:
         password = decrypt_secret(vm.admin_password)
-    config = render_opnsense_config(site, vm, public_key, password, temporary_management=True)
+    wan_interface, lan_interface = _snapshot_interface_mapping(vm, lan_mac)
+    config = render_opnsense_config(
+        site, vm, public_key, password, temporary_management=True,
+        wan_interface=wan_interface, lan_interface=lan_interface,
+    )
     upload_text(vm, "/tmp/ctf-site-config.xml", config)
     php = ('require_once("config.inc"); require_once("util.inc"); '
            '$c=\\OPNsense\\Core\\Config::getInstance(); '
@@ -440,9 +508,12 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> No
         try:
             code, output, error = ssh_command(
                 vm,
-                "test -f /conf/ctf-site-ready && opnsense-version -v && "
-                "ifconfig vtnet0 >/dev/null && ifconfig vtnet1 >/dev/null && "
-                "pfctl -sr | grep -F 'Allow management SSH'",
+                f"test -f /conf/ctf-site-ready && test \"$(opnsense-version -v)\" = {shlex.quote(expected_version)} && "
+                f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {vm.public_ip}' >/dev/null && "
+                f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
+                f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {vm.private_ip}' >/dev/null && "
+                f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
+                "pfctl -sr | grep -F 'Allow management SSH' >/dev/null && opnsense-version -v",
                 timeout=60, connect_timeout=60,
             )
             if code == 0 and expected_version in output:
@@ -464,7 +535,8 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str) -> No
 
 
 def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
-                           *, temporary_management: bool) -> str:
+                           *, temporary_management: bool, wan_interface: str = "vtnet0",
+                           lan_interface: str = "vtnet1") -> str:
     templates = FileSystemLoader(os.path.join(os.path.dirname(__file__), "..", "..", "templates"))
     environment = Environment(loader=templates, autoescape=False)
     environment.filters["b64encode"] = lambda value: base64.b64encode(str(value).encode()).decode()
@@ -473,6 +545,7 @@ def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
     return template.render(
         opnsense_hostname=vm.hostname, opnsense_lan_ip=str(network.network_address + 1),
         opnsense_lan_subnet=network.prefixlen,
+        opnsense_wan_interface=wan_interface, opnsense_lan_interface=lan_interface,
         opnsense_admin_password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode(),
         opnsense_ssh_pubkey=public_key, temporary_management=temporary_management,
         opnsense_management_cidr=os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32"),

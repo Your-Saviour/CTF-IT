@@ -35,4 +35,8 @@ The admin event page polls the aggregate provision-status endpoint until every V
 - External provisioning depends on Vultr, Semaphore, and optionally Cloudflare availability.
 - The one-time OPNsense builder requires a valid `CTF_CONTROL_PLANE_CIDR`, at
   least 3 GB of temporary storage, and an interactive Vultr console install.
+- The builder has one NIC and no VPC. Assign that NIC as DHCP WAN in the live
+  console, apply the generated configuration before `opnsense-installer`, and
+  never detach, reboot, or snapshot it manually. The platform blocks snapshot
+  creation until two installed-disk boot checks pass and the VM is stopped.
 - Live provisioning and teardown require the manual release smoke test in `deploy/testing_plan.md`.

@@ -35,9 +35,11 @@ Do not run this procedure as part of ordinary unit tests.
 ## Event exercise
 
 Before creating the event, build the intended OPNsense release under **Admin →
-Settings → OPNsense images**. Complete the console installation with
-WAN=`vtnet0` and LAN=`vtnet1`, load the generated generic configuration, mark
-the installer complete, and activate the resulting validated snapshot.
+Settings → OPNsense images**. In the one-NIC live builder, leave LAN blank and
+assign the sole VirtIO NIC as DHCP WAN. Load the generated WAN-only
+configuration **before** running `opnsense-installer`, leave the completed
+installer running, mark it complete in the platform, and activate the snapshot
+only after both installed-disk boots and both disposable clone checks pass.
 
 Record the total build duration. Then create one GameNet event with at least
 one team and its site endpoints.
@@ -54,6 +56,9 @@ Verify:
 8. Every site firewall records the activated OPNsense release and snapshot ID,
    has a distinct SSH host key, and reaches active state without invoking the
    legacy `opnsense-bootstrap` conversion.
+9. Each snapshot clone starts with WAN only. The site VPC is attached only
+   after WAN validation, its Vultr-reported MAC maps to the configured LAN
+   interface, and the WAN interface retains the public address/default route.
 
 For the release acceptance run, provision at least five firewalls from the
 same snapshot. Record ready time for each deployment; target median under

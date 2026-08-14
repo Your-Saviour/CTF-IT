@@ -45,12 +45,12 @@
       <enabled>1</enabled>
       <port>22</port>
       <permitrootlogin>1</permitrootlogin>
-      <passwordauth>1</passwordauth>
+      <interfaces>{% if temporary_management | default(true) %}wan,lan{% else %}lan{% endif %}</interfaces>
+      <group>admins</group>
     </ssh>
     <webgui>
       <protocol>https</protocol>
       <port>443</port>
-      <ssl-certref>self-signed</ssl-certref>
       <nohttpreferercheck>1</nohttpreferercheck>
       <noantilockout>1</noantilockout>
       <interfaces>lan</interfaces>
@@ -58,7 +58,7 @@
   </system>
   <interfaces>
     <wan>
-      <if>vtnet0</if>
+      <if>{{ opnsense_wan_interface }}</if>
       <descr>WAN</descr>
       <enable>1</enable>
       <spoofmac/>
@@ -69,7 +69,7 @@
       <gateway/>
     </wan>
     <lan>
-      <if>vtnet1</if>
+      <if>{{ opnsense_lan_interface }}</if>
       <descr>LAN</descr>
       <enable>1</enable>
       <spoofmac/>

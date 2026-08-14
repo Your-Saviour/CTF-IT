@@ -70,7 +70,10 @@ def test_opnsense_config_encodes_authorized_key(db_session):
     site = db_session.query(Site).one()
     vm = VM(hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id)
     db_session.add(vm); db_session.flush()
-    rendered = render_opnsense_config(site, vm, "ssh-ed25519 TEST", "password", temporary_management=True)
+    rendered = render_opnsense_config(
+        site, vm, "ssh-ed25519 TEST", "password", temporary_management=True,
+        wan_interface="vtnet7", lan_interface="vtnet3",
+    )
     assert "<authorizedkeys>c3NoLWVkMjU1MTkgVEVTVA==</authorizedkeys>" in rendered
     assert "<active_interface>lan</active_interface>" in rendered
     assert "<OPNsense>" in rendered
@@ -78,6 +81,10 @@ def test_opnsense_config_encodes_authorized_key(db_session):
     assert "<description>Allow management SSH</description>" in rendered
     assert "<filter/>" in rendered
     assert "<filter>" not in rendered
+    assert "<if>vtnet7</if>" in rendered
+    assert "<if>vtnet3</if>" in rendered
+    assert "<passwordauth>" not in rendered
+    assert "<ssl-certref>self-signed</ssl-certref>" not in rendered
 
 
 def test_managed_dns_names_normalize_keys_and_preserve_endpoint_ordinals(db_session):
@@ -323,8 +330,38 @@ def test_vultr_private_instance_request_is_vpc_only(monkeypatch, db_session):
     body = next(call[2]["json"] for call in calls if call[0] == "POST" and call[1] == "/instances")
     assert body["vpc_only"] is True
     assert body["attach_vpc"] == ["vpc-id"]
+    assert "enable_vpc" not in body
     assert body["enable_ipv6"] is False
     assert result["main_ip"] == "0.0.0.0"
+    provider.close()
+
+
+def test_snapshot_instance_boots_without_vpc_then_attaches_explicitly(monkeypatch, db_session):
+    event = Event(name="GameNet", quota="{}"); db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    vm = VM(hostname="firewall", team_id=team.id, event_id=event.id, base_type="opnsense",
+            vultr_plan="vc2-2c-4gb", vultr_region="ewr")
+    db_session.add(vm); db_session.flush()
+    monkeypatch.setenv("VULTR_API_KEY", "test")
+    provider = VultrGameNetProvider(); calls = []
+    responses = iter([
+        {"instances": []}, {"instance": {"id": "instance-id"}},
+        {"vpcs": []}, {},
+        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.0.2", "mac_address": "5a:00:00:00:00:02"}]},
+    ])
+    monkeypatch.setattr(provider, "_request",
+                        lambda method, path, **kwargs: calls.append((method, path, kwargs)) or next(responses))
+    monkeypatch.setattr(provider, "_wait_instance", lambda instance_id: {
+        "id": instance_id, "status": "active", "server_status": "ok", "main_ip": "198.51.100.10",
+    })
+    provider.create_instance(vm, public=True, image_source={"snapshot_id": "snapshot-id"})
+    create_body = next(call[2]["json"] for call in calls if call[0] == "POST" and call[1] == "/instances")
+    assert create_body["snapshot_id"] == "snapshot-id"
+    assert "attach_vpc" not in create_body
+    attachment = provider.attach_vpc(vm, "vpc-id")
+    attach_call = next(call for call in calls if call[1].endswith("/vpcs/attach"))
+    assert attach_call[2]["json"] == {"vpc_id": "vpc-id"}
+    assert attachment["mac_address"] == "5a:00:00:00:00:02"
     provider.close()
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import bcrypt
 import bz2
 import hashlib
 import os
@@ -296,7 +297,7 @@ class VultrImageClient:
         body = {"region": os.environ.get("VULTR_DEFAULT_REGION", "syd"),
                 "plan": os.environ.get("GAMENET_FIREWALL_PLAN", "vc2-2c-4gb"), "iso_id": image.vultr_iso_id,
                 "label": f"ctf-opnsense-builder-{image.version}-{image.id}", "hostname": "opnsense-builder",
-                "attach_vpc": [image.builder_vpc_id], "enable_vpc": True, "firewall_group_id": image.builder_firewall_group_id,
+                "firewall_group_id": image.builder_firewall_group_id,
                 "enable_ipv6": False, "backups": "disabled"}
         return self.request("POST", "/instances", json=body)["instance"]["id"]
 
@@ -307,9 +308,17 @@ class VultrImageClient:
         return self.request("GET", f"/instances/{instance_id}/vpcs").get("vpcs", [])
 
     def detach_iso(self, image: OpnsenseImage):
-        status = self.request("GET", f"/instances/{image.builder_instance_id}/iso").get("iso_status", {})
+        """Detach the installer and wait until Vultr confirms it is gone."""
+        path = f"/instances/{image.builder_instance_id}/iso"
+        status = self.request("GET", path).get("iso_status", {})
         if status.get("iso_id"):
-            self.request("POST", f"/instances/{image.builder_instance_id}/iso/detach")
+            self.request("POST", f"{path}/detach")
+        deadline = time.monotonic() + POLL_TIMEOUT
+        while time.monotonic() < deadline:
+            if not self.request("GET", path).get("iso_status", {}).get("iso_id"):
+                return
+            time.sleep(POLL_SECONDS)
+        raise ImageWorkflowError("timed out waiting for Vultr to detach the installer ISO")
 
     def reboot(self, instance_id: str):
         self.request("POST", f"/instances/{instance_id}/reboot")
@@ -321,11 +330,21 @@ class VultrImageClient:
     def halt(self, instance_id: str):
         self.request("POST", f"/instances/{instance_id}/halt")
 
+    def wait_stopped(self, instance_id: str) -> dict:
+        deadline = time.monotonic() + POLL_TIMEOUT
+        while time.monotonic() < deadline:
+            row = self.instance(instance_id)
+            if row.get("server_status") == "stopped":
+                return row
+            if row.get("status") in {"failed", "error"}:
+                raise ImageWorkflowError("Vultr builder failed while stopping")
+            time.sleep(POLL_SECONDS)
+        raise ImageWorkflowError("timed out waiting for the builder to stop")
+
     def create_test_instance(self, image: OpnsenseImage) -> str:
         body = {"region": os.environ.get("VULTR_DEFAULT_REGION", "syd"),
                 "plan": os.environ.get("GAMENET_FIREWALL_PLAN", "vc2-2c-4gb"), "snapshot_id": image.snapshot_id,
                 "label": f"ctf-opnsense-validation-{image.id}", "hostname": "opnsense-validation",
-                "attach_vpc": [image.builder_vpc_id], "enable_vpc": True,
                 "enable_ipv6": False, "backups": "disabled", "firewall_group_id": image.builder_firewall_group_id}
         return self.request("POST", "/instances", json=body)["instance"]["id"]
 
@@ -365,57 +384,54 @@ def _set_phase(db: Session, image: OpnsenseImage, phase: str) -> None:
     db.commit()
 
 
-def generic_builder_setup_script(db: Session, *, lan_mac: str, control_plane_cidr: str) -> str:
-    """Merge builder access into the installed config using OPNsense's configuration API."""
+def generic_builder_setup_script(db: Session, *, control_plane_cidr: str,
+                                 build_nonce: str) -> str:
+    """Create the one-NIC golden config in the live system before installation."""
+    control_plane = ip_network(control_plane_cidr, strict=False)
+    if control_plane.version != 4:
+        raise ImageWorkflowError("CTF_CONTROL_PLANE_CIDR must be a valid IPv4 CIDR")
     _, public_key = get_or_create_platform_keypair(db)
     encoded_key = base64.b64encode(public_key.strip().encode()).decode()
-    lan_mac = lan_mac.lower()
-    # Deliberately contains no password hash or reusable private credential.
+    # Discard the plaintext; snapshot login is intentionally key-only.
+    password_hash = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt(rounds=12)).decode()
+    nonce_hash = hashlib.sha256(build_nonce.encode()).hexdigest()
     return f'''<?php
 require_once("config.inc");
 require_once("util.inc");
 global $config;
+$devices = [];
+exec("/sbin/ifconfig -l", $ifaces, $status);
+foreach (preg_split('/\\s+/', trim(implode(" ", $ifaces))) as $ifname) {{
+    if (preg_match('/^vtnet[0-9]+$/', $ifname)) {{ $devices[] = $ifname; }}
+}}
+if (count($devices) !== 1) {{
+    fwrite(STDERR, "Golden-image builder must have exactly one VirtIO NIC.\\n");
+    exit(2);
+}}
+$wan_if = $devices[0];
 foreach ($config["system"]["user"] as &$user) {{
     if (($user["name"] ?? "") === "root") {{
         $user["authorizedkeys"] = "{encoded_key}";
-        $user["disabled"] = "0";
+        $user["password"] = "{password_hash}";
+        unset($user["disabled"]);
         $user["scope"] = "system";
         $user["uid"] = "0";
     }}
 }}
 unset($user);
-$config["system"]["ssh"]["enabled"] = "1";
-$config["system"]["ssh"]["port"] = "22";
-$config["system"]["ssh"]["permitrootlogin"] = "1";
-$config["system"]["ssh"]["passwordauth"] = "0";
-$lan_mac = "{lan_mac}";
-$devices = [];
-exec("/sbin/ifconfig -l", $ifaces, $status);
-foreach (preg_split('/\\s+/', trim(implode(" ", $ifaces))) as $ifname) {{
-    if (preg_match('/^vtnet[0-9]+$/', $ifname)) {{
-        $output = shell_exec("/sbin/ifconfig " . escapeshellarg($ifname));
-        if (preg_match('/ether\\s+([0-9a-f:]+)/i', $output, $match)) {{
-            $devices[strtolower($match[1])] = $ifname;
-        }}
-    }}
-}}
-if (!isset($devices[$lan_mac]) || count($devices) !== 2) {{
-    fwrite(STDERR, "Unable to match exactly two VirtIO NICs to Vultr VPC MAC {{$lan_mac}}.\\n");
-    exit(2);
-}}
-$lan_if = $devices[$lan_mac];
-$wan_if = array_values(array_diff(array_values($devices), [$lan_if]))[0];
-$config["interfaces"]["wan"]["enable"] = "1";
-$config["interfaces"]["wan"]["if"] = $wan_if;
-$config["interfaces"]["wan"]["ipaddr"] = "dhcp";
-$config["interfaces"]["lan"]["enable"] = "1";
-$config["interfaces"]["lan"]["if"] = $lan_if;
-$config["interfaces"]["lan"]["ipaddr"] = "192.0.2.1";
-$config["interfaces"]["lan"]["subnet"] = "30";
+$config["system"]["ssh"] = [
+    "enabled" => "1", "port" => "22", "permitrootlogin" => "1",
+    "interfaces" => "wan", "group" => "admins"
+];
+$config["system"]["ctf_builder_nonce"] = "{nonce_hash}";
+$config["interfaces"] = ["wan" => [
+    "enable" => "1", "if" => $wan_if, "ipaddr" => "dhcp", "ipaddrv6" => "none",
+    "blockpriv" => "1", "blockbogons" => "1"
+]];
 $rule = [
     "enabled" => "1", "statetype" => "keep", "sequence" => "1", "action" => "pass",
     "quick" => "1", "interfacenot" => "0", "interface" => "wan", "direction" => "in",
-    "ipprotocol" => "inet", "protocol" => "tcp", "source_net" => "{control_plane_cidr}",
+    "ipprotocol" => "inet", "protocol" => "tcp", "source_net" => "{control_plane}",
     "source_not" => "0", "source_port" => "", "destination_net" => "wanip",
     "destination_not" => "0", "destination_port" => "22", "disablereplyto" => "0",
     "log" => "1", "allowopts" => "0", "nosync" => "0", "nopfsync" => "0",
@@ -426,20 +442,18 @@ $config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"] = array_values(array_
     fn($item) => ($item["description"] ?? "") !== "CTF builder SSH"
 ));
 $config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"][] = $rule;
-write_config("Configure CTF OPNsense image builder");
+write_config("Configure CTF WAN-only OPNsense image builder");
 $commands = [
     "/usr/local/opnsense/scripts/auth/sync_user.php -u root",
-    "/usr/local/sbin/configctl interface reconfigure lan",
     "/usr/local/sbin/configctl interface reconfigure wan",
     "/usr/local/sbin/configctl openssh restart",
     "/usr/local/sbin/configctl filter reload"
 ];
 foreach ($commands as $command) {{ passthru($command, $rc); if ($rc !== 0) exit($rc); }}
 file_put_contents("/conf/ctf-builder-ready", json_encode([
-    "wan" => $wan_if, "lan" => $lan_if, "lan_mac" => $lan_mac,
-    "control_plane_cidr" => "{control_plane_cidr}"
+    "wan" => $wan_if, "nonce" => "{nonce_hash}", "control_plane_cidr" => "{control_plane}"
 ]) . "\\n");
-echo "Builder configuration applied: WAN={{$wan_if}}, LAN={{$lan_if}}. Return to the admin UI and select Installer complete.\\n";
+echo "WAN-only builder configuration applied on {{$wan_if}}. Start the installer now; do not reboot manually.\\n";
 ?>'''
 
 
@@ -498,8 +512,6 @@ def sync_to_awaiting_install(db: Session, image_id: int, *, vultr_factory=VultrI
         old_token = image.route_token
         cleanup_local(image, keep_config=True)
         image.route_token = None; db.commit()
-        if not image.builder_vpc_id:
-            image.builder_vpc_id = client.create_vpc(image.version); db.commit()
         if not image.builder_firewall_group_id:
             image.builder_firewall_group_id = client.create_firewall(image.version); db.commit()
         if not image.builder_instance_id:
@@ -533,32 +545,72 @@ def _builder_ssh(db: Session, host: str, command: str, timeout: int = 120) -> tu
     raise ImageWorkflowError(f"builder SSH did not become ready: {last_error}")
 
 
-def _builder_validation_command(*, public_ip: str, lan_mac: str, version: str,
-                                control_plane_cidr: str) -> str:
+def _builder_validation_command(*, public_ip: str, version: str,
+                                control_plane_cidr: str, build_nonce: str,
+                                installed: bool) -> str:
     """Validate persisted and effective OPNsense state without changing it."""
+    nonce_hash = hashlib.sha256(build_nonce.encode()).hexdigest()
     php = (
-        'require_once("config.inc"); '
+        'require_once("config.inc"); require_once("util.inc"); '
         '$wan=$config["interfaces"]["wan"]["if"]??""; '
-        '$lan=$config["interfaces"]["lan"]["if"]??""; '
+        '$lan=isset($config["interfaces"]["lan"])?"yes":"no"; '
+        '$nonce=$config["system"]["ctf_builder_nonce"]??""; '
         '$key=""; foreach($config["system"]["user"] as $u){if(($u["name"]??"")==="root")'
-        '{$key=$u["authorizedkeys"]??"";}} echo $wan," ",$lan," ",strlen($key);'
+        '{$key=$u["authorizedkeys"]??"";}} '
+        'echo $wan," ",$lan," ",strlen($key)," ",$nonce," ",(is_install_media()?"live":"disk");'
     )
     control_source = str(ip_network(control_plane_cidr, strict=False).network_address)
+    expected_medium = "disk" if installed else "live"
     inner = (
         f"set -eu; actual_version=$(opnsense-version -v); test \"$actual_version\" = {shlex.quote(version)}; "
         f"mapping=$(/usr/local/bin/php -r {shlex.quote(php)}); set -- $mapping; "
-        "wan_if=$1; lan_if=$2; key_len=$3; test \"$key_len\" -gt 40; "
+        "wan_if=$1; has_lan=$2; key_len=$3; nonce=$4; medium=$5; "
+        "test \"$has_lan\" = no; test \"$key_len\" -gt 40; "
+        f"test \"$nonce\" = {shlex.quote(nonce_hash)}; test \"$medium\" = {expected_medium}; "
+        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); test \"$#\" -eq 1; test \"$1\" = \"$wan_if\"; "
         f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null; "
-        f"ifconfig \"$lan_if\" | grep -iF {shlex.quote('ether ' + lan_mac.lower())} >/dev/null; "
         "test -s /root/.ssh/authorized_keys; "
         "/usr/local/sbin/sshd -T | grep -q '^permitrootlogin yes$'; "
         "/usr/local/sbin/sshd -T | grep -q '^pubkeyauthentication yes$'; "
+        "/usr/local/sbin/sshd -T | grep -q '^passwordauthentication no$'; "
+        "/usr/local/sbin/sshd -T | grep -q '^kbdinteractiveauthentication no$'; "
         f"pfctl -sr | grep -F {shlex.quote('from ' + control_source + ' to')} | "
         "grep -E 'port = (ssh|22)' >/dev/null; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
         "test -x /usr/local/sbin/configctl; mount | grep ' on / ' >/dev/null; echo \"$actual_version\""
     )
     return "/bin/sh -c " + shlex.quote(inner)
+
+
+def _boot_id(db: Session, host: str) -> str:
+    code, output, error = _builder_ssh(db, host, "/sbin/sysctl -n kern.boottime")
+    if code or not output.strip():
+        raise ImageWorkflowError(f"could not read builder boot identity: {(error or output)[:300]}")
+    return output.strip()
+
+
+def _wait_for_new_boot(db: Session, host: str, previous_boot_id: str) -> None:
+    deadline = time.monotonic() + POLL_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            if _boot_id(db, host) != previous_boot_id:
+                return
+        except ImageWorkflowError:
+            pass
+        time.sleep(POLL_SECONDS)
+    raise ImageWorkflowError("timed out waiting for a confirmed new OPNsense boot")
+
+
+def _ssh_host_fingerprint(db: Session, host: str) -> str:
+    private_key, _ = get_or_create_platform_keypair(db)
+    key = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key))
+    client = paramiko.SSHClient(); client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(host, username="root", pkey=key, timeout=15, auth_timeout=15)
+        server_key = client.get_transport().get_remote_server_key()
+        return hashlib.sha256(server_key.asbytes()).hexdigest()
+    finally:
+        client.close()
 
 
 def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClient) -> None:
@@ -575,25 +627,39 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         host = builder.get("main_ip")
         if not host:
             raise ImageWorkflowError("builder has no public address")
-        vpcs = client.instance_vpcs(image.builder_instance_id)
-        vpc = next((row for row in vpcs if row.get("id") == image.builder_vpc_id), None)
-        if not vpc or not vpc.get("mac_address"):
-            raise ImageWorkflowError("builder VPC NIC metadata is missing")
+        if not image.builder_config_token:
+            raise ImageWorkflowError("builder validation nonce is missing")
         check = _builder_validation_command(
-            public_ip=host, lan_mac=vpc["mac_address"], version=image.version,
+            public_ip=host, version=image.version,
             control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
+            build_nonce=image.builder_config_token, installed=False,
         )
-        # Do not reboot a builder that has not first proven its persisted and effective configuration.
+        # The administrator must still be in the configured live system. The
+        # installer clones that configuration to disk; the platform owns reboot.
         code, output, error = _builder_ssh(db, host, check)
         if code or image.version not in output:
-            raise ImageWorkflowError(f"builder validation failed: {(error or output)[:300]}")
+            raise ImageWorkflowError(f"pre-detach live-system validation failed: {(error or output)[:300]}")
+        previous_boot_id = _boot_id(db, host)
         client.detach_iso(image)
         client.reboot(image.builder_instance_id)
-        builder = client.wait_instance(image.builder_instance_id)
+        _wait_for_new_boot(db, host, previous_boot_id)
+        check = _builder_validation_command(
+            public_ip=host, version=image.version,
+            control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
+            build_nonce=image.builder_config_token, installed=True,
+        )
         code, output, error = _builder_ssh(db, host, check)
         if code or image.version not in output:
-            raise ImageWorkflowError(f"post-reboot builder validation failed: {(error or output)[:300]}")
-        sanitize_inner = ("rm -f /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
+            raise ImageWorkflowError(f"installed-disk validation failed: {(error or output)[:300]}")
+        # A second complete cold-boot validation proves this is persistent
+        # state, not a one-shot installer transition.
+        previous_boot_id = _boot_id(db, host)
+        client.reboot(image.builder_instance_id)
+        _wait_for_new_boot(db, host, previous_boot_id)
+        code, output, error = _builder_ssh(db, host, check)
+        if code or image.version not in output:
+            raise ImageWorkflowError(f"second installed-disk validation failed: {(error or output)[:300]}")
+        sanitize_inner = ("rm -f /conf/sshd/ssh_host_* "
                           "/var/db/dhclient.leases.* /root/.*history /root/.sh_history; "
                           "find /var/log -type f -exec sh -c ': > \"$1\"' _ {} \\;; "
                           "rm -rf /tmp/* /var/tmp/* /root/.cache; "
@@ -603,27 +669,35 @@ def complete_install(db: Session, image_id: int, *, vultr_factory=VultrImageClie
         if code:
             raise ImageWorkflowError(f"builder sanitization failed: {error[:300]}")
         client.halt(image.builder_instance_id)
+        client.wait_stopped(image.builder_instance_id)
         _set_phase(db, image, "snapshotting")
         if not image.snapshot_id:
             image.snapshot_id = client.create_snapshot(image); db.commit()
         client.wait_snapshot(image.snapshot_id)
-        if not image.test_instance_id:
-            image.test_instance_id = client.create_test_instance(image); db.commit()
-        test = client.wait_instance(image.test_instance_id)
-        test_host = test.get("main_ip")
-        if not test_host:
-            raise ImageWorkflowError("snapshot validation VM has no address")
-        test_vpcs = client.instance_vpcs(image.test_instance_id)
-        test_vpc = next((row for row in test_vpcs if row.get("id") == image.builder_vpc_id), None)
-        if not test_vpc or not test_vpc.get("mac_address"):
-            raise ImageWorkflowError("snapshot validation VPC NIC metadata is missing")
-        test_check = _builder_validation_command(
-            public_ip=test_host, lan_mac=test_vpc["mac_address"], version=image.version,
-            control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
-        )
-        code, output, _ = _builder_ssh(db, test_host, test_check)
-        if code or image.version not in output:
-            raise ImageWorkflowError("snapshot validation deployment failed")
+        fingerprints = set()
+        for clone_number in (1, 2):
+            if not image.test_instance_id:
+                image.test_instance_id = client.create_test_instance(image); db.commit()
+            test = client.wait_instance(image.test_instance_id)
+            test_host = test.get("main_ip")
+            if not test_host:
+                raise ImageWorkflowError("snapshot validation VM has no address")
+            test_check = _builder_validation_command(
+                public_ip=test_host, version=image.version,
+                control_plane_cidr=os.environ["CTF_CONTROL_PLANE_CIDR"],
+                build_nonce=image.builder_config_token, installed=True,
+            )
+            code, output, error = _builder_ssh(db, test_host, test_check)
+            if code or image.version not in output:
+                raise ImageWorkflowError(
+                    f"snapshot validation deployment {clone_number} failed: {(error or output)[:300]}"
+                )
+            fingerprint = _ssh_host_fingerprint(db, test_host)
+            if fingerprint in fingerprints:
+                raise ImageWorkflowError("snapshot clones reused an SSH host key")
+            fingerprints.add(fingerprint)
+            client.delete("instances", image.test_instance_id)
+            image.test_instance_id = None; db.commit()
         image.validated_at = image.completed_at = utcnow()
         image.build_duration_seconds = elapsed_seconds(image)
         image.status = image.phase = "ready"; image.error_detail = None; image.builder_config_token = None

@@ -116,11 +116,15 @@ async def list_opnsense_images(request: Request, db: Session = Depends(get_db)):
         payload["console_url"] = (f"https://my.vultr.com/subs/?SUBID={row.builder_instance_id}" if row.builder_instance_id else None)
         payload["builder_config_url"] = (f"https://ctf.{domain}/opnsense-builder-config/{row.builder_config_token}/setup.php"
                                          if row.builder_config_token and domain else None)
-        payload["instructions"] = ("Install OPNsense to the VM disk. Assign WAN=vtnet0 and LAN=vtnet1. "
-                                   "Fetch the generated setup URL to /tmp/ctf-builder.php and run it with "
-                                   "/usr/local/bin/php. The script identifies LAN from Vultr's VPC MAC and applies "
-                                   "the authoritative WAN/LAN mapping. Do not replace /conf/config.xml or reboot manually; "
-                                   "then select Installer complete.")
+        payload["instructions"] = ("In the live console, assign interfaces once: no VLANs, leave LAN blank, and assign "
+                                   "the only VirtIO NIC to WAN using DHCP. From the root shell, fetch the generated "
+                                   "setup URL to /tmp/ctf-builder.php, run it with /usr/local/bin/php, confirm it "
+                                   "reports a WAN-only builder, and immediately run opnsense-installer from that same "
+                                   "shell. Install to the VM disk. Do not "
+                                   "assign a LAN, detach the ISO, reboot, or request a snapshot manually. When the "
+                                   "installer finishes, leave the VM running and select Installer complete; the "
+                                   "platform will validate the live state, detach the ISO, perform two installed-disk "
+                                   "boot validations, shut down, and only then snapshot it.")
         result.append(payload)
     return result
 
