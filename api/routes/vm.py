@@ -1129,13 +1129,6 @@ def _cloud_providers():
 
     config = AwsConfig.from_env()
     sessions = AwsSessionFactory(config)
-    security_groups = tuple(
-        value.strip() for value in os.environ.get("AWS_STANDARD_SECURITY_GROUP_IDS", "").split(",")
-        if value.strip()
-    )
-    if not security_groups:
-        from api.services.aws import AwsConfigurationError
-        raise AwsConfigurationError("AWS_STANDARD_SECURITY_GROUP_IDS is required")
     key_db = SessionLocal()
     try:
         _, public_key = get_or_create_platform_keypair(key_db)
@@ -1145,9 +1138,9 @@ def _cloud_providers():
         config=config,
         compute=AwsComputeProvider(sessions.client("ec2")),
         session_factory=SessionLocal,
-        key_name=os.environ.get("AWS_KEY_PAIR_NAME", "ctf-it"),
+        key_name=config.key_pair_name,
         public_key=public_key,
-        security_group_ids=security_groups,
+        security_group_ids=config.standard_security_group_ids,
         configure_guest=_run_provision,
         wait_for_ssh=lambda vm: _wait_for_tcp_port(vm.public_ip, vm.ssh_port or 22),
         reconcile_dns=lambda vm: None,

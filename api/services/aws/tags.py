@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+import os
 
 from .errors import AwsOwnershipError
 
@@ -17,6 +18,11 @@ def ownership_tags(environment: str, **ids: int | None) -> dict[str, str]:
         "ManagedBy": "ctf-it",
         "Environment": environment,
     }
+    if environment == "acceptance" and os.environ.get("RUN_AWS_ACCEPTANCE") == "1":
+        run_id = os.environ.get("AWS_ACCEPTANCE_RUN_ID", "").strip()
+        if len(run_id) < 8:
+            raise ValueError("AWS_ACCEPTANCE_RUN_ID must contain at least eight characters")
+        tags["AcceptanceRunId"] = run_id
     for key, value in ids.items():
         if key not in _ID_TAGS:
             raise ValueError(f"Unsupported ownership identifier: {key}")

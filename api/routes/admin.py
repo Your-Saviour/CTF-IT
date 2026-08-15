@@ -56,7 +56,8 @@ def _check_aws_readiness(plan):
         region=config.default_region,
         availability_zone=config.availability_zone(config.default_region),
         ami_ids=tuple(dict.fromkeys((*config.ubuntu_amis.values(), *config.freebsd_amis.values()))),
-        subnet_id=config.standard_subnet_id,
+        vpc_id=config.standard_vpc_id, subnet_id=config.standard_subnet_id,
+        security_group_ids=config.standard_security_group_ids,
     )
     return service.check(plan)
 

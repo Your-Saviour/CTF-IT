@@ -75,6 +75,18 @@ class FakeEc2:
     def delete_vpc(self, **kwargs):
         self.calls.append(("delete_vpc", kwargs)); return {}
 
+    def describe_network_interfaces(self, **kwargs):
+        self.calls.append(("describe_network_interfaces", kwargs))
+        return {"NetworkInterfaces": getattr(self, "network_interfaces", [])}
+
+    def create_network_interface(self, **kwargs):
+        self.calls.append(("create_network_interface", kwargs))
+        return {"NetworkInterface": {
+            "NetworkInterfaceId": "eni-new", "SubnetId": kwargs["SubnetId"],
+            "PrivateIpAddress": kwargs.get("PrivateIpAddress", "10.40.0.8"),
+            "MacAddress": "02:00:00:00:00:01",
+        }}
+
 
 def site_spec():
     return SiteNetworkSpec(
@@ -148,4 +160,46 @@ def test_route_reconciliation_replaces_wrong_existing_target():
     assert ("replace_route", {
         "RouteTableId": "rtb-zone", "DestinationCidrBlock": "0.0.0.0/0",
         "NetworkInterfaceId": "eni-firewall-lan",
+    }) in ec2.calls
+
+
+def test_ensure_eni_reuses_owned_interface_for_network_role():
+    ec2 = FakeEc2()
+    ec2.network_interfaces = [{
+        "NetworkInterfaceId": "eni-existing", "SubnetId": "subnet-infra",
+        "PrivateIpAddress": "10.40.0.1", "MacAddress": "02:00:00:00:00:02",
+        "Groups": [{"GroupId": "sg-lan"}],
+        "TagSet": [
+            {"Key": "ManagedBy", "Value": "ctf-it"},
+            {"Key": "SiteId", "Value": "12"},
+            {"Key": "NetworkRole", "Value": "lan"},
+        ],
+    }]
+    result = AwsNetworkProvider(ec2).ensure_eni(
+        "subnet-infra", "10.40.0.1", ["sg-lan"],
+        {"ManagedBy": "ctf-it", "SiteId": "12", "NetworkRole": "lan"},
+    )
+    assert result.eni_id == "eni-existing"
+    assert not any(name == "create_network_interface" for name, _ in ec2.calls)
+
+
+def test_site_network_reuses_owned_unattached_gateway_after_interruption():
+    ec2 = FakeEc2()
+    def describe_gateways(**kwargs):
+        ec2.calls.append(("describe_internet_gateways", kwargs))
+        if any(row["Name"].startswith("tag:") for row in kwargs.get("Filters", [])):
+            return {"InternetGateways": [{
+                "InternetGatewayId": "igw-existing",
+                "Tags": [
+                    {"Key": "ManagedBy", "Value": "ctf-it"},
+                    {"Key": "SiteId", "Value": "12"},
+                ],
+            }]}
+        return {"InternetGateways": []}
+    ec2.describe_internet_gateways = describe_gateways
+    result = AwsNetworkProvider(ec2).ensure_site_network(site_spec())
+    assert result.internet_gateway_id == "igw-existing"
+    assert not any(name == "create_internet_gateway" for name, _ in ec2.calls)
+    assert ("attach_internet_gateway", {
+        "InternetGatewayId": "igw-existing", "VpcId": "vpc-123",
     }) in ec2.calls

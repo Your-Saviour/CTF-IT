@@ -36,6 +36,33 @@ class AwsImageProvider:
         self._call("create_tags", Resources=[ami_id, *snapshots], Tags=aws_tag_list(tags))
         return ImageResult(ami_id, snapshots, image.get("State", "unknown"))
 
+    def ensure_image(self, instance_id: str, name: str,
+                     tags: Mapping[str, str]) -> ImageResult:
+        filters = [
+            {"Name": "name", "Values": [name]},
+            *({"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()),
+        ]
+        images = self._call("describe_images", Owners=["self"], Filters=filters).get(
+            "Images", []
+        )
+        if len(images) > 1:
+            raise RuntimeError("multiple AMIs match one owned image build")
+        if not images:
+            return self.create_image(instance_id, name, tags)
+        image = images[0]
+        assert_owned(aws_tag_dict(image.get("Tags")), tags)
+        if image.get("State") != "available":
+            self.wait_available(image["ImageId"])
+            image = self._call("describe_images", ImageIds=[image["ImageId"]])["Images"][0]
+        snapshots = tuple(
+            row["Ebs"]["SnapshotId"] for row in image.get("BlockDeviceMappings", [])
+            if row.get("Ebs", {}).get("SnapshotId")
+        )
+        self._call(
+            "create_tags", Resources=[image["ImageId"], *snapshots], Tags=aws_tag_list(tags),
+        )
+        return ImageResult(image["ImageId"], snapshots, image.get("State", "unknown"))
+
     def launch_validation_instance(self, spec: InstanceSpec) -> InstanceResult:
         return self.compute.launch_instance(spec)
 

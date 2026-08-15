@@ -34,6 +34,11 @@ class AwsGameNetProvider:
     def close(self):
         return None
 
+    def _token(self, *parts):
+        if hasattr(self.config, "resource_token"):
+            return self.config.resource_token(*parts)
+        return "-".join(("ctf-it", *(str(part) for part in parts)))
+
     def _tags(self, site, vm):
         return ownership_tags(
             self.config.environment,
@@ -109,14 +114,14 @@ class AwsGameNetProvider:
         result = self.compute.launch_instance(InstanceSpec(
             ami_id=self.config.ubuntu_ami(vm.cloud_region),
             instance_type=vm.instance_type or "t3.small",
-            client_token=f"ctf-it-vm-{vm.id}",
+            client_token=self._token("vm", vm.id),
             network_interfaces=(NetworkInterfaceSpec(
                 0, subnet_id=self.config.standard_subnet_id,
                 security_group_ids=(group_id,), associate_public_ip=False,
             ),),
             tags=tags, key_name=key_name, user_data=user_data,
         ))
-        allocation = self.compute.allocate_eip(tags)
+        allocation = self.compute.ensure_eip(tags)
         self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
         return replace(
             result, public_ip=allocation.public_ip,
@@ -125,16 +130,18 @@ class AwsGameNetProvider:
 
     def create_firewall(self, site, vm, *, ami_id: str):
         tags = self._tags(site, vm)
-        wan = self.network.create_eni(
-            site.public_subnet_id, None, [site.wan_security_group_id], tags,
+        wan = self.network.ensure_eni(
+            site.public_subnet_id, None, [site.wan_security_group_id],
+            {**tags, "NetworkRole": "wan"},
         )
-        lan = self.network.create_eni(
-            site.infrastructure_subnet_id, vm.private_ip, [site.lan_security_group_id], tags,
+        lan = self.network.ensure_eni(
+            site.infrastructure_subnet_id, vm.private_ip, [site.lan_security_group_id],
+            {**tags, "NetworkRole": "lan"},
         )
         result = self.compute.launch_instance(InstanceSpec(
             ami_id=ami_id,
             instance_type=vm.instance_type or "t3.medium",
-            client_token=f"ctf-it-vm-{vm.id}",
+            client_token=self._token("vm", vm.id),
             network_interfaces=(
                 NetworkInterfaceSpec(0, eni_id=wan.eni_id, delete_on_termination=False),
                 NetworkInterfaceSpec(1, eni_id=lan.eni_id, delete_on_termination=False),
@@ -142,7 +149,7 @@ class AwsGameNetProvider:
             tags=tags,
         ))
         self.compute.set_source_dest_check(result.instance_id, enabled=False)
-        allocation = self.compute.allocate_eip(tags)
+        allocation = self.compute.ensure_eip(tags)
         self.compute.associate_eip(allocation.allocation_id, wan.eni_id)
         return replace(
             result,
@@ -178,6 +185,9 @@ class AwsGameNetProvider:
         for eni_id in (vm.wan_eni_id, vm.lan_eni_id):
             if eni_id:
                 self.network.delete_owned_eni(eni_id, tags)
+        if vm.role == "vpn_gateway":
+            for group_id in json.loads(vm.security_group_ids_json or "[]"):
+                self.network.delete_owned_security_group(group_id, tags)
 
     def cleanup_site(self, site) -> None:
         self.network.delete_owned_site(site, ownership_tags(
@@ -189,7 +199,7 @@ class AwsGameNetProvider:
         return self.compute.launch_instance(InstanceSpec(
             ami_id=ami_id,
             instance_type=vm.instance_type or "t3.small",
-            client_token=f"ctf-it-vm-{vm.id}",
+            client_token=self._token("vm", vm.id),
             network_interfaces=(NetworkInterfaceSpec(
                 0,
                 subnet_id=zone.subnet_id,

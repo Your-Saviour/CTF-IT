@@ -56,7 +56,7 @@ class Compute:
     def wait_running(self, instance_id):
         pass
 
-    def allocate_eip(self, tags):
+    def ensure_eip(self, tags):
         return ElasticIpResult("eipalloc-123", "198.51.100.20")
 
     def associate_eip(self, allocation_id, eni_id):

@@ -7,11 +7,13 @@ class Waiter:
 
 
 class Ec2:
-    def __init__(self): self.calls = []
+    def __init__(self): self.calls = []; self.existing_images = []
     def create_image(self, **kwargs): self.calls.append(("create_image", kwargs)); return {"ImageId": "ami-new"}
     def get_waiter(self, name): assert name == "image_available"; return Waiter(self.calls)
     def describe_images(self, **kwargs):
         self.calls.append(("describe_images", kwargs))
+        if kwargs.get("Filters"):
+            return {"Images": self.existing_images}
         return {"Images": [{"ImageId": "ami-new", "State": "available",
                             "Tags": [{"Key": "ManagedBy", "Value": "ctf-it"}],
                             "BlockDeviceMappings": [
@@ -46,3 +48,18 @@ def test_retire_deregisters_before_owned_snapshot_delete():
     names = [name for name, _ in ec2.calls]
     assert names.index("deregister_image") < names.index("delete_snapshot")
     assert names.count("delete_snapshot") == 2
+
+
+def test_ensure_image_reuses_owned_candidate_after_interrupted_create():
+    ec2 = Ec2()
+    ec2.existing_images = [{
+        "ImageId": "ami-existing", "Name": "ctf-opnsense-26-7", "State": "available",
+        "Tags": [{"Key": "ManagedBy", "Value": "ctf-it"}],
+        "BlockDeviceMappings": [{"Ebs": {"SnapshotId": "snap-existing"}}],
+    }]
+    result = AwsImageProvider(ec2).ensure_image(
+        "i-builder", "ctf-opnsense-26-7", {"ManagedBy": "ctf-it"},
+    )
+    assert result.ami_id == "ami-existing"
+    assert result.snapshot_ids == ("snap-existing",)
+    assert not any(name == "create_image" for name, _ in ec2.calls)

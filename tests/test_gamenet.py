@@ -746,7 +746,7 @@ def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
 
     class Network:
         def __init__(self): self.enis = []
-        def create_eni(self, subnet, ip, groups, tags):
+        def ensure_eni(self, subnet, ip, groups, tags):
             result = NetworkInterfaceResult(f"eni-{len(self.enis)}", subnet, ip, "02:00:00:00:00:01")
             self.enis.append((subnet, ip, groups, result)); return result
     class Compute:
@@ -755,7 +755,7 @@ def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
             self.spec = spec
             return InstanceResult("i-fw", "pending", availability_zone="ap-southeast-2a")
         def set_source_dest_check(self, instance_id, enabled): self.source_checks.append((instance_id, enabled))
-        def allocate_eip(self, tags): return ElasticIpResult("eipalloc-fw", "198.51.100.8")
+        def ensure_eip(self, tags): return ElasticIpResult("eipalloc-fw", "198.51.100.8")
         def associate_eip(self, allocation_id, eni_id): return "eipassoc-fw"
 
     network, compute = Network(), Compute()
@@ -784,7 +784,7 @@ def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     class Compute:
         def ensure_key_pair(self, name, public_key, tags): self.key = (name, public_key); return "key-1"
         def launch_instance(self, spec): self.spec = spec; return InstanceResult("i-gw", "pending", "eni-gw")
-        def allocate_eip(self, tags): return ElasticIpResult("eipalloc-gw", "198.51.100.9")
+        def ensure_eip(self, tags): return ElasticIpResult("eipalloc-gw", "198.51.100.9")
         def associate_eip(self, allocation_id, eni_id): return "eipassoc-gw"
     compute, network = Compute(), Network()
     config = SimpleNamespace(
@@ -804,6 +804,31 @@ def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     assert compute.spec.network_interfaces[0].security_group_ids == ("sg-gateway",)
     assert result.public_ip == "198.51.100.9"
     assert result.eip_allocation_id == "eipalloc-gw"
+
+
+def test_aws_gamenet_cleanup_removes_gateway_security_group_after_instance():
+    from types import SimpleNamespace
+    from api.services.gamenet_provider import AwsGameNetProvider
+
+    calls = []
+    class Compute:
+        def terminate_owned(self, instance_id, tags): calls.append(("terminate", instance_id))
+        def wait_terminated(self, instance_id): calls.append(("wait", instance_id))
+        def release_owned_eip(self, allocation_id, tags): calls.append(("eip", allocation_id))
+    class Network:
+        def delete_owned_security_group(self, group_id, tags): calls.append(("sg", group_id))
+
+    provider = AwsGameNetProvider(Compute(), Network(), SimpleNamespace(environment="test"))
+    vm = SimpleNamespace(
+        id=9, event_id=1, team_id=2, site_id=None, role="vpn_gateway",
+        cloud_instance_id="i-gateway", eip_allocation_id="eipalloc-gateway",
+        wan_eni_id=None, lan_eni_id=None, security_group_ids_json='["sg-gateway"]',
+    )
+    provider.cleanup_vm(vm)
+    assert calls == [
+        ("terminate", "i-gateway"), ("wait", "i-gateway"),
+        ("eip", "eipalloc-gateway"), ("sg", "sg-gateway"),
+    ]
 
 
 def test_aws_gamenet_private_endpoint_has_no_public_ip():
@@ -869,6 +894,7 @@ def test_gamenet_orchestration_requires_aws_configuration_not_vultr(monkeypatch)
     monkeypatch.setenv("AWS_ENVIRONMENT", "test")
     monkeypatch.setenv("AWS_STANDARD_VPC_ID", "vpc-standard")
     monkeypatch.setenv("AWS_STANDARD_SUBNET_ID", "subnet-standard")
+    monkeypatch.setenv("AWS_STANDARD_SECURITY_GROUP_IDS", "sg-standard")
     monkeypatch.setenv("AWS_UBUNTU_AMIS", '{"ap-southeast-2":"ami-ubuntu"}')
     monkeypatch.setenv("AWS_FREEBSD_AMIS", '{"ap-southeast-2":"ami-freebsd"}')
     monkeypatch.setenv("AWS_AVAILABILITY_ZONES", '{"ap-southeast-2":"ap-southeast-2a"}')

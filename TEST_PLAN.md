@@ -10,4 +10,4 @@ docker compose config >/dev/null
 git diff --check
 ```
 
-Live acceptance is restricted to an approved disposable account. Set `RUN_AWS_ACCEPTANCE=1`, `AWS_ACCEPTANCE_ACCOUNT_ID`, and a unique `AWS_ACCEPTANCE_RUN_ID`. The suite creates tagged standard-VM, GameNet, and OPNsense AMI canaries. Run `scripts/aws_acceptance_cleanup.py` afterward and require an empty matching inventory.
+Live acceptance is restricted to an approved disposable account. Set `RUN_AWS_ACCEPTANCE=1`, `AWS_ENVIRONMENT=acceptance`, `AWS_ACCEPTANCE_ACCOUNT_ID`, a unique `AWS_ACCEPTANCE_RUN_ID`, and `CTF_CONTROL_PLANE_CIDR`. The suite creates tagged standard-VM, full GameNet, and OPNsense AMI canaries. GameNet requires root plus WireGuard/`NET_ADMIN` on the dev host. The session fixture performs cleanup; run `scripts/aws_acceptance_cleanup.py --inventory-only` afterward and require an empty matching inventory. Without `--inventory-only`, the script is the interrupt-recovery cleanup path.

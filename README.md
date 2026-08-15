@@ -57,8 +57,10 @@ Normal tests require no AWS credentials and make no AWS network calls. Disposabl
 
 ```bash
 RUN_AWS_ACCEPTANCE=1
+AWS_ENVIRONMENT=acceptance
 AWS_ACCEPTANCE_ACCOUNT_ID=123456789012
 AWS_ACCEPTANCE_RUN_ID=unique-run-id
+CTF_CONTROL_PLANE_CIDR=203.0.113.10/32
 ```
 
 Run them only in the approved test account. Every canary resource is tagged with the run ID, and the cleanup inventory must be empty afterward. See [tests/aws_acceptance/README.md](tests/aws_acceptance/README.md).

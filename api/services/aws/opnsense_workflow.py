@@ -9,6 +9,7 @@ from .images import AwsImageProvider
 from .network import AwsNetworkProvider, SecurityGroupSpec, SiteNetworkSpec
 from .session import AwsSessionFactory
 from .tags import ownership_tags
+from .tags import assert_owned, aws_tag_dict
 
 
 class AwsOpnsenseWorkflow:
@@ -37,12 +38,12 @@ class AwsOpnsenseWorkflow:
     def _launch(self, image, role, ami_id, interfaces, tags, key_name):
         result = self.compute.launch_instance(InstanceSpec(
             ami_id=ami_id, instance_type="t3.medium",
-            client_token=f"ctf-it-opnsense-{image.id}-{role}",
+            client_token=self.config.resource_token("opnsense", image.id, role),
             network_interfaces=tuple(interfaces), tags={**tags, "ImageRole": role},
             key_name=key_name,
         ))
         self.compute.wait_running(result.instance_id)
-        allocation = self.compute.allocate_eip({**tags, "ImageRole": role})
+        allocation = self.compute.ensure_eip({**tags, "ImageRole": role})
         self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
         return replace(result, public_ip=allocation.public_ip,
                        eip_allocation_id=allocation.allocation_id)
@@ -111,15 +112,18 @@ class AwsOpnsenseWorkflow:
         })()
         workflow._sanitize_and_halt(db, adapter, image, builder.public_ip)
         image.phase = image.status = "snapshotting"; db.commit()
-        artifact = self.images.create_image(
-            builder.instance_id, f"ctf-it-opnsense-{image.version.replace('.', '-')}-{image.id}", tags,
+        artifact = self.images.ensure_image(
+            builder.instance_id,
+            self.config.resource_token("opnsense", image.version.replace('.', '-'), image.id),
+            tags,
         )
         image.ami_id = artifact.ami_id
         image.backing_snapshot_ids_json = json.dumps(artifact.snapshot_ids)
         db.commit()
 
-        peer_lan = self.network.create_eni(
-            network.subnet_ids["validation"], "172.31.254.2", [validation_sg], tags,
+        peer_lan = self.network.ensure_eni(
+            network.subnet_ids["validation"], "172.31.254.2", [validation_sg],
+            {**tags, "NetworkRole": "public-clone-validation"},
         )
         public_clone = self._launch(
             image, "public-clone", artifact.ami_id,
@@ -139,8 +143,9 @@ class AwsOpnsenseWorkflow:
             {"ip_address": peer_lan.private_ip, "mac_address": peer_lan.mac_address},
         )
 
-        lan = self.network.create_eni(
-            network.subnet_ids["validation"], "172.31.254.3", [validation_sg], tags,
+        lan = self.network.ensure_eni(
+            network.subnet_ids["validation"], "172.31.254.3", [validation_sg],
+            {**tags, "NetworkRole": "private-clone-validation"},
         )
         private_clone = self._launch(
             image, "private-clone", artifact.ami_id,
@@ -169,3 +174,73 @@ class AwsOpnsenseWorkflow:
                                   "private_ip": lan.private_ip},
             },
         }
+
+    def cleanup_temporary(self, image, _result):
+        """Remove disposable builders and validation networking, retaining the AMI."""
+        tags = ownership_tags(self.config.environment, site_id=image.id)
+        filters = [{"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()]
+        response = self.ec2.describe_instances(Filters=filters + [{
+            "Name": "instance-state-name",
+            "Values": ["pending", "running", "stopping", "stopped"],
+        }])
+        instances = [
+            row for reservation in response.get("Reservations", [])
+            for row in reservation.get("Instances", [])
+        ]
+        instance_ids = []
+        for row in instances:
+            assert_owned(aws_tag_dict(row.get("Tags")), tags)
+            instance_ids.append(row["InstanceId"])
+        if instance_ids:
+            self.ec2.terminate_instances(InstanceIds=instance_ids)
+            self.ec2.get_waiter("instance_terminated").wait(InstanceIds=instance_ids)
+
+        for address in self.ec2.describe_addresses(Filters=filters).get("Addresses", []):
+            assert_owned(aws_tag_dict(address.get("Tags")), tags)
+            if address.get("AssociationId"):
+                self.ec2.disassociate_address(AssociationId=address["AssociationId"])
+            self.ec2.release_address(AllocationId=address["AllocationId"])
+
+        for eni in self.ec2.describe_network_interfaces(Filters=filters).get("NetworkInterfaces", []):
+            assert_owned(aws_tag_dict(eni.get("TagSet")), tags)
+            self.ec2.delete_network_interface(NetworkInterfaceId=eni["NetworkInterfaceId"])
+
+        for group in self.ec2.describe_security_groups(Filters=filters).get("SecurityGroups", []):
+            assert_owned(aws_tag_dict(group.get("Tags")), tags)
+            self.ec2.delete_security_group(GroupId=group["GroupId"])
+
+        for table in self.ec2.describe_route_tables(Filters=filters).get("RouteTables", []):
+            assert_owned(aws_tag_dict(table.get("Tags")), tags)
+            for association in table.get("Associations", []):
+                if association.get("RouteTableAssociationId") and not association.get("Main"):
+                    self.ec2.disassociate_route_table(
+                        AssociationId=association["RouteTableAssociationId"],
+                    )
+            self.ec2.delete_route_table(RouteTableId=table["RouteTableId"])
+
+        for subnet in self.ec2.describe_subnets(Filters=filters).get("Subnets", []):
+            assert_owned(aws_tag_dict(subnet.get("Tags")), tags)
+            self.ec2.delete_subnet(SubnetId=subnet["SubnetId"])
+
+        for gateway in self.ec2.describe_internet_gateways(Filters=filters).get("InternetGateways", []):
+            assert_owned(aws_tag_dict(gateway.get("Tags")), tags)
+            for attachment in gateway.get("Attachments", []):
+                self.ec2.detach_internet_gateway(
+                    InternetGatewayId=gateway["InternetGatewayId"], VpcId=attachment["VpcId"],
+                )
+            self.ec2.delete_internet_gateway(InternetGatewayId=gateway["InternetGatewayId"])
+
+        for key in self.ec2.describe_key_pairs(Filters=filters).get("KeyPairs", []):
+            assert_owned(aws_tag_dict(key.get("Tags")), tags)
+            self.ec2.delete_key_pair(KeyPairId=key["KeyPairId"])
+
+        vpcs = self.ec2.describe_vpcs(Filters=filters).get("Vpcs", [])
+        for vpc in vpcs:
+            assert_owned(aws_tag_dict(vpc.get("Tags")), tags)
+            for association in vpc.get("CidrBlockAssociationSet", []):
+                if (association.get("AssociationId") and
+                        association.get("CidrBlock") != vpc.get("CidrBlock")):
+                    self.ec2.disassociate_vpc_cidr_block(
+                        AssociationId=association["AssociationId"],
+                    )
+            self.ec2.delete_vpc(VpcId=vpc["VpcId"])

@@ -48,6 +48,7 @@ class FakeEc2:
         return {"Addresses": [{
             "AllocationId": "eipalloc-123", "PublicIp": "198.51.100.20",
             "AssociationId": "eipassoc-123",
+            "NetworkInterfaceId": "eni-primary",
             "Tags": [{"Key": "ManagedBy", "Value": "ctf-it"}, {"Key": "VmId", "Value": "7"}],
         }]}
 
@@ -140,6 +141,16 @@ def test_allocate_associate_and_release_owned_eip():
     ]
 
 
+def test_ensure_eip_reuses_owned_address_and_association():
+    ec2 = FakeEc2()
+    provider = AwsComputeProvider(ec2)
+    address = provider.ensure_eip({"ManagedBy": "ctf-it", "VmId": "7"})
+    association = provider.associate_eip(address.allocation_id, "eni-primary")
+    assert address.allocation_id == "eipalloc-123"
+    assert association == "eipassoc-123"
+    assert not any(name in {"allocate_address", "associate_address"} for name, _ in ec2.calls)
+
+
 def test_throttling_is_translated_to_retryable_error():
     from botocore.exceptions import ClientError
 
@@ -151,3 +162,30 @@ def test_throttling_is_translated_to_retryable_error():
 
     with pytest.raises(AwsRetryableError, match="slow down"):
         AwsComputeProvider(ec2).instance("i-123")
+
+
+def test_throttling_retries_with_bounded_backoff_before_succeeding():
+    from botocore.exceptions import ClientError
+
+    ec2 = FakeEc2()
+    attempts = 0
+    def describe_instances(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise ClientError(
+                {"Error": {"Code": "RequestLimitExceeded", "Message": "slow down"}},
+                "DescribeInstances",
+            )
+        return {"Reservations": [{"Instances": [{
+            "InstanceId": "i-123", "State": {"Name": "running"},
+            "NetworkInterfaces": [],
+        }]}]}
+    ec2.describe_instances = describe_instances
+    delays = []
+    provider = AwsComputeProvider(
+        ec2, max_attempts=3, sleep=delays.append, jitter=lambda: 0,
+    )
+    assert provider.instance("i-123").state == "running"
+    assert attempts == 3
+    assert delays == [0.25, 0.5]

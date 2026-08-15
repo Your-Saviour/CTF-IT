@@ -460,6 +460,7 @@ def run_image_build(db: Session, image_id: int, *, provider_factory=None,
         evidence = result["validation_results"]
         if not evidence.get("public_clone", {}).get("passed") or not evidence.get("private_clone", {}).get("passed"):
             raise ImageWorkflowError("public and private AMI validation must both pass")
+        provider.cleanup_temporary(image, result)
         for field in (
             "builder_instance_id", "builder_vpc_id", "builder_subnet_id",
             "validation_subnet_id", "ami_id",

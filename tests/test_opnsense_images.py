@@ -60,6 +60,7 @@ def test_running_jobs_interrupt_and_only_validated_active_ami_is_selected():
 def test_aws_image_workflow_persists_ami_snapshots_and_validation_evidence(monkeypatch):
     db = session(); monkeypatch.setenv("CTF_CONTROL_PLANE_CIDR", "203.0.113.0/24")
     class Provider:
+        cleaned = False
         def preflight(self, base_os):
             assert base_os == "FreeBSD 15 x64"
             return {"region": "ap-southeast-2", "availability_zone": "ap-southeast-2a"}
@@ -71,12 +72,17 @@ def test_aws_image_workflow_persists_ami_snapshots_and_validation_evidence(monke
                 "validation_results": {"public_clone": {"passed": True},
                                        "private_clone": {"passed": True}},
             }
-    image = new_image(db, "26.7", provider_factory=lambda: Provider())
-    run_image_build(db, image.id, provider_factory=lambda: Provider())
+        def cleanup_temporary(self, image, result):
+            assert result["ami_id"] == "ami-opnsense"
+            self.cleaned = True
+    provider = Provider()
+    image = new_image(db, "26.7", provider_factory=lambda: provider)
+    run_image_build(db, image.id, provider_factory=lambda: provider)
     db.refresh(image)
     assert image.status == image.phase == "ready" and image.ami_id == "ami-opnsense"
     assert json.loads(image.backing_snapshot_ids_json) == ["snap-root"]
     assert json.loads(image.validation_results)["private_clone"]["passed"] is True
+    assert provider.cleaned is True
 
 
 def test_activation_source_rejects_unvalidated_ami(monkeypatch):

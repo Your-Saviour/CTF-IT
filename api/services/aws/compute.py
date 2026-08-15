@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from typing import Mapping
+import random
+import time
 
 from botocore.exceptions import ClientError
 
@@ -56,21 +58,29 @@ class InstanceSpec:
 
 
 class AwsComputeProvider:
-    def __init__(self, ec2_client):
+    def __init__(self, ec2_client, *, max_attempts: int = 4,
+                 sleep=time.sleep, jitter=random.random):
         self.ec2 = ec2_client
+        self.max_attempts = max(1, max_attempts)
+        self.sleep = sleep
+        self.jitter = jitter
 
     def _call(self, operation: str, **kwargs):
-        try:
-            return getattr(self.ec2, operation)(**kwargs)
-        except ClientError as exc:
-            error = exc.response.get("Error", {})
-            code = error.get("Code", "Unknown")
-            message = error.get("Message", str(exc))
-            if code in _RETRYABLE_CODES or code.endswith("NotFound"):
-                raise AwsRetryableError(f"{operation}: {message}") from exc
-            if code in _QUOTA_CODES:
-                raise AwsQuotaError(f"{operation}: {message}") from exc
-            raise AwsTerminalError(f"{operation}: {code}: {message}") from exc
+        for attempt in range(self.max_attempts):
+            try:
+                return getattr(self.ec2, operation)(**kwargs)
+            except ClientError as exc:
+                error = exc.response.get("Error", {})
+                code = error.get("Code", "Unknown")
+                message = error.get("Message", str(exc))
+                if code in _QUOTA_CODES:
+                    raise AwsQuotaError(f"{operation}: {message}") from exc
+                if code not in _RETRYABLE_CODES and not code.endswith("NotFound"):
+                    raise AwsTerminalError(f"{operation}: {code}: {message}") from exc
+                if attempt + 1 == self.max_attempts:
+                    raise AwsRetryableError(f"{operation}: {message}") from exc
+                delay = min(4.0, 0.25 * (2 ** attempt)) + (self.jitter() * 0.1)
+                self.sleep(delay)
 
     @staticmethod
     def _result(instance: dict) -> InstanceResult:
@@ -160,7 +170,27 @@ class AwsComputeProvider:
         )
         return ElasticIpResult(response["AllocationId"], response["PublicIp"])
 
+    def ensure_eip(self, tags: Mapping[str, str]) -> ElasticIpResult:
+        response = self._call("describe_addresses", Filters=[
+            {"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()
+        ])
+        addresses = response.get("Addresses", [])
+        if len(addresses) > 1:
+            raise AwsTerminalError("multiple Elastic IPs match one ownership identity")
+        if addresses:
+            address = addresses[0]
+            assert_owned(aws_tag_dict(address.get("Tags")), tags)
+            return ElasticIpResult(
+                address["AllocationId"], address["PublicIp"], address.get("AssociationId"),
+            )
+        return self.allocate_eip(tags)
+
     def associate_eip(self, allocation_id: str, eni_id: str) -> str:
+        addresses = self._call("describe_addresses", AllocationIds=[allocation_id]).get(
+            "Addresses", []
+        )
+        if addresses and addresses[0].get("NetworkInterfaceId") == eni_id:
+            return addresses[0].get("AssociationId", "")
         response = self._call(
             "associate_address",
             AllocationId=allocation_id,

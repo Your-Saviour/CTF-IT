@@ -64,6 +64,18 @@ class AwsNetworkProvider:
             gateway = response["InternetGateways"][0]
             assert_owned(aws_tag_dict(gateway.get("Tags")), tags)
             return gateway["InternetGatewayId"]
+        response = self._call("describe_internet_gateways", Filters=[
+            {"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()
+        ])
+        gateways = response.get("InternetGateways", [])
+        if len(gateways) > 1:
+            raise RuntimeError("multiple internet gateways match one site identity")
+        if gateways:
+            gateway = gateways[0]
+            assert_owned(aws_tag_dict(gateway.get("Tags")), tags)
+            gateway_id = gateway["InternetGatewayId"]
+            self._call("attach_internet_gateway", InternetGatewayId=gateway_id, VpcId=vpc_id)
+            return gateway_id
         gateway_id = self._call(
             "create_internet_gateway",
             TagSpecifications=self._tag_spec("internet-gateway", tags),
@@ -163,6 +175,31 @@ class AwsNetworkProvider:
             eni["NetworkInterfaceId"], subnet_id, eni.get("PrivateIpAddress"), eni.get("MacAddress")
         )
 
+    def ensure_eni(self, subnet_id: str, private_ip: str | None,
+                   security_group_ids: list[str],
+                   tags: Mapping[str, str]) -> NetworkInterfaceResult:
+        filters = [{"Name": "subnet-id", "Values": [subnet_id]}]
+        if private_ip:
+            filters.append({"Name": "addresses.private-ip-address", "Values": [private_ip]})
+        filters.extend(
+            {"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()
+        )
+        interfaces = self._call(
+            "describe_network_interfaces", Filters=filters,
+        ).get("NetworkInterfaces", [])
+        if len(interfaces) > 1:
+            raise RuntimeError("multiple network interfaces match one ownership identity")
+        if not interfaces:
+            return self.create_eni(subnet_id, private_ip, security_group_ids, tags)
+        eni = interfaces[0]
+        assert_owned(aws_tag_dict(eni.get("TagSet")), tags)
+        if {row["GroupId"] for row in eni.get("Groups", [])} != set(security_group_ids):
+            raise RuntimeError("existing owned network interface has unexpected security groups")
+        return NetworkInterfaceResult(
+            eni["NetworkInterfaceId"], eni["SubnetId"], eni.get("PrivateIpAddress"),
+            eni.get("MacAddress"),
+        )
+
     @staticmethod
     def _permissions_equal(actual: list[dict], expected: tuple[dict, ...]) -> bool:
         def canonical(permission: dict) -> dict:
@@ -231,6 +268,13 @@ class AwsNetworkProvider:
         eni = response["NetworkInterfaces"][0]
         assert_owned(aws_tag_dict(eni.get("TagSet")), expected_tags)
         self._call("delete_network_interface", NetworkInterfaceId=eni_id)
+
+    def delete_owned_security_group(self, group_id: str,
+                                    expected_tags: Mapping[str, str]) -> None:
+        response = self._call("describe_security_groups", GroupIds=[group_id])
+        group = response["SecurityGroups"][0]
+        assert_owned(aws_tag_dict(group.get("Tags")), expected_tags)
+        self._call("delete_security_group", GroupId=group_id)
 
     def delete_owned_site(self, site, expected_tags: Mapping[str, str]) -> None:
         for group_id in [site.wan_security_group_id, site.lan_security_group_id,

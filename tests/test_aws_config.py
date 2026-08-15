@@ -19,20 +19,35 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("AWS_FREEBSD_AMIS", '{"ap-southeast-2":"ami-freebsd"}')
     monkeypatch.setenv("AWS_AVAILABILITY_ZONES", '{"ap-southeast-2":"ap-southeast-2a"}')
     monkeypatch.setenv("AWS_INSTANCE_TYPES", "t3.small,t3.medium")
+    monkeypatch.setenv("AWS_STANDARD_SECURITY_GROUP_IDS", "sg-one, sg-two")
 
 
 def test_config_loads_network_approved_amis_and_instance_types(monkeypatch):
     _set_required_env(monkeypatch)
+    monkeypatch.setenv("AWS_KEY_PAIR_NAME", "ctf-it-platform")
 
     config = AwsConfig.from_env()
 
     assert config.default_region == "ap-southeast-2"
     assert config.standard_vpc_id == "vpc-123"
     assert config.standard_subnet_id == "subnet-123"
+    assert config.standard_security_group_ids == ("sg-one", "sg-two")
     assert config.ubuntu_ami("ap-southeast-2") == "ami-ubuntu"
     assert config.freebsd_ami("ap-southeast-2") == "ami-freebsd"
     assert config.instance_types == ("t3.small", "t3.medium")
     assert config.availability_zone("ap-southeast-2") == "ap-southeast-2a"
+    assert config.key_pair_name == "ctf-it-platform"
+
+
+def test_acceptance_config_suffixes_shared_key_pair_name(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("AWS_ENVIRONMENT", "acceptance")
+    monkeypatch.setenv("AWS_KEY_PAIR_NAME", "ctf-it-platform")
+    monkeypatch.setenv("RUN_AWS_ACCEPTANCE", "1")
+    monkeypatch.setenv("AWS_ACCEPTANCE_RUN_ID", "run-123456")
+    config = AwsConfig.from_env()
+    assert config.key_pair_name == "ctf-it-platform-run-123456"
+    assert config.resource_token("vm", 7) == "ctf-it-acceptance-run-123456-vm-7"
 
 
 def test_config_rejects_missing_approved_ami_mapping(monkeypatch):
@@ -59,6 +74,20 @@ def test_ownership_tags_include_only_supplied_resource_ids():
         "EventId": "4",
         "VmId": "7",
     }
+
+
+def test_acceptance_opt_in_adds_unique_run_tag(monkeypatch):
+    monkeypatch.setenv("RUN_AWS_ACCEPTANCE", "1")
+    monkeypatch.setenv("AWS_ACCEPTANCE_RUN_ID", "run-123456")
+    assert ownership_tags("acceptance", event_id=4)["AcceptanceRunId"] == "run-123456"
+
+
+def test_acceptance_run_tag_requires_both_safety_gates(monkeypatch):
+    monkeypatch.setenv("RUN_AWS_ACCEPTANCE", "1")
+    monkeypatch.setenv("AWS_ACCEPTANCE_RUN_ID", "run-123456")
+    assert "AcceptanceRunId" not in ownership_tags("production")
+    monkeypatch.delenv("RUN_AWS_ACCEPTANCE")
+    assert "AcceptanceRunId" not in ownership_tags("acceptance")
 
 
 def test_assert_owned_rejects_mismatched_vm():

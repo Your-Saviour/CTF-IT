@@ -52,7 +52,8 @@ def _instance_spec(providers: CloudProviders, vm: VM) -> InstanceSpec:
     return InstanceSpec(
         ami_id=providers.config.ubuntu_ami(region),
         instance_type=vm.instance_type or "t3.small",
-        client_token=f"ctf-it-vm-{vm.id}",
+        client_token=(providers.config.resource_token("vm", vm.id)
+                      if hasattr(providers.config, "resource_token") else f"ctf-it-vm-{vm.id}"),
         network_interfaces=(NetworkInterfaceSpec(
             0,
             subnet_id=vm.subnet_id or providers.config.standard_subnet_id,
@@ -91,7 +92,7 @@ def create_cloud_vm(vm_id: int, providers: CloudProviders) -> None:
 
         providers.compute.wait_running(result.instance_id)
         if not vm.eip_allocation_id:
-            allocation = providers.compute.allocate_eip(_tags(providers, vm))
+            allocation = providers.compute.ensure_eip(_tags(providers, vm))
             providers.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
             vm.eip_allocation_id = allocation.allocation_id
             vm.public_ip = allocation.public_ip

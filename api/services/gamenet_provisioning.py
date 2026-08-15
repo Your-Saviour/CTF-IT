@@ -246,7 +246,7 @@ def create_gateways(db, event, infrastructure):
             provider = _provider()
             try:
                 result = provider.create_gateway(
-                    event, team, vm, key_name="ctf-it-platform", public_key=public_key,
+                    event, team, vm, key_name=provider.config.key_pair_name, public_key=public_key,
                     ingress=_gateway_ingress(team, temporary=True), user_data=ubuntu_cloud_init(),
                 )
                 _persist_instance_result(vm, result)
