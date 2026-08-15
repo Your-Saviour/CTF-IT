@@ -1,11 +1,13 @@
-{% extends "admin_base.html" %}
+{% extends "base.html" %}
 {% block title %}Network Plan — {{ event_name }}{% endblock %}
-{% block extra_head %}{{ super() }}<link rel="stylesheet" href="/static/event-planner.css?v=1">{% endblock %}
-{% block page_header %}{% endblock %}
-{% block admin_content %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=2">{% endblock %}
+{% block body_class %}planner-page{% endblock %}
+{% block site_nav %}{% endblock %}
+{% block container_class %}planner-root{% endblock %}
+{% block content %}
 <main class="planner" data-event-id="{{ event_id }}" data-event-status="{{ event_status }}" data-read-only="{{ read_only|tojson }}">
   <header class="planner-toolbar">
-    <div><a href="/admin/events" class="planner-back">← Events</a><h1>{{ event_name }}</h1><p>Canonical network repeated for every team</p></div>
+    <div class="planner-identity"><a href="/admin/events" class="planner-back">Back to Events</a><div><h1>{{ event_name }}</h1><p>Canonical network repeated for every team</p></div><span class="planner-event-status">{{ event_status }}</span></div>
     <div class="planner-actions">
       <span id="planner-save-state" role="status" aria-live="polite">Loading…</span>
       <button id="planner-advanced" class="btn">Advanced JSON</button>
@@ -14,6 +16,10 @@
       <button id="planner-preview" class="btn">Preview per team</button>
       <button id="planner-save" class="btn btn-primary">Save draft</button>
       <button id="planner-start" class="btn">Start event</button>
+    </div>
+    <div class="planner-account">
+      <span>{{ user.username }}</span>
+      <form method="post" action="/auth/logout"><button class="btn" type="submit">Logout</button></form>
     </div>
   </header>
   <section id="planner-validation" class="planner-validation" aria-live="polite"></section>

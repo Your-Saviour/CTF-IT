@@ -21,6 +21,16 @@ def test_plan_page_loads_full_page_planner_assets():
     assert "onclick=" not in source
 
 
+def test_plan_page_owns_a_dedicated_shell():
+    source = TEMPLATE.read_text()
+
+    assert '{% extends "base.html" %}' in source
+    assert "admin_base.html" not in source
+    assert 'class="planner-account"' in source
+    assert 'action="/auth/logout"' in source
+    assert "{{ user.username }}" in source
+
+
 def test_admin_drawers_restore_focus_and_red_team_tables_are_responsive():
     script = (ROOT / "frontend" / "static" / "admin.js").read_text()
     caldera = (ROOT / "frontend" / "templates" / "caldera_dashboard.html").read_text()
