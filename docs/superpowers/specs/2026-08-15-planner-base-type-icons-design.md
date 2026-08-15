@@ -10,7 +10,12 @@ The existing `/admin/api/base-types` catalogue already returns each base type's 
 
 This applies to the VPN gateway, primary firewall VM, and workload VMs. Site and zone nodes remain text-only. Changing a Base type rerenders the graph and updates the icon immediately.
 
-Each machine inspector also provides an Icon selector. `Automatic (Base type)` removes the override and follows catalogue metadata. Choosing a library icon stores its keyword in the machine's optional `icon` field. Provisioning ignores this presentation-only field.
+Each machine inspector provides two independent selectors:
+
+- `Primary icon` represents function or form factor. Automatic resolves gateway to Router, firewall VM to Firewall, and workload VM to Server. An explicit choice is stored in `primary_icon`.
+- `Secondary icon` represents platform or product. Automatic follows base-type catalogue metadata. An explicit choice remains stored in the existing `icon` field for backwards compatibility.
+
+Both selectors expose the full icon library, allowing any useful combination. Choosing Automatic removes only that selector's override. Provisioning ignores both presentation-only fields.
 
 ## Icon Contract
 
@@ -24,7 +29,7 @@ Custom paths render inside a nested SVG viewport so their declared view box is r
 
 ## Presentation
 
-Keep the established industrial planner styling, but do not render card backgrounds around machines. The VPN gateway, firewall VM, and workload VMs reuse the original topology's composed machine glyph: three outlined server-rack units with LED dots and a small circular base-type icon badge at the lower-right. The machine name is centred below the glyph. Sites and zones retain their structural cards.
+Keep the established industrial planner styling, but do not render card backgrounds around machines. The selected primary icon renders large, with the selected secondary icon in a small circular badge at the lower-right. The machine name is centred below the glyph. Sites and zones retain their structural cards.
 
 Machine nodes retain an invisible interaction target for reliable clicking and dragging. Selected or invalid machines gain a circular cyan or red state ring around the icon; the ring is absent in the normal state. The firewall icon remains amber. Collision bounds, link anchors, and persisted coordinates do not change.
 
