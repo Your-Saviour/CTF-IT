@@ -12,7 +12,7 @@ from api.services.opnsense_images import (
     BOOTSTRAP_SOURCE_URL, ImageWorkflowError, VultrImageClient, active_image,
     builder_validation_command, cleanup_validated_image, download_bootstrap,
     interrupt_running_jobs, new_image, render_golden_config, run_image_build,
-    validate_bootstrap_url, validate_release,
+    validate_bootstrap_url, validate_release, _posix_command,
 )
 
 
@@ -98,6 +98,12 @@ def test_validation_command_checks_release_disk_network_ssh_and_pf():
                      "route -n get default", "passwordauthentication no",
                      "kbdinteractiveauthentication no", "pfctl -sr", "192.0.2.8"):
         assert expected in command
+
+
+def test_remote_commands_explicitly_select_posix_shell_for_opnsense_root():
+    wrapped = _posix_command("set -eu; value=$(echo ok); test \"$value\" = ok")
+    assert wrapped.startswith("/bin/sh -c ")
+    assert "set -eu" in wrapped and "$(echo ok)" in wrapped
 
 
 def test_running_jobs_interrupt_and_only_validated_active_image_is_selected():

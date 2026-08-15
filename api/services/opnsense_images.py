@@ -325,7 +325,10 @@ def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
         try:
             client.connect(host, username="root", pkey=key, allow_agent=False, look_for_keys=False,
                            timeout=15, banner_timeout=15, auth_timeout=15)
-            _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+            # OPNsense assigns root a csh login shell.  Always select POSIX sh
+            # explicitly because lifecycle and validation commands use sh
+            # conditionals, substitutions, and `set -eu`.
+            _stdin, stdout, stderr = client.exec_command(_posix_command(command), timeout=timeout)
             return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
                     stderr.read().decode(errors="replace"))
         except Exception as exc:
@@ -336,6 +339,10 @@ def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
         finally:
             client.close()
     raise ImageWorkflowError(f"SSH did not become ready: {last_error}")
+
+
+def _posix_command(command: str) -> str:
+    return "/bin/sh -c " + shlex.quote(command)
 
 
 def _upload_atomic(db: Session, host: str, path: str, content: bytes, mode: int = 0o600) -> None:
