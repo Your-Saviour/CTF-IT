@@ -86,6 +86,7 @@ class AwsComputeProvider:
             public_ip=instance.get("PublicIpAddress"),
             private_ip=instance.get("PrivateIpAddress"),
             availability_zone=instance.get("Placement", {}).get("AvailabilityZone"),
+            primary_mac=primary.get("MacAddress") if primary else None,
         )
 
     def _owned_result(self, instance: dict, tags: Mapping[str, str]) -> InstanceResult:

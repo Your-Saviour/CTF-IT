@@ -95,6 +95,40 @@ class AwsGameNetProvider:
             ))
         return groups
 
+    def ensure_gateway_security_group(self, event, team, vm, ingress: tuple[dict, ...]):
+        tags = ownership_tags(
+            self.config.environment, event_id=event.id, team_id=team.id, vm_id=vm.id,
+        )
+        return self.network.ensure_security_group(SecurityGroupSpec(
+            self.config.standard_vpc_id, f"ctf-it-event-{event.id}-team-{team.id}-gateway",
+            "GameNet VPN gateway", ingress,
+            ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},), tags,
+        ))
+
+    def create_gateway(self, event, team, vm, *, key_name: str, public_key: str,
+                       ingress: tuple[dict, ...], user_data: str):
+        tags = ownership_tags(
+            self.config.environment, event_id=event.id, team_id=team.id, vm_id=vm.id,
+        )
+        group_id = self.ensure_gateway_security_group(event, team, vm, ingress)
+        self.compute.ensure_key_pair(key_name, public_key, ownership_tags(self.config.environment))
+        result = self.compute.launch_instance(InstanceSpec(
+            ami_id=self.config.ubuntu_ami(vm.cloud_region),
+            instance_type=vm.instance_type or "t3.small",
+            client_token=f"ctf-it-vm-{vm.id}",
+            network_interfaces=(NetworkInterfaceSpec(
+                0, subnet_id=self.config.standard_subnet_id,
+                security_group_ids=(group_id,), associate_public_ip=False,
+            ),),
+            tags=tags, key_name=key_name, user_data=user_data,
+        ))
+        allocation = self.compute.allocate_eip(tags)
+        self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
+        return replace(
+            result, public_ip=allocation.public_ip,
+            eip_allocation_id=allocation.allocation_id,
+        )
+
     def create_firewall(self, site, vm, *, ami_id: str):
         tags = self._tags(site, vm)
         wan = self.network.create_eni(
@@ -119,9 +153,23 @@ class AwsGameNetProvider:
         return replace(
             result,
             public_ip=allocation.public_ip,
+            private_ip=lan.private_ip,
             wan_eni_id=wan.eni_id,
             lan_eni_id=lan.eni_id,
+            lan_mac=lan.mac_address,
+            eip_allocation_id=allocation.allocation_id,
         )
+
+    def configure_private_routes(self, site, lan_eni_id: str) -> None:
+        route_tables = json.loads(site.route_table_ids_json or "{}")
+        for role, route_table_id in route_tables.items():
+            if role != "wan":
+                self.network.ensure_route(
+                    route_table_id, "0.0.0.0/0", eni_id=lan_eni_id,
+                )
+
+    def security_group_rules(self, group_id: str) -> tuple[dict, ...]:
+        return self.network.security_group_rules(group_id)
 
     def create_endpoint(self, site, zone, vm, *, ami_id: str):
         return self.compute.launch_instance(InstanceSpec(

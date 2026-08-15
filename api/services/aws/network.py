@@ -141,7 +141,14 @@ class AwsNetworkProvider:
             request["GatewayId"] = gateway_id
         else:
             raise ValueError("A route requires an ENI or gateway target")
-        self._call("create_route", **request)
+        response = self._call("describe_route_tables", RouteTableIds=[route_table_id])
+        routes = response.get("RouteTables", [{}])[0].get("Routes", []) if response.get("RouteTables") else []
+        existing = next((row for row in routes if row.get("DestinationCidrBlock") == destination), None)
+        target_key = "NetworkInterfaceId" if eni_id else "GatewayId"
+        target_value = eni_id or gateway_id
+        if existing and existing.get(target_key) == target_value:
+            return
+        self._call("replace_route" if existing else "create_route", **request)
 
     def create_eni(self, subnet_id: str, private_ip: str | None,
                    security_group_ids: list[str], tags: Mapping[str, str]) -> NetworkInterfaceResult:
@@ -205,6 +212,13 @@ class AwsNetworkProvider:
                 self._call("authorize_security_group_egress", GroupId=group_id,
                            IpPermissions=list(spec.egress))
         return group_id
+
+    def security_group_rules(self, group_id: str) -> tuple[dict, ...]:
+        response = self._call("describe_security_groups", GroupIds=[group_id])
+        groups = response.get("SecurityGroups", [])
+        if not groups:
+            return ()
+        return tuple(groups[0].get("IpPermissions", []))
 
     def delete_owned_vpc(self, vpc_id: str, expected_tags: Mapping[str, str]) -> None:
         response = self._call("describe_vpcs", VpcIds=[vpc_id])

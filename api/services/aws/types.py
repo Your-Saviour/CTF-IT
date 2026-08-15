@@ -27,6 +27,9 @@ class InstanceResult:
     availability_zone: str | None = None
     wan_eni_id: str | None = None
     lan_eni_id: str | None = None
+    primary_mac: str | None = None
+    lan_mac: str | None = None
+    eip_allocation_id: str | None = None
 
 
 @dataclass(frozen=True)

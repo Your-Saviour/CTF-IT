@@ -133,3 +133,19 @@ def test_security_group_creation_replaces_default_egress_with_exact_rules():
     assert ("authorize_security_group_egress", {
         "GroupId": "sg-123", "IpPermissions": list(egress),
     }) in ec2.calls
+
+
+def test_route_reconciliation_replaces_wrong_existing_target():
+    ec2 = FakeEc2()
+    def describe(**kwargs):
+        ec2.calls.append(("describe_route_tables", kwargs))
+        return {"RouteTables": [{"RouteTableId": "rtb-zone", "Routes": [{
+            "DestinationCidrBlock": "0.0.0.0/0", "GatewayId": "igw-wrong",
+        }]}]}
+    ec2.describe_route_tables = describe
+    ec2.replace_route = lambda **kwargs: ec2.calls.append(("replace_route", kwargs)) or {}
+    AwsNetworkProvider(ec2).ensure_route("rtb-zone", "0.0.0.0/0", eni_id="eni-firewall-lan")
+    assert ("replace_route", {
+        "RouteTableId": "rtb-zone", "DestinationCidrBlock": "0.0.0.0/0",
+        "NetworkInterfaceId": "eni-firewall-lan",
+    }) in ec2.calls

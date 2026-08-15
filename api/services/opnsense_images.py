@@ -106,7 +106,7 @@ def active_image(db: Session) -> OpnsenseImage | None:
     if not setting or not setting.value.isdigit():
         return None
     image = db.get(OpnsenseImage, int(setting.value))
-    return image if image and image.status == "active" and image.snapshot_id and image.validated_at else None
+    return image if image and image.status == "active" and image.ami_id and image.validated_at else None
 
 
 def interrupt_running_jobs(db: Session) -> int:

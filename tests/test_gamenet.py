@@ -651,8 +651,9 @@ def test_private_boot_reachability_probe_uses_posix_shell_on_opnsense(monkeypatc
     assert "ping=%s tcp=%s arp=%s attempts=%s" in commands[0]
 
 
-def test_endpoint_creation_uses_stock_image_and_persisted_mac_stages(monkeypatch, db_session):
+def test_endpoint_creation_uses_approved_ami_and_persists_eni_metadata(monkeypatch, db_session):
     from api.services import gamenet_provisioning
+    from api.services.aws import AwsConfig, InstanceResult
     event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
     db_session.add(event); db_session.flush()
     team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
@@ -663,24 +664,26 @@ def test_endpoint_creation_uses_stock_image_and_persisted_mac_stages(monkeypatch
     gateway = db_session.get(VM, team.vpn_gateway.vm_id)
     gateway.public_ip, gateway.status = "198.51.100.10", "active"
     firewall = db_session.get(VM, site.firewall_vm_id)
-    firewall.vultr_id, firewall.status = "firewall-id", "active"
-    db_session.add(PrivateBootCertification(
-        site_id=site.id, base_type="ubuntu_24_server", os_id=2284, region="ewr",
-        vpc_id="vpc-id", firewall_instance_id="firewall-id", plan="vc2-1c-2gb",
-        status="passed", phase="passed", cleanup_completed_at=utcnow(),
-    ))
+    firewall.cloud_instance_id, firewall.status = "i-firewall", "active"
     db_session.commit()
     calls = []
-    def create(vm, **kwargs):
-        calls.append(kwargs); vm.vultr_id = "instance-" + str(vm.id)
-        vm.vpc_ip, vm.vpc_mac = "10.128.0." + str(vm.id + 10), "5a:00:00:00:00:10"
-    monkeypatch.setattr(gamenet_provisioning, "_create_provider_instance", create)
-    monkeypatch.setattr(gamenet_provisioning, "add_deterministic_endpoint_address", lambda *_args: None)
-    monkeypatch.setattr(gamenet_provisioning, "finalize_endpoint_network", lambda *_args: None)
+    class Provider:
+        def create_endpoint(self, _site, _zone, vm, *, ami_id):
+            calls.append(ami_id)
+            return InstanceResult("i-" + str(vm.id), "running", "eni-" + str(vm.id),
+                                  None, vm.private_ip, "ap-southeast-2a",
+                                  primary_mac="02:00:00:00:00:10")
+        def close(self): pass
+    monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())
+    monkeypatch.setattr(gamenet_provisioning, "_require_endpoint_prerequisites", lambda *_args: None)
+    monkeypatch.setattr(AwsConfig, "from_env", classmethod(lambda cls: type(
+        "Config", (), {"ubuntu_ami": lambda self, region: "ami-ubuntu"},
+    )()))
     monkeypatch.setattr(gamenet_provisioning, "_assign_blue_modules", lambda *_args: None)
     create_private_endpoints(db_session, event, INFRASTRUCTURE)
     endpoints = db_session.query(VM).filter_by(role="blue_endpoint").all()
-    assert calls and all(call["stock_image"] is True and "user_data" not in call for call in calls)
+    assert calls and set(calls) == {"ami-ubuntu"}
+    assert all(vm.cloud_instance_id and vm.primary_eni_id and vm.vpc_mac for vm in endpoints)
     assert all(vm.network_phase == "network_converted" for vm in endpoints)
 
 
@@ -707,8 +710,7 @@ def test_endpoint_stage_one_selects_nic_by_attachment_mac_and_jumps_gateway(monk
     assert endpoint.network_boot_id == "boot-one"
 
 
-def test_failed_canary_is_cleaned_and_creates_no_workload_instances(monkeypatch, db_session):
-    from api.services import gamenet_provisioning
+def test_private_boot_gate_rejects_missing_validated_aws_ami(db_session):
     event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
     db_session.add(event); db_session.flush()
     team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
@@ -716,30 +718,11 @@ def test_failed_canary_is_cleaned_and_creates_no_workload_instances(monkeypatch,
     ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
     site = db_session.query(Site).one(); site.vpc_id = "vpc-id"
     site.tunnel_status = site.control_plane_status = "active"
-    firewall = db_session.get(VM, site.firewall_vm_id); firewall.vultr_id = "firewall-id"
-    gateway = db_session.get(VM, team.vpn_gateway.vm_id); gateway.vultr_id = "gateway-id"
-    deleted = []
-    requested_hostnames = []
-    class Provider:
-        def close(self): pass
-        def _resolve_os_id(self, _name): return 2284
-        def create_private_boot_canary(self, cert, **kwargs):
-            requested_hostnames.append(kwargs["hostname"])
-            cert.instance_id = "canary-id"; db_session.commit()
-            return {"id": "canary-id", "vpc_only": True, "main_ip": "0.0.0.0",
-                    "internal_ip": "10.128.0.9", "vpc_mac": "5a:00:00:00:00:09"}
-        def delete_instance(self, instance_id): deleted.append(instance_id)
-    monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())
-    monkeypatch.setattr(gamenet_provisioning, "_validate_private_boot_canary",
-                        lambda *_args: (_ for _ in ()).throw(GameNetProviderError("no ARP/TCP reachability")))
-    with pytest.raises(GameNetProviderError, match="private boot certification failed"):
+    firewall = db_session.get(VM, site.firewall_vm_id); firewall.cloud_instance_id = "i-firewall"
+    with pytest.raises(GameNetProviderError, match="no active privately validated OPNsense AMI"):
         certify_private_boot(db_session, event, INFRASTRUCTURE)
-    cert = db_session.query(PrivateBootCertification).one()
-    assert cert.status == "failed" and cert.cleanup_completed_at is not None
-    assert cert.instance_id == "canary-id" and deleted == ["canary-id"]
-    assert requested_hostnames == [f"gamenet-e{event.id}-t{team.id}-head-office-ubuntu-24-server-canary"]
     endpoints = db_session.query(VM).filter(VM.role.like("%_endpoint")).all()
-    assert all(vm.vultr_id is None for vm in endpoints)
+    assert all(vm.cloud_instance_id is None for vm in endpoints)
 
 
 def test_snapshot_instance_boots_without_vpc_then_attaches_explicitly(monkeypatch, db_session):
@@ -771,8 +754,9 @@ def test_snapshot_instance_boots_without_vpc_then_attaches_explicitly(monkeypatc
     provider.close()
 
 
-def test_site_firewall_persists_wan_gate_before_vpc_attachment(monkeypatch, db_session):
+def test_site_firewall_persists_aws_dual_eni_result(monkeypatch, db_session):
     from api.services import gamenet_provisioning
+    from api.services.aws import InstanceResult
 
     event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
     db_session.add(event); db_session.flush()
@@ -780,33 +764,32 @@ def test_site_firewall_persists_wan_gate_before_vpc_attachment(monkeypatch, db_s
     allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
     ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
     image = OpnsenseImage(
-        version="26.7", status="active", phase="active", snapshot_id="snapshot-id",
+        version="26.7", status="active", phase="active", ami_id="ami-opnsense",
         validated_at=utcnow(), build_method="freebsd-bootstrap", base_os="FreeBSD 15 x64",
     )
     db_session.add(image); db_session.flush()
     db_session.add(PlatformSettings(key="active_opnsense_image_id", value=str(image.id)))
     db_session.commit()
-    calls = []
-
     monkeypatch.setattr(gamenet_provisioning, "_require_provider", lambda: None)
     monkeypatch.setattr(gamenet_provisioning, "_create_provider_vpc", lambda _site: "vpc-id")
-    def create_instance(vm, **_kwargs):
-        vm.vultr_id, vm.public_ip = "instance-id", "198.51.100.10"
-    monkeypatch.setattr(gamenet_provisioning, "_create_provider_instance", create_instance)
-    monkeypatch.setattr(gamenet_provisioning, "validate_snapshot_wan",
-                        lambda vm, _release: calls.append(("wan", vm.vpc_ip)))
-    def attach(vm, _vpc_id):
-        assert vm.provision_step == "snapshot_wan_validated"
-        calls.append(("attach", vm.provision_step))
-        return {"ip_address": "10.128.0.2", "mac_address": "5a:00:00:00:00:02"}
-    monkeypatch.setattr(gamenet_provisioning, "_attach_provider_vpc", attach)
+    class Provider:
+        def create_firewall(self, site, vm, *, ami_id):
+            assert ami_id == "ami-opnsense"
+            return InstanceResult(
+                "i-firewall", "running", "eni-wan", "198.51.100.10", vm.private_ip,
+                "ap-southeast-2a", wan_eni_id="eni-wan", lan_eni_id="eni-lan",
+                lan_mac="02:00:00:00:00:02", eip_allocation_id="eipalloc-fw",
+            )
+        def configure_private_routes(self, site, eni): assert eni == "eni-lan"
+        def close(self): pass
+    monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())
     monkeypatch.setattr(gamenet_provisioning, "configure_snapshot_opnsense", lambda *_args, **_kwargs: None)
 
     gamenet_provisioning.create_site_firewalls(db_session, event, INFRASTRUCTURE)
     firewall = db_session.query(VM).filter_by(role="site_firewall").one()
-    assert calls[0] == ("wan", None)
-    assert firewall.provision_step == "snapshot_wan_validated"
-    assert firewall.vpc_ip == "10.128.0.2" and firewall.status == "active"
+    assert firewall.cloud_instance_id == "i-firewall"
+    assert firewall.wan_eni_id == "eni-wan" and firewall.lan_eni_id == "eni-lan"
+    assert firewall.vpc_mac == "02:00:00:00:00:02" and firewall.status == "active"
 
 
 def test_vultr_ssh_key_collision_uses_material_specific_name(monkeypatch):
@@ -941,6 +924,37 @@ def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
     assert result.wan_eni_id == "eni-0" and result.lan_eni_id == "eni-1"
 
 
+def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
+    from types import SimpleNamespace
+    from api.services.aws import ElasticIpResult, InstanceResult
+    from api.services.gamenet_provider import AwsGameNetProvider
+    class Network:
+        def ensure_security_group(self, spec): self.spec = spec; return "sg-gateway"
+    class Compute:
+        def ensure_key_pair(self, name, public_key, tags): self.key = (name, public_key); return "key-1"
+        def launch_instance(self, spec): self.spec = spec; return InstanceResult("i-gw", "pending", "eni-gw")
+        def allocate_eip(self, tags): return ElasticIpResult("eipalloc-gw", "198.51.100.9")
+        def associate_eip(self, allocation_id, eni_id): return "eipassoc-gw"
+    compute, network = Compute(), Network()
+    config = SimpleNamespace(
+        environment="test", standard_vpc_id="vpc-standard", standard_subnet_id="subnet-standard",
+        ubuntu_ami=lambda region: "ami-ubuntu",
+    )
+    provider = AwsGameNetProvider(compute, network, config)
+    event, team = SimpleNamespace(id=1), SimpleNamespace(id=2)
+    vm = SimpleNamespace(id=3, cloud_region="ap-southeast-2", instance_type="t3.small")
+    result = provider.create_gateway(
+        event, team, vm, key_name="ctf-it", public_key="ssh-ed25519 AAAA",
+        ingress=({"IpProtocol": "udp", "FromPort": 51820, "ToPort": 51820,
+                  "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},),
+        user_data="#cloud-config",
+    )
+    assert compute.spec.network_interfaces[0].subnet_id == "subnet-standard"
+    assert compute.spec.network_interfaces[0].security_group_ids == ("sg-gateway",)
+    assert result.public_ip == "198.51.100.9"
+    assert result.eip_allocation_id == "eipalloc-gw"
+
+
 def test_aws_gamenet_private_endpoint_has_no_public_ip():
     from types import SimpleNamespace
     from api.services.aws import InstanceResult
@@ -962,6 +976,28 @@ def test_aws_gamenet_private_endpoint_has_no_public_ip():
     assert result.public_ip is None
     assert compute.spec.network_interfaces[0].associate_public_ip is False
     assert compute.spec.network_interfaces[0].subnet_id == "subnet-blue"
+
+
+def test_aws_instance_result_is_persisted_to_neutral_vm_fields(db_session):
+    from api.services.aws import InstanceResult
+    from api.services.gamenet_provisioning import _persist_instance_result
+    event = Event(name="AWS result", quota="{}"); db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    vm = VM(hostname="aws-vm", status="creating", base_type="ubuntu_24_server",
+            team_id=team.id, event_id=event.id)
+    db_session.add(vm); db_session.commit()
+    result = InstanceResult(
+        "i-123", "running", "eni-primary", "198.51.100.8", "10.40.1.10",
+        "ap-southeast-2a", wan_eni_id="eni-wan", lan_eni_id="eni-lan",
+        primary_mac="02:00:00:00:00:01", eip_allocation_id="eipalloc-123",
+    )
+    _persist_instance_result(vm, result)
+    assert vm.cloud_instance_id == "i-123"
+    assert vm.primary_eni_id == "eni-primary"
+    assert vm.wan_eni_id == "eni-wan" and vm.lan_eni_id == "eni-lan"
+    assert vm.eip_allocation_id == "eipalloc-123"
+    assert vm.public_ip == "198.51.100.8" and vm.private_ip == "10.40.1.10"
+    assert vm.vpc_mac == "02:00:00:00:00:01"
 
 
 def test_aws_private_interface_netplan_matches_recorded_eni_mac():
