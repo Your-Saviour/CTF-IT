@@ -29,13 +29,23 @@ test('visual address annotations are constrained while short values remain exact
 
 test('zones and VMs receive distinct address text presentation', () => {
   assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'zone', annotation: '10.0.0.0/24'}), {
-    className: 'zone-container-address', text: '10.0.0.0/24', x: 12, y: 41,
+    className: 'zone-address-rail', text: '10.0.0.0/24', x: 0, y: 36, height: 24,
   });
   assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'vm', annotation: '10.0.0.10'}), {
     className: 'topo-node-address', text: '10.0.0.10', x: 0, y: 46,
   });
   assert.equal(canvas.topologyAnnotationPresentation({type: 'site', annotation: 'ignored'}), null);
   assert.equal(canvas.topologyAnnotationPresentation({type: 'vm', annotation: null}), null);
+});
+
+test('annotated VM bounds contain the address baseline without enlarging plain VMs', () => {
+  const annotated = {type: 'vm', annotation: '10.0.0.10', x: 100, y: 200};
+  const plain = {type: 'vm', annotation: null, x: 100, y: 200};
+  const address = canvas.topologyAnnotationPresentation(annotated);
+
+  assert.deepEqual(canvas.machineBounds(annotated), {x: 60, y: 170, width: 80, height: 84});
+  assert.deepEqual(canvas.machineBounds(plain), {x: 60, y: 170, width: 80, height: 72});
+  assert.equal(annotated.y + address.y < canvas.machineBounds(annotated).y + canvas.machineBounds(annotated).height, true);
 });
 
 test('machine nodes use icon-first presentation while structural nodes retain cards', () => {
@@ -145,11 +155,11 @@ test('collision fallback chooses the free slot nearest the preferred sibling pos
 test('zone bounds use minimum size and grow around direct machine children', () => {
   const zone = {id: 'zone:a/blue', x: 100, y: 200};
   assert.deepEqual(canvas.calculateZoneBounds(zone, []), {
-    x: 100, y: 200, width: 280, height: 190,
+    x: 100, y: 200, width: 280, height: 190, headerHeight: 36,
   });
   assert.deepEqual(canvas.calculateZoneBounds(zone, [
     {id: 'vm:a/blue/web', type: 'vm', x: 430, y: 390},
-  ]), {x: 100, y: 200, width: 390, height: 246});
+  ]), {x: 100, y: 200, width: 390, height: 252, headerHeight: 36});
 
   const graph = [
     {id: 'zone:a/blue', type: 'zone'},
@@ -160,6 +170,24 @@ test('zone bounds use minimum size and grow around direct machine children', () 
   assert.deepEqual(canvas.zoneChildren(graph, 'zone:a/blue').map(row => row.id), [
     'vm:a/blue/web',
   ]);
+});
+
+test('subnet rail expands workload zone geometry and shifts arranged VMs below it', () => {
+  const annotated = {id: 'zone:a/blue', type: 'zone', annotation: '10.0.0.0/24', x: 100, y: 200};
+  const plain = {id: 'zone:a/red', type: 'zone', annotation: null, x: 100, y: 200};
+  const firewall = {id: 'firewall-zone:a', type: 'firewall-zone', annotation: 'ignored', x: 100, y: 200};
+
+  assert.equal(canvas.zoneHeaderHeight(annotated), 60);
+  assert.equal(canvas.zoneHeaderHeight(plain), 36);
+  assert.equal(canvas.zoneHeaderHeight(firewall), 36);
+  assert.deepEqual(canvas.calculateZoneBounds(annotated, []), {
+    x: 100, y: 200, width: 280, height: 214, headerHeight: 60,
+  });
+  assert.deepEqual(canvas.arrangeZoneChildren(annotated, [{id: 'vm', type: 'vm'}]).vm, {x: 160, y: 316});
+  assert.deepEqual(
+    canvas.constrainMachinePosition({x: 80, y: 210}, canvas.calculateZoneBounds(annotated, [])),
+    {x: 160, y: 316},
+  );
 });
 
 test('zone arrangement packs children deterministically and translation is atomic', () => {

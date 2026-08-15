@@ -12,7 +12,11 @@ export function topologyAccessibleLabel(node) {
 export function topologyAnnotationPresentation(node) {
   if (typeof node?.annotation !== 'string' || node.annotation === '') return null;
   if (node.type === 'zone') {
-    return {className: 'zone-container-address', text: truncatedAnnotation(node.annotation, 38), x: 12, y: 41};
+    return {
+      className: 'zone-address-rail', text: truncatedAnnotation(node.annotation, 38),
+      x: 0, y: ZONE_CONTAINER_GEOMETRY.baseHeaderHeight,
+      height: ZONE_CONTAINER_GEOMETRY.addressRailHeight,
+    };
   }
   if (node.type === 'vm') {
     return {className: 'topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 46};
@@ -48,15 +52,40 @@ export const MACHINE_ICON_GEOMETRY = Object.freeze({
 });
 
 export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
-  headerHeight: 36,
+  baseHeaderHeight: 36,
+  addressRailHeight: 24,
   padding: 20,
   machineWidth: 80,
   machineHeight: 72,
+  annotatedMachineHeight: 84,
+  machineTop: -30,
+  machineAnchorOffset: 36,
   columnGap: 24,
   rowGap: 24,
   minWidth: 280,
   minHeight: 190,
 });
+
+export function machineBounds(node) {
+  const width = ZONE_CONTAINER_GEOMETRY.machineWidth;
+  const annotated = node?.type === 'vm' && typeof node.annotation === 'string' && node.annotation !== '';
+  return {
+    x: (node?.x ?? 0) - width / 2,
+    y: (node?.y ?? 0) + ZONE_CONTAINER_GEOMETRY.machineTop,
+    width,
+    height: annotated ? ZONE_CONTAINER_GEOMETRY.annotatedMachineHeight : ZONE_CONTAINER_GEOMETRY.machineHeight,
+  };
+}
+
+export function zoneHeaderHeight(zone) {
+  return ZONE_CONTAINER_GEOMETRY.baseHeaderHeight
+    + (zone?.type === 'zone' && typeof zone.annotation === 'string' && nodeHasAnnotation(zone)
+      ? ZONE_CONTAINER_GEOMETRY.addressRailHeight : 0);
+}
+
+function nodeHasAnnotation(node) {
+  return node.annotation !== '';
+}
 
 export function zoneChildren(graph, zoneId) {
   return graph.filter(node => node.parent === zoneId && ['vm', 'firewall'].includes(node.type));
@@ -64,26 +93,32 @@ export function zoneChildren(graph, zoneId) {
 
 export function calculateZoneBounds(zone, children) {
   const geometry = ZONE_CONTAINER_GEOMETRY;
+  const headerHeight = zoneHeaderHeight(zone);
+  const minimumHeight = geometry.minHeight + headerHeight - geometry.baseHeaderHeight;
   const requiredWidth = children.reduce((width, child) => Math.max(
     width,
-    child.x + geometry.machineWidth / 2 + geometry.padding - zone.x,
+    machineBounds(child).x + machineBounds(child).width + geometry.padding - zone.x,
   ), geometry.minWidth);
   const requiredHeight = children.reduce((height, child) => Math.max(
     height,
-    child.y + geometry.machineHeight / 2 + geometry.padding - zone.y,
-  ), geometry.minHeight);
-  return {x: zone.x, y: zone.y, width: requiredWidth, height: requiredHeight};
+    machineBounds(child).y + machineBounds(child).height + geometry.padding - zone.y,
+  ), minimumHeight);
+  return {x: zone.x, y: zone.y, width: requiredWidth, height: requiredHeight, headerHeight};
 }
 
 export function arrangeZoneChildren(zone, children) {
   if (!children.length) return {};
   const geometry = ZONE_CONTAINER_GEOMETRY;
   const columns = Math.ceil(Math.sqrt(children.length));
+  const rows = Array.from({length: Math.ceil(children.length / columns)}, (_, row) =>
+    children.slice(row * columns, (row + 1) * columns));
+  const rowOffsets = rows.map((_, row) => rows.slice(0, row).reduce((offset, previous) =>
+    offset + Math.max(...previous.map(child => machineBounds(child).height)) + geometry.rowGap, 0));
   return Object.fromEntries(children.map((child, index) => [child.id, {
     x: zone.x + geometry.padding + geometry.machineWidth / 2
       + (index % columns) * (geometry.machineWidth + geometry.columnGap),
-    y: zone.y + geometry.headerHeight + geometry.padding + geometry.machineHeight / 2
-      + Math.floor(index / columns) * (geometry.machineHeight + geometry.rowGap),
+    y: zone.y + zoneHeaderHeight(zone) + geometry.padding + geometry.machineAnchorOffset
+      + rowOffsets[Math.floor(index / columns)],
   }]));
 }
 
@@ -103,7 +138,7 @@ export function constrainMachinePosition(position, zoneBounds) {
   const geometry = ZONE_CONTAINER_GEOMETRY;
   return {
     x: Math.max(position.x, zoneBounds.x + geometry.padding + geometry.machineWidth / 2),
-    y: Math.max(position.y, zoneBounds.y + geometry.headerHeight + geometry.padding + geometry.machineHeight / 2),
+    y: Math.max(position.y, zoneBounds.y + (zoneBounds.headerHeight ?? geometry.baseHeaderHeight) + geometry.padding + geometry.machineAnchorOffset),
   };
 }
 
@@ -218,11 +253,10 @@ export function calculateHierarchicalLayout(graph, savedLayout = {version: 1, no
   for (const node of graph) {
     const parent = byId.get(node.parent);
     if (!isZoneContainer(parent) || !['vm', 'firewall'].includes(node.type)) continue;
-    const constrained = constrainMachinePosition(nodes[node.id], {
-      ...nodes[parent.id],
-      width: ZONE_CONTAINER_GEOMETRY.minWidth,
-      height: ZONE_CONTAINER_GEOMETRY.minHeight,
-    });
+    const constrained = constrainMachinePosition(
+      nodes[node.id],
+      calculateZoneBounds({...parent, ...nodes[parent.id]}, []),
+    );
     if (constrained.x !== nodes[node.id].x || constrained.y !== nodes[node.id].y) {
       nodes[node.id] = constrained;
       added = true;
@@ -347,11 +381,11 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         .attr('height', d => bounds.get(d.id).height);
       containers.select('.zone-container-header')
         .attr('width', d => bounds.get(d.id).width)
-        .attr('height', ZONE_CONTAINER_GEOMETRY.headerHeight);
+        .attr('height', d => bounds.get(d.id).headerHeight);
       containers.select('.zone-container-divider')
         .attr('x2', d => bounds.get(d.id).width)
-        .attr('y1', ZONE_CONTAINER_GEOMETRY.headerHeight)
-        .attr('y2', ZONE_CONTAINER_GEOMETRY.headerHeight);
+        .attr('y1', d => bounds.get(d.id).headerHeight)
+        .attr('y2', d => bounds.get(d.id).headerHeight);
       arrangeControls.attr('transform', d => `translate(${bounds.get(d.id).width - 104},4)`);
     }
     updateContainers();
@@ -468,10 +502,10 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     machineGroups
       .append('rect')
       .attr('class', 'node-hit-target')
-      .attr('x', -40)
-      .attr('y', -30)
-      .attr('width', 80)
-      .attr('height', 72);
+      .attr('x', d => machineBounds(d).x - d.x)
+      .attr('y', d => machineBounds(d).y - d.y)
+      .attr('width', d => machineBounds(d).width)
+      .attr('height', d => machineBounds(d).height);
     machineGroups.append('circle')
       .attr('class', 'node-state-ring')
       .attr('cy', -3)
