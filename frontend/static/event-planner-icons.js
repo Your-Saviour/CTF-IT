@@ -36,3 +36,14 @@ export function resolvePlannerIcon(value) {
   }
   return {path: PLANNER_ICONS.server.path, viewBox: '0 0 24 24'};
 }
+
+export function machineIconDefinition(machine, baseTypes) {
+  const baseIcon = (baseTypes || []).find(base => base.id === machine?.base_type)?.icon;
+  return resolvePlannerIcon(machine?.icon || baseIcon || 'server');
+}
+
+export function setMachineIconOverride(machine, value) {
+  if (typeof value === 'string' && PLANNER_ICONS[value]) machine.icon = value;
+  else delete machine.icon;
+  return machine;
+}

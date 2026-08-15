@@ -160,7 +160,17 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('y', -24)
       .attr('width', 4)
       .attr('height', 48);
-    groups.append('text').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
+    const icons = groups.filter(d => d.icon)
+      .append('svg')
+      .attr('class', 'node-icon')
+      .attr('x', -58)
+      .attr('y', -9)
+      .attr('width', 18)
+      .attr('height', 18)
+      .attr('viewBox', d => d.icon.viewBox)
+      .attr('aria-hidden', 'true');
+    icons.append('path').attr('d', d => d.icon.path);
+    groups.append('text').attr('text-anchor', 'middle').attr('x', d => d.icon ? 8 : 0).attr('y', 4).text(d => d.label);
 
     if (completed.added && !callbacks.readOnly) {
       const key = JSON.stringify(completed.nodes);

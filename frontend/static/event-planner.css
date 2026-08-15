@@ -86,6 +86,11 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-node.zone .node-body { fill: #132238; stroke: #466887; }
 .topo-node.vm .node-body { fill: #0d1725; stroke: #405b73; }
 .topo-node .vm-edge { fill: var(--cyan); stroke: none; pointer-events: none; }
+.topo-node .node-icon { overflow: visible; pointer-events: none; }
+.topo-node .node-icon path { fill: var(--cyan-dim); }
+.topo-node.firewall .node-icon path { fill: var(--amber); }
+.topo-node.selected .node-icon path { fill: var(--cyan); }
+.topo-node.invalid .node-icon path { fill: var(--red); }
 .topo-node.selected .node-body { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }
 .topo-node.invalid .node-body { stroke: var(--red); stroke-width: 2.5; stroke-dasharray: none; filter: drop-shadow(0 0 4px var(--red-glow)); }
 .topo-node.invalid text { fill: var(--red); }

@@ -6,6 +6,7 @@ import {
   normalizeClientLayout,
   nodeIndex,
   renameStructuralKey,
+  validateClientInfrastructure,
 } from '../frontend/static/event-planner-state.js';
 
 const infrastructure = {
@@ -65,4 +66,13 @@ test('site key rename remaps firewall zone, primary firewall, zones, and VMs', (
     'vm:branch_office/corporate/workstation',
     'zone:branch_office/corporate',
   ]);
+});
+
+test('machine icon overrides must come from the planner icon library', () => {
+  const value = structuredClone(infrastructure);
+  value.sites[0].zones[0].endpoints[0].icon = 'not-in-library';
+
+  const errors = validateClientInfrastructure(value, {bases: [{id: 'ubuntu'}, {id: 'opnsense'}]});
+
+  assert.equal(errors.some(error => error.path === 'sites[0].zones[0].endpoints[0].icon'), true);
 });

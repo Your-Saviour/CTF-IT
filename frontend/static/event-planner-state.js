@@ -1,3 +1,5 @@
+import {PLANNER_ICONS} from './event-planner-icons.js';
+
 export const clone = value => structuredClone(value);
 export const slugify = value => String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'item';
 const SLUG = /^[a-z][a-z0-9_]{0,63}$/;
@@ -114,6 +116,7 @@ export function validateClientInfrastructure(value, catalogues = {}) {
     if (!row.base_type || (bases.size && !bases.has(row.base_type))) add(`${path}.base_type`, nodeId, 'Choose an available base type');
     if (!String(row.default_plan || '').trim()) add(`${path}.default_plan`, nodeId, 'Cloud plan is required');
     if (row.ust_prompt != null && (typeof row.ust_prompt !== 'string' || row.ust_prompt.length > 8000)) add(`${path}.ust_prompt`, nodeId, 'UST prompt must be at most 8000 characters');
+    if (row.icon != null && (typeof row.icon !== 'string' || !PLANNER_ICONS[row.icon])) add(`${path}.icon`, nodeId, 'Choose a supported icon or Automatic');
   };
   const gateway = value?.vpn_gateway;
   if (!gateway) add('vpn_gateway', 'gateway', 'VPN gateway is required');

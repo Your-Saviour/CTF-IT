@@ -138,3 +138,14 @@ def test_planner_renders_system_firewall_zone_as_workload_route_parent():
     assert "Automatically allocated" in source
     assert "['site','firewall-zone','firewall','zone','vm']" in source
     assert "['zone','vm']" in source
+
+
+def test_planner_projects_configurable_base_type_icons_into_machine_nodes():
+    controller = CONTROLLER.read_text()
+    canvas = CANVAS.read_text()
+
+    assert "PLANNER_ICON_OPTIONS" in controller
+    assert "machineIconDefinition" in controller
+    assert "setMachineIconOverride" in controller
+    assert "node-icon" in canvas
+    assert "viewBox" in canvas

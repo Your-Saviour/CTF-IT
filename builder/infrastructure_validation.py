@@ -9,6 +9,11 @@ from ipaddress import ip_network
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TEAM_ROLES = {"blue", "red"}
+PLANNER_ICONS = {
+    "server", "desktop", "laptop", "ubuntu", "linux", "debian", "kali", "windows",
+    "router", "firewall", "attacker", "database", "web", "dns", "mail", "directory",
+    "cloud", "container", "kubernetes", "storage", "monitoring",
+}
 VPC_LIMIT_PER_REGION = 5
 
 
@@ -166,6 +171,9 @@ def _validate_machine(spec: dict, path: str, bases: set[str], errors: list[str],
     prompt = spec.get("ust_prompt")
     if prompt is not None and (not isinstance(prompt, str) or len(prompt) > 8000):
         errors.append(f"{path}.ust_prompt must be a string of at most 8000 characters")
+    icon = spec.get("icon")
+    if icon is not None and (not isinstance(icon, str) or icon not in PLANNER_ICONS):
+        errors.append(f"{path}.icon must reference a supported planner icon")
     base = spec.get("base_type")
     if not isinstance(base, str) or base not in bases:
         errors.append(f"{path}.base_type references unknown or disabled base type '{base}'")
