@@ -62,6 +62,24 @@
 
 .planner-inspector label { display: block; margin: 12px 0; color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
 .planner-inspector input, .planner-inspector select, .planner-inspector textarea, #planner-json { width: 100%; margin-top: 5px; padding: 9px; background: var(--bg-deep); border: 1px solid var(--border); border-radius: 5px; color: var(--text-primary); font: 12px 'JetBrains Mono', monospace; }
+.icon-picker-field > span { display: block; }
+.icon-picker { position: relative; margin-top: 5px; text-transform: none; }
+.icon-picker-trigger { display: grid; grid-template-columns: 30px minmax(0, 1fr) 10px; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-deep); color: var(--text-primary); font: 12px 'JetBrains Mono', monospace; text-align: left; cursor: pointer; }
+.icon-picker-trigger:hover, .icon-picker-trigger[aria-expanded="true"] { border-color: var(--cyan-dim); color: var(--cyan); }
+.icon-picker-trigger:focus-visible, .icon-picker-option:focus-visible, .icon-picker-search:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.icon-picker-trigger:disabled { cursor: default; opacity: .55; }
+.icon-picker-chevron { width: 7px; height: 7px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg) translateY(-2px); }
+.icon-picker-svg { display: block; width: 24px; height: 24px; fill: currentColor; flex: 0 0 auto; }
+.icon-picker-trigger .icon-picker-svg { width: 28px; height: 28px; color: var(--cyan-dim); }
+.icon-picker-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; padding: 7px; border: 1px solid var(--cyan-dim); background: var(--bg-overlay); }
+.icon-picker-menu[hidden] { display: none; }
+.planner-inspector .icon-picker-search { margin: 0 0 7px; border-radius: 0; }
+.icon-picker-options { max-height: 290px; overflow-y: auto; overscroll-behavior: contain; }
+.icon-picker-group { margin-top: 8px; border-top: 1px solid var(--border); }
+.icon-picker-group-label { padding: 8px 7px 4px; color: var(--text-muted); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
+.icon-picker-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 6px 8px; border: 0; background: transparent; color: var(--text-secondary); font: 11px 'JetBrains Mono', monospace; text-align: left; cursor: pointer; }
+.icon-picker-option:hover, .icon-picker-option:focus, .icon-picker-option[aria-selected="true"] { background: var(--cyan-subtle); color: var(--cyan); }
+.icon-picker-option.automatic { border-bottom: 1px solid var(--border); }
 .system-zone-details { display: grid; gap: 12px; color: var(--text-secondary); font-size: 12px; }
 .system-zone-details strong { color: var(--cyan); text-transform: uppercase; }
 .system-zone-details dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; }

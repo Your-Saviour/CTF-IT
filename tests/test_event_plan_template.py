@@ -155,6 +155,21 @@ def test_planner_projects_configurable_base_type_icons_into_machine_nodes():
     assert "viewBox" in canvas
 
 
+def test_planner_icon_picker_has_preview_search_and_keyboard_contracts():
+    controller = CONTROLLER.read_text()
+    picker = (ROOT / "frontend" / "static" / "event-planner-icon-picker.js").read_text()
+
+    assert "renderIconPicker" in controller
+    assert "bindIconPickers" in controller
+    assert "machineAutomaticIcon" in controller
+    assert 'role="listbox"' in picker
+    assert "icon-picker-search" in picker
+    assert "ArrowDown" in picker
+    assert "ArrowUp" in picker
+    assert "event.key === 'Enter'" in picker
+    assert "Escape" in picker
+
+
 def test_machine_nodes_render_as_standalone_icons_with_labels_below():
     canvas = CANVAS.read_text()
 
