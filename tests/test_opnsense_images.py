@@ -152,6 +152,7 @@ class WorkflowClient:
         return {"main_ip": {"builder": "198.51.100.10", "clone-1": "198.51.100.11", "clone-2": "198.51.100.12"}[identifier]}
     def wait_stopped(self, identifier): self.events.append(f"stopped:{identifier}"); return {"power_status": "stopped"}
     def start(self, identifier): self.events.append(f"start:{identifier}")
+    def halt(self, identifier): self.events.append(f"halt:{identifier}")
     def create_snapshot(self, _image):
         assert self.events.count("stopped:builder") == 2 or "instance:builder" in self.events
         self.events.append("snapshot"); return "snapshot"
@@ -176,6 +177,8 @@ def patch_success(monkeypatch, *, state="freebsd"):
     monkeypatch.setattr("api.services.opnsense_images._boot_id", lambda *_args: next(boots))
     monkeypatch.setattr("api.services.opnsense_images._fingerprint", lambda *_args: "builder-key")
     monkeypatch.setattr("api.services.opnsense_images._halt", lambda *_args: None)
+    monkeypatch.setattr("api.services.opnsense_images._wait_for_guest_shutdown", lambda *_args: None)
+    monkeypatch.setattr("api.services.opnsense_images._guest_ssh_online", lambda *_args: True)
     monkeypatch.setattr("api.services.opnsense_images._ssh", lambda *_args, **_kwargs: (0, "", ""))
     monkeypatch.setattr("api.services.opnsense_images._validate_clone_one", lambda *_args: "clone-key-1")
     monkeypatch.setattr("api.services.opnsense_images._validate_clone_two", lambda *_args: "clone-key-2")
@@ -213,6 +216,27 @@ def test_resume_from_stopped_snapshot_phase_skips_builder_and_conversion(monkeyp
     run_image_build(db, image.id, vultr_factory=lambda: client,
                     bootstrap_downloader=lambda _url: downloads.append(True))
     assert downloads == [] and "wait:builder" not in client.events
+    assert image.status == "ready" and image.snapshot_id == "snapshot", image.error_detail
+
+
+def test_resume_from_guest_halted_snapshot_phase_synchronizes_vultr_state(monkeypatch):
+    db = session()
+    results = '{"builder_boot_2":{"passed":true,"ssh_host_key":"builder-key"}}'
+    image = image_row(db, status="interrupted", phase="snapshotting",
+                      builder_instance_id="builder", builder_firewall_group_id="firewall",
+                      validation_results=results, bootstrap_sha256="existing")
+    client = WorkflowClient(); patch_success(monkeypatch)
+    def running_instance(identifier):
+        client.events.append(f"instance:{identifier}")
+        return {"power_status": "running", "main_ip": "198.51.100.10"}
+    client.instance = running_instance
+    monkeypatch.setattr("api.services.opnsense_images._guest_ssh_online", lambda *_args: False)
+    monkeypatch.setattr("api.services.opnsense_images._sanitize_and_halt", lambda *_args: (_ for _ in ()).throw(
+        AssertionError("an already halted guest must not be contacted over SSH")))
+    run_image_build(db, image.id, vultr_factory=lambda: client,
+                    bootstrap_downloader=lambda _url: (_ for _ in ()).throw(
+                        AssertionError("bootstrap must not run during snapshot resume")))
+    assert "halt:builder" in client.events and "stopped:builder" in client.events
     assert image.status == "ready" and image.snapshot_id == "snapshot", image.error_detail
 
 

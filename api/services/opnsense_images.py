@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import shlex
+import socket
 import time
 from ipaddress import ip_network
 from urllib.parse import urlparse
@@ -227,6 +228,9 @@ class VultrImageClient:
 
     def start(self, identifier: str):
         self.request("POST", f"/instances/{identifier}/start")
+
+    def halt(self, identifier: str):
+        self.request("POST", f"/instances/{identifier}/halt")
 
     def wait_stopped(self, identifier: str) -> dict:
         deadline = time.monotonic() + POLL_TIMEOUT
@@ -478,6 +482,35 @@ def _halt(db: Session, host: str) -> None:
         raise ImageWorkflowError(f"clean power-off request failed: {error[:300]}")
 
 
+def _wait_for_guest_shutdown(host: str) -> None:
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, 22), timeout=2):
+                time.sleep(2)
+        except OSError:
+            return
+    raise ImageWorkflowError("guest did not close SSH during clean shutdown")
+
+
+def _guest_ssh_online(host: str) -> bool:
+    try:
+        with socket.create_connection((host, 22), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def _power_off_builder(db: Session, client: VultrImageClient,
+                       image: OpnsenseImage, host: str) -> None:
+    _halt(db, host)
+    _wait_for_guest_shutdown(host)
+    # Vultr can leave a cleanly halted custom guest marked running.  Once the
+    # guest is offline, synchronize the hypervisor state before the hard gate.
+    client.halt(image.builder_instance_id)
+    client.wait_stopped(image.builder_instance_id)
+
+
 def _sanitize_and_halt(db: Session, client: VultrImageClient, image: OpnsenseImage, host: str) -> None:
     sanitize = (
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
@@ -489,8 +522,7 @@ def _sanitize_and_halt(db: Session, client: VultrImageClient, image: OpnsenseIma
     code, _, error = _ssh(db, host, sanitize)
     if code:
         raise ImageWorkflowError(f"builder sanitization failed: {error[:300]}")
-    _halt(db, host)
-    client.wait_stopped(image.builder_instance_id)
+    _power_off_builder(db, client, image, host)
 
 
 def _record_validation(image: OpnsenseImage, name: str, **data) -> None:
@@ -577,7 +609,13 @@ def run_image_build(db: Session, image_id: int, *, vultr_factory=VultrImageClien
                 host = builder.get("main_ip")
                 if not host:
                     raise ImageWorkflowError("snapshot resume cannot resolve the builder address")
-                _sanitize_and_halt(db, client, image, host)
+                if _guest_ssh_online(host):
+                    _sanitize_and_halt(db, client, image, host)
+                else:
+                    # A prior run can be interrupted after the clean guest halt
+                    # but before Vultr records the corresponding power state.
+                    client.halt(image.builder_instance_id)
+                    client.wait_stopped(image.builder_instance_id)
 
         if not image.snapshot_id and not snapshot_resume:
             if not image.builder_firewall_group_id:
@@ -619,8 +657,7 @@ def run_image_build(db: Session, image_id: int, *, vultr_factory=VultrImageClien
                                ssh_host_key=builder_key)
             db.commit()
 
-            _halt(db, host)
-            client.wait_stopped(image.builder_instance_id)
+            _power_off_builder(db, client, image, host)
             client.start(image.builder_instance_id)
             client.wait_instance(image.builder_instance_id)
             _validate_builder(db, image, host, cidr, "second disk-boot validation")
