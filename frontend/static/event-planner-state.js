@@ -58,6 +58,15 @@ export function renameStructuralKey(state, nodeId, rawKey) {
   return {state, nodeId: `${node.type}:${newToken}`};
 }
 
+export function pruneLayout(state) {
+  const valid = new Set(nodeIndex(state.infrastructure).keys()), nodes = {};
+  for (const [id, position] of Object.entries(state.layout?.nodes || {})) {
+    if (valid.has(id)) nodes[id] = position;
+  }
+  state.layout = {version: 1, nodes};
+  return state;
+}
+
 export function validateClientInfrastructure(value, catalogues = {}) {
   const errors = [], bases = new Set((catalogues.bases || []).map(row => row.id));
   const add = (path, nodeId, message) => errors.push({path, nodeId, message});

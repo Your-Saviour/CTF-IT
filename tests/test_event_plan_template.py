@@ -57,6 +57,7 @@ def test_planner_state_remaps_structural_layout_ids_and_mirrors_server_paths():
 
     assert "renameStructuralKey" in source
     assert "state.layout = {version: 1, nodes: remapped}" in source
+    assert "export function pruneLayout" in source
     assert "sites[${si}].zones[${zi}].endpoints[${vi}]" in source
     assert "A zone supports at most 245 VMs" in source
     assert "Listen port must be from 1 to 65535" in source
@@ -70,3 +71,5 @@ def test_planner_recovers_catalogues_and_guards_read_only_mutations():
     assert "readOnly:READ_ONLY" in source
     assert "if(!READ_ONLY)canvas?.resetLayout()" in source
     assert "document.querySelector('.planner-add-actions').hidden=READ_ONLY" in source
+    assert "return pruneLayout(state)" in source
+    assert "if(name==='listen_port')value=Number(value)" in source
