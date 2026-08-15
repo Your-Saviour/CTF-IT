@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from builder.infrastructure_planner import default_infrastructure, validate_infrastructure_layout
+
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "frontend" / "templates" / "event_plan.html"
 ROOT = TEMPLATE.parents[2]
@@ -8,6 +10,39 @@ CANVAS = ROOT / "frontend" / "static" / "event-planner-canvas.js"
 STATE = ROOT / "frontend" / "static" / "event-planner-state.js"
 CONTROLLER = ROOT / "frontend" / "static" / "event-planner.js"
 CSS = ROOT / "frontend" / "static" / "event-planner.css"
+
+
+def test_layout_theme_validation_accepts_known_nodes_and_strict_hex_colours():
+    layout = {
+        "version": 1,
+        "nodes": {},
+        "themes": {
+            "zone:head_office/corporate": {"color": "#2563eb"},
+            "vm:head_office/corporate/workstation_1": {"color": "#A855F7"},
+        },
+    }
+
+    assert validate_infrastructure_layout(layout, default_infrastructure()) == []
+
+
+def test_layout_theme_validation_rejects_unknown_malformed_and_extra_values():
+    layout = {
+        "version": 1,
+        "nodes": {},
+        "themes": {
+            "zone:head_office/missing": {"color": "#2563eb"},
+            "zone:head_office/corporate": {"color": "blue"},
+            "vm:head_office/corporate/workstation_1": {"color": "#a855f7", "fill": "red"},
+            "firewall-zone:head_office": "#dc2626",
+        },
+    }
+
+    errors = validate_infrastructure_layout(layout, default_infrastructure())
+
+    assert any("themes.zone:head_office/missing references an unknown node id" in error for error in errors)
+    assert any("themes.zone:head_office/corporate.color must be a six-digit hex colour" in error for error in errors)
+    assert any("themes.vm:head_office/corporate/workstation_1.fill is not supported" in error for error in errors)
+    assert any("themes.firewall-zone:head_office must be an object" in error for error in errors)
 
 
 def test_plan_page_loads_full_page_planner_assets():

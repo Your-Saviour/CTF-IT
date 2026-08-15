@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import math
+import re
 
 
 _DEFAULT_INFRASTRUCTURE = {
@@ -43,6 +44,7 @@ _DEFAULT_INFRASTRUCTURE = {
         ],
     }],
 }
+_THEME_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 def default_infrastructure() -> dict:
@@ -158,6 +160,23 @@ def validate_infrastructure_layout(layout: dict | None, infrastructure: dict) ->
             if (not isinstance(value, (int, float)) or isinstance(value, bool)
                     or not math.isfinite(value)):
                 errors.append(f"{path}.{axis} must be a finite number")
+    themes = layout.get("themes", {})
+    if not isinstance(themes, dict):
+        errors.append("infrastructure_layout.themes must be an object")
+        return errors
+    for node_id, theme in themes.items():
+        path = f"infrastructure_layout.themes.{node_id}"
+        if node_id not in valid_ids:
+            errors.append(f"{path} references an unknown node id")
+        if not isinstance(theme, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        for field in theme:
+            if field != "color":
+                errors.append(f"{path}.{field} is not supported")
+        color = theme.get("color")
+        if not isinstance(color, str) or not _THEME_COLOR.fullmatch(color):
+            errors.append(f"{path}.color must be a six-digit hex colour")
     return errors
 
 
