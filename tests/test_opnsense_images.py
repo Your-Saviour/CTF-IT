@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -13,7 +14,7 @@ from api.services.opnsense_images import (
     builder_validation_command, cleanup_validated_image, download_bootstrap,
     interrupt_running_jobs, new_image, render_golden_config, run_image_build,
     validate_bootstrap_url, validate_release, release_matches, _posix_command,
-    _validate_clone_two,
+    _validate_clone_two, elapsed_seconds,
 )
 
 
@@ -37,6 +38,15 @@ def test_supported_release_mapping_is_exact():
     assert validate_release("26.7") == "26.7"
     for value in ("25.7", "26.1", "26.7/../../", ""):
         with pytest.raises(ValueError): validate_release(value)
+
+
+@pytest.mark.parametrize("created_at", [
+    datetime(2026, 8, 15, 3, 0, 0),
+    datetime(2026, 8, 15, 3, 0, 0, tzinfo=timezone.utc),
+])
+def test_build_duration_accepts_database_naive_or_aware_utc(created_at):
+    image = type("Image", (), {"created_at": created_at})()
+    assert elapsed_seconds(image) >= 0
 
 
 def test_requested_release_accepts_only_its_patch_train():

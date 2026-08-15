@@ -18,6 +18,7 @@ import secrets
 import shlex
 import socket
 import time
+from datetime import timezone
 from ipaddress import ip_network
 from urllib.parse import urlparse
 
@@ -126,7 +127,10 @@ def image_payload(image: OpnsenseImage) -> dict:
 
 
 def elapsed_seconds(image: OpnsenseImage) -> int:
-    return max(0, int((utcnow() - image.created_at).total_seconds()))
+    created_at = image.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return max(0, int((utcnow() - created_at).total_seconds()))
 
 
 def redact_error(exc: Exception) -> str:
