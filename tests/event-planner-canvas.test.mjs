@@ -28,12 +28,16 @@ test('visual address annotations are constrained while short values remain exact
 });
 
 test('zones and VMs receive distinct address text presentation', () => {
-  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'zone', annotation: '10.0.0.0/24'}), {
+  const rail = {
     className: 'zone-address-rail', prefix: 'Range · ', value: '10.0.0.0/24', x: 0, y: 36, height: 24,
-  });
-  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'vm', annotation: '10.0.0.10'}), {
+  };
+  const machine = {
     className: 'machine-label topo-node-address', text: '10.0.0.10', x: 0, y: 46,
-  });
+  };
+  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'zone', annotation: '10.0.0.0/24'}), rail);
+  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'firewall-zone', annotation: '10.0.0.0/24'}), rail);
+  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'vm', annotation: '10.0.0.10'}), machine);
+  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'firewall', annotation: '10.0.0.10'}), machine);
   assert.equal(canvas.topologyAnnotationPresentation({type: 'site', annotation: 'ignored'}), null);
   assert.equal(canvas.topologyAnnotationPresentation({type: 'vm', annotation: null}), null);
 });
@@ -46,6 +50,8 @@ test('annotated VM bounds contain the address baseline without enlarging plain V
   assert.deepEqual(canvas.machineBounds(annotated), {x: 60, y: 170, width: 80, height: 84});
   assert.deepEqual(canvas.machineBounds(plain), {x: 60, y: 170, width: 80, height: 72});
   assert.equal(annotated.y + address.y < canvas.machineBounds(annotated).y + canvas.machineBounds(annotated).height, true);
+  assert.equal(canvas.machineBounds({type: 'firewall', annotation: '10.0.0.1', x: 100, y: 200}).height, 84);
+  assert.equal(canvas.machineBounds({type: 'firewall', annotation: null, x: 100, y: 200}).height, 72);
 });
 
 test('machine nodes use icon-first presentation while structural nodes retain cards', () => {
@@ -179,7 +185,7 @@ test('subnet rail expands workload zone geometry and shifts arranged VMs below i
 
   assert.equal(canvas.zoneHeaderHeight(annotated), 60);
   assert.equal(canvas.zoneHeaderHeight(plain), 36);
-  assert.equal(canvas.zoneHeaderHeight(firewall), 36);
+  assert.equal(canvas.zoneHeaderHeight(firewall), 60);
   assert.deepEqual(canvas.calculateZoneBounds(annotated, []), {
     x: 100, y: 200, width: 280, height: 214, headerHeight: 60,
   });
@@ -188,6 +194,9 @@ test('subnet rail expands workload zone geometry and shifts arranged VMs below i
     canvas.constrainMachinePosition({x: 80, y: 210}, canvas.calculateZoneBounds(annotated, [])),
     {x: 160, y: 316},
   );
+  assert.deepEqual(canvas.arrangeZoneChildren(firewall, [
+    {id: 'primary', type: 'firewall', annotation: '10.0.0.1'},
+  ]).primary, {x: 160, y: 316});
 });
 
 test('zone arrangement packs children deterministically and translation is atomic', () => {

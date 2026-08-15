@@ -11,14 +11,14 @@ export function topologyAccessibleLabel(node) {
 
 export function topologyAnnotationPresentation(node) {
   if (typeof node?.annotation !== 'string' || node.annotation === '') return null;
-  if (node.type === 'zone') {
+  if (['zone', 'firewall-zone'].includes(node.type)) {
     return {
       className: 'zone-address-rail', prefix: 'Range · ', value: truncatedAnnotation(node.annotation, 38),
       x: 0, y: ZONE_CONTAINER_GEOMETRY.baseHeaderHeight,
       height: ZONE_CONTAINER_GEOMETRY.addressRailHeight,
     };
   }
-  if (node.type === 'vm') {
+  if (['vm', 'firewall'].includes(node.type)) {
     return {className: 'machine-label topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 46};
   }
   return null;
@@ -68,7 +68,7 @@ export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
 
 export function machineBounds(node) {
   const width = ZONE_CONTAINER_GEOMETRY.machineWidth;
-  const annotated = node?.type === 'vm' && typeof node.annotation === 'string' && node.annotation !== '';
+  const annotated = ['vm', 'firewall'].includes(node?.type) && typeof node.annotation === 'string' && node.annotation !== '';
   return {
     x: (node?.x ?? 0) - width / 2,
     y: (node?.y ?? 0) + ZONE_CONTAINER_GEOMETRY.machineTop,
@@ -79,7 +79,7 @@ export function machineBounds(node) {
 
 export function zoneHeaderHeight(zone) {
   return ZONE_CONTAINER_GEOMETRY.baseHeaderHeight
-    + (zone?.type === 'zone' && typeof zone.annotation === 'string' && nodeHasAnnotation(zone)
+    + (['zone', 'firewall-zone'].includes(zone?.type) && typeof zone.annotation === 'string' && nodeHasAnnotation(zone)
       ? ZONE_CONTAINER_GEOMETRY.addressRailHeight : 0);
 }
 

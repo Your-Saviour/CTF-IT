@@ -1086,7 +1086,10 @@ def test_gamenet_ignores_display_only_address_annotations_when_allocating_vm_ips
     from builder.infrastructure_planner import normalize_infrastructure
 
     infrastructure = deepcopy(INFRASTRUCTURE)
-    zone = infrastructure["sites"][0]["zones"][0]
+    site_spec = infrastructure["sites"][0]
+    site_spec["firewall_zone_address_range"] = "display-firewall-range/{{team_id}}"
+    site_spec["firewall"]["address"] = "not-a-firewall-ip"
+    zone = site_spec["zones"][0]
     zone["address_range"] = "display-only/{{team_id}}"
     zone["endpoints"][0]["address"] = "not-an-ip"
     infrastructure = normalize_infrastructure(infrastructure)
@@ -1097,8 +1100,13 @@ def test_gamenet_ignores_display_only_address_annotations_when_allocating_vm_ips
 
     placeholders = ensure_vm_placeholders(db_session, event, infrastructure)
     endpoints = [vm for vm in placeholders if vm.role == "blue_endpoint"]
+    firewall = next(vm for vm in placeholders if vm.role == "site_firewall")
+    site = db_session.query(Site).one()
 
-    assert db_session.query(Site).one().zones[0].subnet == "10.128.1.0/24"
+    assert site.allocated_cidr == "10.128.0.0/20"
+    assert site.zones[0].subnet == "10.128.1.0/24"
+    assert firewall.private_ip is None
+    assert firewall.ip_address is None
     assert [vm.private_ip for vm in endpoints] == ["10.128.1.10", "10.128.1.11"]
     assert all(vm.private_ip != "not-an-ip" for vm in endpoints)
 
