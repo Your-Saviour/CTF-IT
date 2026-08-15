@@ -3,7 +3,15 @@ export const slugify = value => String(value || '').toLowerCase().trim().replace
 const SLUG = /^[a-z][a-z0-9_]{0,63}$/;
 
 export function normalizeClientInfrastructure(value) {
-  const result = clone(value);
+  const result = clone(value || {
+    vpn_gateway: {
+      base_type: 'ubuntu_24_server',
+      default_plan: 'vc2-1c-1gb',
+      region: 'ewr',
+      listen_port: 51820,
+    },
+    sites: [],
+  });
   for (const site of result.sites || []) for (const zone of site.zones || []) {
     const reserved = new Set((zone.endpoints || []).filter(row => row.count == null).map(row => row.key));
     const generated = new Set(), rows = [];
