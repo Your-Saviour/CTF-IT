@@ -6,6 +6,69 @@ export function topologyLinkClass(link) {
   return `topo-link${link.source.selected || link.target.selected ? ' selected-adjacent' : ''}`;
 }
 
+const ROOT_X = 120;
+const ROOT_Y = 70;
+const HORIZONTAL_GAP = 190;
+const VERTICAL_GAP = 110;
+const NODE_WIDTH = 140;
+const NODE_HEIGHT = 48;
+const COLLISION_PADDING = 24;
+
+function balancedSlot(index) {
+  if (index === 0) return 0;
+  const distance = Math.ceil(index / 2);
+  return index % 2 ? distance : -distance;
+}
+
+export function calculateHierarchicalLayout(graph, savedLayout = {version: 1, nodes: {}}) {
+  const byId = new Map(graph.map(node => [node.id, node]));
+  const siblingIndex = new Map();
+  const siblingCounts = new Map();
+  for (const node of graph) {
+    const parent = node.parent && byId.has(node.parent) ? node.parent : null;
+    const count = siblingCounts.get(parent) || 0;
+    siblingIndex.set(node.id, count);
+    siblingCounts.set(parent, count + 1);
+  }
+
+  const nodes = {};
+  for (const node of graph) {
+    const saved = savedLayout?.nodes?.[node.id];
+    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) nodes[node.id] = {x: saved.x, y: saved.y};
+  }
+  const occupied = () => Object.values(nodes);
+  const overlaps = candidate => occupied().some(position =>
+    Math.abs(position.x - candidate.x) < NODE_WIDTH + COLLISION_PADDING
+    && Math.abs(position.y - candidate.y) < NODE_HEIGHT + COLLISION_PADDING
+  );
+  let added = false;
+
+  function place(node) {
+    if (nodes[node.id]) return nodes[node.id];
+    const parent = node.parent ? byId.get(node.parent) : null;
+    const parentPosition = parent ? place(parent) : null;
+    const preferred = siblingIndex.get(node.id) || 0;
+    const candidates = [preferred];
+    for (let index = 0; candidates.length < graph.length * 2 + 4; index++) {
+      if (!candidates.includes(index)) candidates.push(index);
+    }
+    let position;
+    for (const index of candidates) {
+      position = {
+        x: (parentPosition?.x ?? ROOT_X) + balancedSlot(index) * HORIZONTAL_GAP,
+        y: parentPosition ? parentPosition.y + VERTICAL_GAP : ROOT_Y,
+      };
+      if (!overlaps(position)) break;
+    }
+    nodes[node.id] = position;
+    added = true;
+    return position;
+  }
+
+  graph.forEach(place);
+  return {version: 1, nodes, added};
+}
+
 export function createPlannerCanvas(svgElement, callbacks = {}) {
   const svg = d3.select(svgElement);
   const scene = svg.append('g');
