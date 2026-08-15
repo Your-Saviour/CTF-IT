@@ -514,9 +514,8 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
         "rm -f /tmp/ctf-site-config.xml", "echo ready > /conf/ctf-site-ready",
     ]) + "\n"
     upload_text(vm, "/tmp/ctf-apply.sh", apply_script, mode=0o700)
-    code, _, error = ssh_command(
-        vm, "nohup /bin/sh /tmp/ctf-apply.sh >/tmp/ctf-apply.log 2>&1 </dev/null &", timeout=30
-    )
+    launch = "nohup /bin/sh /tmp/ctf-apply.sh >/tmp/ctf-apply.log 2>&1 </dev/null &"
+    code, _, error = ssh_command(vm, "/bin/sh -c " + shlex.quote(launch), timeout=30)
     if code:
         raise GameNetProviderError(f"failed to launch snapshot configuration: {error[:300]}")
     deadline = time.monotonic() + 600

@@ -1,6 +1,7 @@
 import json
 import asyncio
 from ipaddress import ip_network
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,6 +46,12 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
     assert "pass in quick on vtnet1 inet from (vtnet1:network) to any" in command
     assert "nat on" in command and "from 192.0.2.8 to" in command
     assert "Allow management SSH" not in command
+
+
+def test_snapshot_site_apply_uses_posix_shell_for_opnsense_root():
+    source = Path("api/services/gamenet_provider.py").read_text()
+    assert 'ssh_command(vm, "/bin/sh -c " + shlex.quote(launch)' in source
+    assert 'launch = "nohup /bin/sh /tmp/ctf-apply.sh' in source
 
 
 @pytest.fixture
