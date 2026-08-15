@@ -94,10 +94,10 @@ def _active_admin_count(db: Session) -> int:
 
 def _run_image_job(image_id: int, operation: str):
     from api.database import SessionLocal
-    from api.services.opnsense_images import complete_install, sync_to_awaiting_install
+    from api.services.opnsense_images import run_image_build
     session = SessionLocal()
     try:
-        (complete_install if operation == "complete" else sync_to_awaiting_install)(session, image_id)
+        run_image_build(session, image_id)
     finally:
         session.close()
 
@@ -108,26 +108,8 @@ async def list_opnsense_images(request: Request, db: Session = Depends(get_db)):
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
     from api.services.opnsense_images import image_payload
-    domain = os.environ.get("DOMAIN", "")
     rows = db.query(OpnsenseImage).order_by(OpnsenseImage.created_at.desc()).all()
-    result = []
-    for row in rows:
-        payload = image_payload(row)
-        payload["console_url"] = (f"https://my.vultr.com/subs/?SUBID={row.builder_instance_id}" if row.builder_instance_id else None)
-        payload["builder_config_url"] = (f"https://ctf.{domain}/opnsense-builder-config/{row.builder_config_token}/setup.php"
-                                         if row.builder_config_token and domain else None)
-        payload["instructions"] = ("In the live console, assign interfaces once: no VLANs, leave LAN blank, and assign "
-                                   "the only VirtIO NIC to WAN using DHCP. From the root shell, fetch the generated "
-                                   "setup URL to /tmp/ctf-builder.php, run it with /usr/local/bin/php, confirm it "
-                                   "reports a WAN-only builder, and immediately run opnsense-installer from that same "
-                                   "shell. Install to the VM disk. Do not "
-                                   "assign a LAN, detach the ISO, reboot, or request a snapshot manually. When the "
-                                   "installer finishes it may automatically reboot back into the attached live ISO; "
-                                   "this is expected. Select Installer complete at the live-mode prompt. The platform "
-                                   "will detach the ISO, perform two installed-disk boot validations, shut down, and "
-                                   "only then snapshot it.")
-        result.append(payload)
-    return result
+    return [image_payload(row) for row in rows]
 
 
 @router.post("/opnsense-images/sync")
@@ -146,22 +128,6 @@ async def sync_opnsense_image(body: OpnsenseSyncRequest, request: Request, backg
     return JSONResponse({"id": image.id, "status": image.status}, status_code=202)
 
 
-@router.post("/opnsense-images/{image_id}/installer-complete")
-async def opnsense_installer_complete(image_id: int, request: Request, background: BackgroundTasks,
-                                      db: Session = Depends(get_db)):
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    image = db.get(OpnsenseImage, image_id)
-    if not image:
-        return JSONResponse({"error": "image not found"}, status_code=404)
-    if image.status != "awaiting_install":
-        return JSONResponse({"error": "image is not awaiting installation"}, status_code=409)
-    _audit(db, admin, "opnsense_installer_complete", image_id=image.id); db.commit()
-    background.add_task(_run_image_job, image.id, "complete")
-    return JSONResponse({"id": image.id, "status": "validating"}, status_code=202)
-
-
 @router.post("/opnsense-images/{image_id}/resume")
 async def resume_opnsense_image(image_id: int, request: Request, background: BackgroundTasks,
                                 db: Session = Depends(get_db)):
@@ -171,11 +137,10 @@ async def resume_opnsense_image(image_id: int, request: Request, background: Bac
     image = db.get(OpnsenseImage, image_id)
     if not image:
         return JSONResponse({"error": "image not found"}, status_code=404)
-    if image.status != "interrupted":
-        return JSONResponse({"error": "only an interrupted job can be resumed"}, status_code=409)
-    operation = "complete" if image.phase in {"validating", "snapshotting"} else "sync"
+    if image.status not in {"interrupted", "failed"}:
+        return JSONResponse({"error": "only an interrupted or failed job can be resumed"}, status_code=409)
     _audit(db, admin, "opnsense_image_resume", image_id=image.id, phase=image.phase); db.commit()
-    background.add_task(_run_image_job, image.id, operation)
+    background.add_task(_run_image_job, image.id, "resume")
     return JSONResponse({"id": image.id, "status": "resuming"}, status_code=202)
 
 
@@ -214,7 +179,7 @@ async def retire_opnsense_image(image_id: int, body: OpnsenseRetireRequest, requ
         return JSONResponse({"error": "artifact deletion requires confirm=true"}, status_code=409)
     if body.delete_artifacts and db.query(VM).filter_by(opnsense_image_id=image.id).first():
         return JSONResponse({"error": "artifacts cannot be deleted while firewall records reference this image"}, status_code=409)
-    if image.status in {"downloading", "verifying", "decompressing", "importing", "validating", "snapshotting"}:
+    if image.status in {"creating_builder", "bootstrapping", "validating", "snapshotting"}:
         return JSONResponse({"error": "a running job cannot be retired"}, status_code=409)
     setting = db.query(PlatformSettings).filter_by(key="active_opnsense_image_id").first()
     if setting and setting.value == str(image.id):

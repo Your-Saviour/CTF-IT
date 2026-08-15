@@ -11,7 +11,6 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - api_data:/app/data
-      - opnsense_iso_data:/var/lib/ctf-opnsense
     env_file: .env
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
@@ -21,13 +20,6 @@ services:
       - VERIFICATION_INTERVAL_SECONDS=${VERIFICATION_INTERVAL_SECONDS:-300}
       - VERIFICATION_VM_CONCURRENCY=${VERIFICATION_VM_CONCURRENCY:-5}
       - VERIFICATION_TIMEOUT_SECONDS=${VERIFICATION_TIMEOUT_SECONDS:-10}
-    restart: unless-stopped
-
-  opnsense-iso:
-    image: nginx:1.27-alpine
-    volumes:
-      - opnsense_iso_data:/srv/opnsense:ro
-      - ./deploy/nginx/opnsense-iso.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   ai-agent:
@@ -72,4 +64,3 @@ services:
 volumes:
   api_data:
   agent_data:
-  opnsense_iso_data:

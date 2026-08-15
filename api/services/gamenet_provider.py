@@ -534,6 +534,82 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
             transport.close()
 
 
+def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_mac: str,
+                                       expected_version: str, control_plane_cidr: str) -> None:
+    """Apply the production site configuration shape to the disposable VPC clone.
+
+    This deliberately uses ``render_opnsense_config`` and the same restore,
+    interface-reconfigure, SSH, and filter sequence as real GameNet firewalls.
+    It has an explicit session/host interface because validation clones are not
+    persisted as user-visible VM or Site records.
+    """
+    from types import SimpleNamespace
+    from api.services.opnsense_images import ImageWorkflowError, _ssh, _upload_atomic
+
+    mapping = "/bin/sh -c " + shlex.quote(
+        "set -eu; wan=$(route -n get default | awk '/interface:/{print $2}'); lan=''; "
+        "for candidate in $(ifconfig -l); do "
+        "mac=$(ifconfig \"$candidate\" 2>/dev/null | awk '/ether/{print tolower($2); exit}'); "
+        f"if [ \"$mac\" = {shlex.quote(lan_mac.lower())} ]; then lan=$candidate; fi; done; "
+        "test -n \"$wan\"; test -n \"$lan\"; test \"$wan\" != \"$lan\"; echo \"$wan $lan\""
+    )
+    code, output, error = _ssh(db, host, mapping)
+    interfaces = output.strip().split()
+    if code or len(interfaces) != 2:
+        raise ImageWorkflowError(f"could not map validation VPC MAC: {(error or output)[:300]}")
+    wan_interface, lan_interface = interfaces
+    _, public_key = get_or_create_platform_keypair(db)
+    password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+    # The /28 network and .1 gateway exactly mirror a minimal GameNet site.
+    site = SimpleNamespace(allocated_cidr="172.31.254.0/28")
+    vm = SimpleNamespace(hostname="opnsense-validation-site")
+    previous_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR")
+    os.environ["CTF_CONTROL_PLANE_CIDR"] = control_plane_cidr
+    try:
+        config = render_opnsense_config(
+            site, vm, public_key, password, temporary_management=True,
+            wan_interface=wan_interface, lan_interface=lan_interface,
+        )
+    finally:
+        if previous_cidr is None:
+            os.environ.pop("CTF_CONTROL_PLANE_CIDR", None)
+        else:
+            os.environ["CTF_CONTROL_PLANE_CIDR"] = previous_cidr
+    _upload_atomic(db, host, "/tmp/ctf-site-config.xml", config.encode())
+    php = ('require_once("config.inc"); require_once("util.inc"); '
+           '$c=\\OPNsense\\Core\\Config::getInstance(); '
+           'if(!$c->restoreBackup("/tmp/ctf-site-config.xml")){exit(1);} $c->forceReload();')
+    commands = "\n".join([
+        "#!/bin/sh", "set -eu", f"/usr/local/bin/php -r {shlex.quote(php)}",
+        "/usr/local/sbin/pluginctl -M",
+        "/usr/local/opnsense/scripts/auth/sync_user.php -u root",
+        "/usr/local/sbin/configctl interface reconfigure lan",
+        "/usr/local/sbin/configctl interface reconfigure wan",
+        "/usr/local/sbin/configctl openssh restart",
+        "/usr/local/sbin/configctl filter reload",
+        "rm -f /tmp/ctf-site-config.xml", "echo ready > /conf/ctf-site-ready", "",
+    ])
+    _upload_atomic(db, host, "/tmp/ctf-apply.sh", commands.encode(), 0o700)
+    code, _, error = _ssh(db, host, "nohup /bin/sh /tmp/ctf-apply.sh >/tmp/ctf-apply.log 2>&1 </dev/null &", timeout=30)
+    if code:
+        raise ImageWorkflowError(f"failed to launch validation site configuration: {error[:300]}")
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        try:
+            code, output, error = _ssh(
+                db, host,
+                f"test -f /conf/ctf-site-ready && test \"$(opnsense-version -v)\" = {shlex.quote(expected_version)} && "
+                f"ifconfig {shlex.quote(lan_interface)} | grep -F {shlex.quote('inet ' + private_ip)} >/dev/null",
+                retry=False,
+            )
+            if code == 0:
+                return
+        except Exception:
+            pass
+        time.sleep(POLL_SECONDS)
+    raise ImageWorkflowError("validation site configuration did not become ready")
+
+
 def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
                            *, temporary_management: bool, wan_interface: str = "vtnet0",
                            lan_interface: str = "vtnet1") -> str:

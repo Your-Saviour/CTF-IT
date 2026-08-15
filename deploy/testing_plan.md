@@ -34,12 +34,11 @@ Do not run this procedure as part of ordinary unit tests.
 
 ## Event exercise
 
-Before creating the event, build the intended OPNsense release under **Admin →
-Settings → OPNsense images**. In the one-NIC live builder, leave LAN blank and
-assign the sole VirtIO NIC as DHCP WAN. Load the generated WAN-only
-configuration **before** running `opnsense-installer`, leave the completed
-installer running, mark it complete in the platform, and activate the snapshot
-only after both installed-disk boots and both disposable clone checks pass.
+Before creating the event, build OPNsense 26.7 under **Admin → Settings →
+OPNsense images**. No console action is required. Confirm the automated
+FreeBSD 15.1 conversion records its bootstrap SHA-256, performs two complete
+disk-boot validations before any snapshot exists, and passes both disposable
+clone checks. Review the recorded validation results before activation.
 
 Record the total build duration. Then create one GameNet event with at least
 one team and its site endpoints.
@@ -54,8 +53,8 @@ Verify:
 6. Provisioning status and errors are visible in the admin UI.
 7. `deface_website`, `install_c2`, and `exfil_shadow` can each transition from pending to achieved and then defended.
 8. Every site firewall records the activated OPNsense release and snapshot ID,
-   has a distinct SSH host key, and reaches active state without invoking the
-   legacy `opnsense-bootstrap` conversion.
+   has a distinct SSH host key, and reaches active state without performing a
+   per-firewall FreeBSD conversion.
 9. Each snapshot clone starts with WAN only. The site VPC is attached only
    after WAN validation, its Vultr-reported MAC maps to the configured LAN
    interface, and the WAN interface retains the public address/default route.

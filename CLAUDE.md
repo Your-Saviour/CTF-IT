@@ -43,7 +43,6 @@ See `.env.example` for full documentation. Key variables:
 - `SEMAPHORE_URL` / `SEMAPHORE_ADMIN` / `SEMAPHORE_ADMIN_PASSWORD` — Ansible Semaphore connection (internal service; defaults work with docker-compose stack)
 - `VULTR_API_KEY` / `VULTR_DEFAULT_REGION` — Vultr cloud provisioning (optional; enables VM create/destroy from admin UI)
 - `CTF_CONTROL_PLANE_CIDR` — required IPv4 CIDR for temporary OPNsense builder SSH access
-- `OPNSENSE_MIRROR_BASE` / `OPNSENSE_ISO_DIR` — official release mirror and shared temporary image volume
 - `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_DOMAIN` — Cloudflare DNS (optional; auto-creates DNS A records for provisioned VMs)
 - `AGENT_API_KEY` — shared key for CTF API ↔ AI agent communication (required for agent service)
 - `AI_API_BASE` / `AI_API_KEY` / `AI_MODEL` — OpenAI-compatible API for AI agent (required for agent service)
@@ -271,18 +270,16 @@ When `VULTR_API_KEY` is set, admins can create and destroy Vultr VPS instances d
 
 New GameNet site firewalls are created from an explicitly activated Vultr
 snapshot. `api/services/opnsense_images.py` owns the resumable lifecycle:
-official-mirror download, checksum/signature verification, decompression,
-temporary Nginx hosting, Vultr ISO import, interactive builder gate, validation,
-sanitization, snapshot/test deployment, activation, and cleanup. Persistent
+Vultr FreeBSD 15 resolution, official bootstrap download and SHA recording,
+unattended conversion, two disk-boot gates, sanitization, snapshot/clone
+validation, activation, and cleanup. Persistent
 state lives in `OpnsenseImage`; `PlatformSettings.active_opnsense_image_id`
 selects the sole active image, and each firewall stores its image release and
 snapshot provenance. API restart converts running image phases to
 `interrupted`; administrators resume explicitly from `/admin/settings`.
 
-The API and `opnsense-iso` sidecar share the OPNsense volume read-write and
-read-only respectively. Traefik routes only the random `/vultr-iso/` path to
-Nginx at higher priority. `CTF_CONTROL_PLANE_CIDR` is validated before creating
-temporary Vultr firewall resources. Cleanup failure after validation leaves the
+There is no ISO sidecar or console installation. `CTF_CONTROL_PLANE_CIDR` is
+validated before creating temporary Vultr firewall resources. Cleanup failure after validation leaves the
 image `ready`, preserves remaining Vultr IDs, and records an audit warning.
 
 ### VM Quota System

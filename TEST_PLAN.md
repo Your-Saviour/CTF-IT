@@ -60,6 +60,14 @@ Automated tests should mock external systems at their client boundaries:
 - SSH: command execution for service/file goal verification;
 - Cloudflare: DNS creation and removal.
 
+The managed-image tests additionally cover the 26.7/FreeBSD 15 mapping,
+pre-mutation CIDR and Vultr availability gates, official bootstrap URL and hash
+recording, WAN-only/key-only golden configuration, interrupted conversion
+resume, two builder boots, snapshot blocking, both disposable clone paths,
+VPC MAC-based LAN configuration, unique host keys, and cleanup failures after
+readiness. No new image test may import or attach installation media, add a
+builder VPC, or expose a manual installation-completion action.
+
 Provisioning tests must verify the complete state machine, including failures and retries:
 
 1. Event start creates team VPCs when a firewall role is configured.

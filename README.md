@@ -98,16 +98,13 @@ GameNet firewall provisioning also requires a managed OPNsense snapshot:
 ```bash
 CTF_CONTROL_PLANE_CIDR=203.0.113.10/32  # Public source CIDR allowed to SSH to the temporary builder
 GAMENET_FIREWALL_PLAN=vc2-2c-4gb       # Builder and firewall baseline
-OPNSENSE_MIRROR_BASE=https://pkg.opnsense.org/releases/mirror/
 ```
 
 `CTF_CONTROL_PLANE_CIDR` must be an IPv4 CIDR and should be restricted to the
 deployment host or management network. The image workflow refuses to create a
-Vultr firewall group when this value is missing or invalid. The production
-Compose stack mounts a persistent image volume into the API and exposes only a
-random, temporary ISO path through a read-only Nginx sidecar. Allow roughly
-3 GB of free space for the compressed image, decompressed ISO, and atomic
-temporary files.
+Vultr resource when this value is missing or invalid. The build downloads the
+bootstrap source directly from the official OPNsense update repository and
+records its SHA-256; it does not host or attach installation media.
 
 The root `.env` configures API secrets and integrations. The production stack
 uses its dedicated PostgreSQL service; root `DATABASE_URL` is only used by the
@@ -487,40 +484,31 @@ are allocated.
 
 Build and activate an image from **Admin → Settings → OPNsense images**:
 
-1. Enter a major release such as `26.7` and select **Sync release**. The API
-   downloads only from `OPNSENSE_MIRROR_BASE`, verifies the published SHA-256,
-   decompresses the ISO, and verifies its signature against the reviewed
-   release public key in the repository.
-2. Wait for `awaiting_install` and open the Vultr console. In the live system,
-   use interface assignment once: no VLANs, leave LAN blank, and assign the
-   builder's only VirtIO NIC as WAN using DHCP.
-3. Before installing, fetch the displayed one-time setup URL to
-   `/tmp/ctf-builder.php` and run it with `/usr/local/bin/php`. The script uses
-   OPNsense's `write_config()` API to create a WAN-only, key-only golden
-   configuration and a management rule limited to `CTF_CONTROL_PLANE_CIDR`.
-   It contains no reusable password and deliberately has no LAN or VPC state.
-   From the same root shell, run `opnsense-installer` so the configured live
-   system is cloned to disk. Do not detach the ISO or reboot manually.
-4. When installation finishes, OPNsense 26.7 may automatically reboot back into
-   the still-attached live ISO; this is expected. Leave the VM at that live-mode
-   prompt and select **Installer complete**. Vultr's ISO-detach operation itself
-   reboots the VM; the platform waits for both confirmed detachment and running
-   power state, boots from the writable installed disk, and performs the full
-   validation. Because custom-installed Vultr instances can remain powered off
-   after a reboot, the platform requests a clean OPNsense shutdown with
-   `configctl system halt`, confirms `power_status=stopped`, explicitly starts
-   the VM, and proves a changed boot identity before repeating validation. It
-   then removes persistent
-   host keys from `/conf/sshd`, shuts down cleanly, confirms the VM is stopped,
-   creates the snapshot, and validates two disposable clones with distinct SSH
-   host keys. Any failed check blocks snapshot creation and leaves the builder
-   available for diagnosis.
-5. When the image is `ready`, select **Activate**. Activation is explicit and
-   affects only newly created firewalls. Existing firewalls are unchanged.
+1. Enter `26.7` and select **Build image**. Before creating resources, the API
+   validates the control-plane CIDR, the `vc2-2c-4gb` plan in the selected
+   region, account access, and Vultr's `FreeBSD 15 x64` image.
+2. The platform creates a one-NIC FreeBSD builder with no VPC, confirms amd64
+   FreeBSD 15.1 compatibility, uploads the official `opnsense-bootstrap`
+   atomically, records its source URL and SHA-256, and runs it unattended. The
+   supported bootstrap reboots into OPNsense automatically.
+3. A WAN-DHCP golden configuration permits key-only SSH from
+   `CTF_CONTROL_PLANE_CIDR` and contains no LAN, VPC, site, DNS-zone, NAT,
+   WireGuard, or event state. The platform validates the installed disk, halts,
+   explicitly restarts the builder, proves a changed boot identity, and repeats
+   every validation before snapshot creation.
+4. After sanitization and a clean halt, the platform snapshots the stopped
+   builder. One disposable clone proves WAN-only startup and regenerated SSH
+   host keys. A second clone receives a temporary VPC and exercises the same
+   MAC-based site configuration used by real GameNet firewalls. Builder and
+   clone host keys must all differ.
+5. When the image is `ready`, review the recorded gates and select **Activate**.
+   Activation affects only newly created firewalls; existing firewalls are
+   unchanged.
 
 Only one image job and one active image are permitted. If the API restarts
-during a phase, the job becomes `interrupted` and must be resumed from the
-settings page. A validated snapshot remains `ready` if temporary builder
+during a phase, the job becomes `interrupted` and can be resumed from the
+settings page. Resume inspects whether the guest is stock FreeBSD, converting,
+or already OPNsense and never launches a second conversion. A validated snapshot remains `ready` if temporary builder
 cleanup encounters a Vultr error; the warning and remaining artifact IDs are
 retained for later cleanup instead of invalidating the snapshot. Retiring an
 image deactivates it. Destructive artifact removal requires confirmation and
@@ -532,16 +520,15 @@ restore. A clone first boots and validates with WAN only; the site VPC is then
 attached, and its Vultr-reported MAC is mapped to the guest interface before
 LAN configuration is generated. Provisioning rejects duplicate SSH host keys.
 The temporary builder management rule is replaced when the per-site
-configuration is applied. After ISO detachment, installer completion validates
-the effective interface mapping, public address, default route, key
-authentication, SSH settings, PF rule, build nonce, and installed media across
-two installed-disk boots and on both snapshot test deployments. Snapshot
-creation remains blocked until all builder checks pass.
+configuration is applied. The pipeline validates effective interface mapping,
+public address, default route, key authentication, SSH settings, PF rule,
+provenance marker, writable installation, and release across two disk boots and
+both snapshot deployments. Snapshot creation remains blocked until both builder
+checks pass.
 
-The workflow is aligned with the upstream [OPNsense installation
-guidance](https://docs.opnsense.org/manual/install.html), the OPNsense 26.7
+The workflow follows the upstream [OPNsense FreeBSD conversion
+guidance](https://docs.opnsense.org/relations/freebsd.html), the OPNsense 26.7
 [`openssh` implementation](https://github.com/opnsense/core/blob/stable/26.7/src/etc/inc/plugins.inc.d/openssh.inc),
-Vultr's documented [custom ISO detach behavior](https://docs.vultr.com/how-to-upload-and-use-custom-isos-on-vultr),
 [post-creation VPC attachment
 API](https://docs.vultr.com/products/compute/cloud-compute/networking/vpc) and
 [clean-shutdown snapshot guidance](https://docs.vultr.com/vultr-marketplace).

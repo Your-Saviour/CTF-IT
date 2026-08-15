@@ -172,7 +172,6 @@ services:
       - ./caldera/config/local.yml:/caldera-config/local.yml
       # Shared playbooks: API writes playbook files here; Semaphore reads them
       - ctf-shared_playbooks:/shared/playbooks
-      - ctf-opnsense_iso:/var/lib/ctf-opnsense
     env_file: ../.env
     environment:
       - DATABASE_URL=postgresql+psycopg://ctf:${CTF_POSTGRES_PASSWORD}@api-postgres:5432/ctf
@@ -215,22 +214,6 @@ services:
         condition: service_healthy
       caldera:
         condition: service_healthy
-
-  opnsense-iso:
-    image: nginx:1.27-alpine
-    container_name: ctf-opnsense-iso
-    restart: unless-stopped
-    volumes:
-      - ctf-opnsense_iso:/srv/opnsense:ro
-      - ./nginx/opnsense-iso.conf:/etc/nginx/conf.d/default.conf:ro
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ctf-opnsense-iso.rule=Host(`ctf.${DOMAIN}`) && PathPrefix(`/vultr-iso/`)"
-      - "traefik.http.routers.ctf-opnsense-iso.priority=200"
-      - "traefik.http.routers.ctf-opnsense-iso.entrypoints=websecure"
-      - "traefik.http.routers.ctf-opnsense-iso.tls.certresolver=letsencrypt"
-      - "traefik.http.services.ctf-opnsense-iso.loadbalancer.server.port=8080"
-    networks: [ctf-proxy]
 
   # ─── MITRE Caldera — Adversary Emulation ───────────────────────────────────
   caldera:
@@ -383,7 +366,6 @@ volumes:
   ctf-semaphore_data:
   ctf-shared_playbooks:
   ctf-ai-agent_data:
-  ctf-opnsense_iso:
 
 networks:
   ctf-proxy:
