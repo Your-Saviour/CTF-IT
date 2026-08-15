@@ -116,3 +116,15 @@ def test_planner_recovers_catalogues_and_guards_read_only_mutations():
     assert "document.querySelector('.planner-add-actions').hidden=READ_ONLY" in source
     assert "return pruneLayout(state)" in source
     assert "if(name==='listen_port')value=Number(value)" in source
+
+
+def test_planner_renders_system_firewall_zone_as_workload_route_parent():
+    source = CONTROLLER.read_text()
+
+    assert "normalizeClientLayout" in source
+    assert "node.visualParent||node.parent" in source
+    assert "node.type==='firewall-zone'" in source
+    assert "System managed" in source
+    assert "Automatically allocated" in source
+    assert "['site','firewall-zone','firewall','zone','vm']" in source
+    assert "['zone','vm']" in source

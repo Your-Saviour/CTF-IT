@@ -50,7 +50,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     let groups = scene.selectAll('g.topo-node')
       .data(nodes, d => d.id)
       .join('g')
-      .attr('class', d => `topo-node ${d.selected ? 'selected' : ''}`)
+      .attr('class', d => `topo-node ${d.type} ${d.selected ? 'selected' : ''}`)
       .attr('data-node-id', d => d.id)
       .attr('role', 'button')
       .attr('tabindex', 0)

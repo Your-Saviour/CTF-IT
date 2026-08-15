@@ -35,7 +35,7 @@ export function nodeIndex(infrastructure) {
   (infrastructure.sites || []).forEach((site, si) => {
     const sid = `site:${site.key}`;
     const firewallZoneId = `firewall-zone:${site.key}`;
-    map.set(sid, {type: 'site', value: site, parent: 'gateway', path: `sites[${si}]`});
+    map.set(sid, {type: 'site', value: site, parent: 'gateway', path: `sites[${si}]`, site});
     map.set(firewallZoneId, {
       type: 'firewall-zone', value: site, parent: sid, visualParent: sid,
       path: `sites[${si}]`, site,
