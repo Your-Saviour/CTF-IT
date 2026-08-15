@@ -192,3 +192,21 @@ test('machine movement keeps fixed zone edges and permits right-bottom expansion
   assert.deepEqual(canvas.constrainMachinePosition({x: 80, y: 210}, bounds), {x: 160, y: 292});
   assert.deepEqual(canvas.constrainMachinePosition({x: 500, y: 500}, bounds), {x: 500, y: 500});
 });
+
+test('hierarchical layout migrates legacy machine centres inside zone frames', () => {
+  const graph = [
+    {id: 'zone:a/blue', type: 'zone', parent: null},
+    {id: 'vm:a/blue/web', type: 'vm', parent: 'zone:a/blue'},
+  ];
+  const result = canvas.calculateHierarchicalLayout(graph, {
+    version: 1,
+    nodes: {
+      'zone:a/blue': {x: 120, y: 290},
+      'vm:a/blue/web': {x: 120, y: 400},
+    },
+  });
+
+  assert.deepEqual(result.nodes['zone:a/blue'], {x: 120, y: 290});
+  assert.deepEqual(result.nodes['vm:a/blue/web'], {x: 180, y: 400});
+  assert.equal(result.added, true);
+});

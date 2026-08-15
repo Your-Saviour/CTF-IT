@@ -184,6 +184,19 @@ export function calculateHierarchicalLayout(graph, savedLayout = {version: 1, no
   }
 
   graph.forEach(place);
+  for (const node of graph) {
+    const parent = byId.get(node.parent);
+    if (!isZoneContainer(parent) || !['vm', 'firewall'].includes(node.type)) continue;
+    const constrained = constrainMachinePosition(nodes[node.id], {
+      ...nodes[parent.id],
+      width: ZONE_CONTAINER_GEOMETRY.minWidth,
+      height: ZONE_CONTAINER_GEOMETRY.minHeight,
+    });
+    if (constrained.x !== nodes[node.id].x || constrained.y !== nodes[node.id].y) {
+      nodes[node.id] = constrained;
+      added = true;
+    }
+  }
   return {version: 1, nodes, added};
 }
 
