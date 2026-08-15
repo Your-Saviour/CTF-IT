@@ -433,9 +433,9 @@ def validate_snapshot_wan(vm: VM, expected_version: str) -> None:
         "test \"$#\" -eq 1; test \"$1\" = \"$wan_if\"; "
         + _opnsense_release_test(expected_version) + "; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
-        "/usr/local/sbin/sshd -T | grep -q '^permitrootlogin yes$'; "
-        "/usr/local/sbin/sshd -T | grep -q '^pubkeyauthentication yes$'; "
-        "/usr/local/sbin/sshd -T | grep -q '^passwordauthentication no$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^pubkeyauthentication yes$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^passwordauthentication no$'; "
         "pfctl -sr | grep -E 'port = (ssh|22)' >/dev/null"
     )
     code, output, error = ssh_command(vm, command, timeout=120, connect_timeout=CREATE_TIMEOUT)

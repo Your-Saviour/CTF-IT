@@ -106,6 +106,7 @@ def test_validation_command_checks_release_disk_network_ssh_and_pf():
                      "route -n get default", "passwordauthentication no",
                      "kbdinteractiveauthentication no", "pfctl -sr", "192.0.2.8"):
         assert expected in command
+    assert command.count("grep -qi") == 4
 
 
 def test_remote_commands_explicitly_select_posix_shell_for_opnsense_root():

@@ -437,10 +437,10 @@ def builder_validation_command(*, public_ip: str, version: str, cidr: str,
         f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
         "test -s /root/.ssh/authorized_keys; "
-        "/usr/local/sbin/sshd -T | grep -q '^permitrootlogin yes$'; "
-        "/usr/local/sbin/sshd -T | grep -q '^pubkeyauthentication yes$'; "
-        "/usr/local/sbin/sshd -T | grep -q '^passwordauthentication no$'; "
-        "/usr/local/sbin/sshd -T | grep -q '^kbdinteractiveauthentication no$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^pubkeyauthentication yes$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^passwordauthentication no$'; "
+        "/usr/local/sbin/sshd -T | grep -qi '^kbdinteractiveauthentication no$'; "
         f"pfctl -sr | grep -F {shlex.quote('from ' + source + ' to')} | grep -E 'port = (ssh|22)' >/dev/null"
     )
 
