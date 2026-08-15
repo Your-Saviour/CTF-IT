@@ -56,6 +56,18 @@ export function arrangeZoneChildren(zone, children) {
   }]));
 }
 
+export function arrangedZoneLayout(graph, layout, zoneId) {
+  const zone = graph.find(node => node.id === zoneId);
+  if (!isZoneContainer(zone)) return structuredClone(layout);
+  const positionedZone = {...zone, ...layout.nodes?.[zoneId]};
+  if (!Number.isFinite(positionedZone.x) || !Number.isFinite(positionedZone.y)) return structuredClone(layout);
+  const children = zoneChildren(graph, zoneId);
+  const arranged = arrangeZoneChildren(positionedZone, children);
+  const nodes = structuredClone(layout.nodes || {});
+  for (const [id, position] of Object.entries(arranged)) nodes[id] = position;
+  return {version: 1, nodes};
+}
+
 export function translateZoneLayout(layout, zoneId, childIds, dx, dy) {
   const nodes = structuredClone(layout?.nodes || {});
   for (const id of [zoneId, ...childIds]) {
@@ -252,7 +264,18 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('role', 'button')
       .attr('tabindex', callbacks.readOnly ? null : 0)
       .attr('aria-label', d => `Arrange VMs in ${d.label}`)
-      .attr('aria-disabled', callbacks.readOnly ? 'true' : null);
+      .attr('aria-disabled', callbacks.readOnly ? 'true' : null)
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        if (!callbacks.readOnly) callbacks.onArrangeZone?.(d.id);
+      })
+      .on('keydown', (event, d) => {
+        if (!callbacks.readOnly && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          event.stopPropagation();
+          callbacks.onArrangeZone?.(d.id);
+        }
+      });
     arrangeControls.append('rect').attr('width', 96).attr('height', 28).attr('rx', 5);
     arrangeControls.append('text').attr('x', 48).attr('y', 18).attr('text-anchor', 'middle').text('Arrange VMs');
 
@@ -412,11 +435,15 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     scene.select(`[data-node-id="${CSS.escape(id)}"]`).node()?.focus();
   }
 
+  function arrangedLayout(zoneId) {
+    return arrangedZoneLayout(graph, currentLayout, zoneId);
+  }
+
   function destroy() {
     pendingLayoutKey = null;
     svg.on('.zoom', null);
     scene.remove();
   }
 
-  return {render, fit, resetLayout, focusNode, destroy};
+  return {render, fit, resetLayout, focusNode, arrangedLayout, destroy};
 }

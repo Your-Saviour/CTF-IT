@@ -130,6 +130,7 @@ def test_planner_recovers_catalogues_and_guards_read_only_mutations():
 
 def test_planner_renders_system_firewall_zone_as_workload_route_parent():
     source = CONTROLLER.read_text()
+    compact = "".join(source.split())
 
     assert "normalizeClientLayout" in source
     assert "node.visualParent||node.parent" in source
@@ -138,6 +139,11 @@ def test_planner_renders_system_firewall_zone_as_workload_route_parent():
     assert "Automatically allocated" in source
     assert "['site','firewall-zone','firewall','zone','vm']" in source
     assert "['zone','vm']" in source
+    assert "systemManaged:node.type==='firewall-zone'" in compact
+    assert "team:node.type==='zone'?node.value.team:null" in compact
+    assert "childCount" in source
+    assert "onArrangeZone" in source
+    assert "state.layout=nextLayout" in compact
 
 
 def test_planner_projects_configurable_base_type_icons_into_machine_nodes():

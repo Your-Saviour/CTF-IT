@@ -168,3 +168,21 @@ test('topology links omit contained machines and target container boundaries', (
   assert.equal(points.x2, 100);
   assert.equal(points.y2 >= 100 && points.y2 <= 290, true);
 });
+
+test('arranged zone layout changes only direct machine children', () => {
+  const graph = [
+    {id: 'zone:a/blue', type: 'zone', x: 100, y: 200},
+    {id: 'vm:a/blue/web', type: 'vm', parent: 'zone:a/blue', x: 900, y: 900},
+    {id: 'firewall-zone:a', type: 'firewall-zone', x: 500, y: 200},
+    {id: 'firewall:a/primary', type: 'firewall', parent: 'firewall-zone:a', x: 900, y: 900},
+  ];
+  const layout = {version: 1, nodes: Object.fromEntries(graph.map(({id, x, y}) => [id, {x, y}]))};
+
+  const workload = canvas.arrangedZoneLayout(graph, layout, 'zone:a/blue');
+  assert.deepEqual(workload.nodes['vm:a/blue/web'], {x: 160, y: 292});
+  assert.deepEqual(workload.nodes['firewall:a/primary'], {x: 900, y: 900});
+
+  const firewall = canvas.arrangedZoneLayout(graph, layout, 'firewall-zone:a');
+  assert.deepEqual(firewall.nodes['firewall:a/primary'], {x: 560, y: 292});
+  assert.deepEqual(canvas.arrangedZoneLayout(graph, layout, 'vm:a/blue/web'), layout);
+});
