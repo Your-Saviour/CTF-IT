@@ -169,20 +169,40 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('height', 72);
     machineGroups.append('circle')
       .attr('class', 'node-state-ring')
-      .attr('cy', -4)
-      .attr('r', 25);
+      .attr('cy', -3)
+      .attr('r', 28);
+    for (let index = 0; index < 3; index++) {
+      const y = -20 + index * 8;
+      machineGroups.append('rect')
+        .attr('class', 'machine-rack')
+        .attr('x', -13)
+        .attr('y', y)
+        .attr('width', 26)
+        .attr('height', 5)
+        .attr('rx', 1.5);
+      machineGroups.append('circle')
+        .attr('class', 'machine-led')
+        .attr('cx', 9)
+        .attr('cy', y + 2.5)
+        .attr('r', 1.4);
+    }
+    machineGroups.append('circle')
+      .attr('class', 'machine-badge')
+      .attr('cx', 15)
+      .attr('cy', 8)
+      .attr('r', 8);
     const icons = machineGroups
       .append('svg')
       .attr('class', 'node-icon')
-      .attr('x', -18)
-      .attr('y', -22)
-      .attr('width', 36)
-      .attr('height', 36)
+      .attr('x', 10)
+      .attr('y', 3)
+      .attr('width', 10)
+      .attr('height', 10)
       .attr('viewBox', d => d.icon?.viewBox || '0 0 24 24')
       .attr('aria-hidden', 'true');
     icons.append('path').attr('d', d => d.icon?.path || '');
     structuralGroups.append('text').attr('class', 'node-label').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
-    machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 32).text(d => d.label);
+    machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 34).text(d => d.label);
 
     if (completed.added && !callbacks.readOnly) {
       const key = JSON.stringify(completed.nodes);

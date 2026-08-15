@@ -24,7 +24,7 @@ Custom paths render inside a nested SVG viewport so their declared view box is r
 
 ## Presentation
 
-Keep the established industrial planner styling, but do not render card backgrounds around machines. The VPN gateway, firewall VM, and workload VMs render as a large standalone base-type icon with the machine name centred below it, following the original topology's icon-first hierarchy. Sites and zones retain their structural cards.
+Keep the established industrial planner styling, but do not render card backgrounds around machines. The VPN gateway, firewall VM, and workload VMs reuse the original topology's composed machine glyph: three outlined server-rack units with LED dots and a small circular base-type icon badge at the lower-right. The machine name is centred below the glyph. Sites and zones retain their structural cards.
 
 Machine nodes retain an invisible interaction target for reliable clicking and dragging. Selected or invalid machines gain a circular cyan or red state ring around the icon; the ring is absent in the normal state. The firewall icon remains amber. Collision bounds, link anchors, and persisted coordinates do not change.
 
