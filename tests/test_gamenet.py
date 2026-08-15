@@ -734,8 +734,8 @@ def test_gamenet_plan_preview_returns_counts_cost_shape_and_addresses(monkeypatc
     assert response["summary"]["gateways"] == 1
     assert response["summary"]["firewalls"] == 1
     assert response["summary"]["endpoints"] == 2
-    assert response["summary"]["estimated_monthly_cost"] == 0
-    assert response["total_cost"] == 0
+    assert response["summary"]["estimated_monthly_cost"] is None
+    assert response["total_cost"] is None
     assert len(response["vm_types"]) == 3
     assert len(response["address_plan"]) == 1
     assert response["address_plan"][0]["zones"][0]["subnet"].endswith("/24")

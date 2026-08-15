@@ -11,6 +11,7 @@ from .session import AwsSessionFactory
 from .compute import AwsComputeProvider, InstanceSpec, NetworkInterfaceSpec
 from .network import AwsNetworkProvider, SecurityGroupSpec, SiteNetworkSpec
 from .images import AwsImageProvider
+from .catalogue import AwsCatalogueService
 from .readiness import AwsReadinessService, ReadinessCheck, ReadinessReport, ResourcePlan
 from .tags import assert_owned, aws_tag_dict, aws_tag_list, ownership_tags
 from .types import (
@@ -24,7 +25,7 @@ from .types import (
 )
 
 __all__ = [
-    "AwsComputeProvider", "AwsConfig", "AwsConfigurationError", "AwsIdentity", "AwsImageProvider", "AwsNetworkProvider", "AwsOwnershipError",
+    "AwsCatalogueService", "AwsComputeProvider", "AwsConfig", "AwsConfigurationError", "AwsIdentity", "AwsImageProvider", "AwsNetworkProvider", "AwsOwnershipError",
     "AwsProviderError", "AwsQuotaError", "AwsRetryableError", "AwsSessionFactory",
     "AwsTerminalError", "AwsReadinessService", "CleanupResult", "ImageResult", "InstanceResult",
     "ElasticIpResult", "InstanceSpec", "NetworkInterfaceResult", "NetworkInterfaceSpec",

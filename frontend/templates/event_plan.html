@@ -267,7 +267,8 @@
     function updateStats(summary) {
         document.getElementById('stat-vms').textContent = summary.total_vms || 0;
         document.getElementById('stat-teams').textContent = summary.teams || 0;
-        document.getElementById('stat-cost').textContent = '$' + (summary.estimated_monthly_cost || 0).toFixed(2);
+        document.getElementById('stat-cost').textContent = summary.estimated_monthly_cost == null
+            ? 'Unavailable' : '$' + summary.estimated_monthly_cost.toFixed(2);
         document.getElementById('stat-modules').textContent = summary.total_modules || 0;
         document.getElementById('stat-attacks').textContent = summary.total_attack_paths || 0;
     }
@@ -977,7 +978,8 @@
     // ── Start event from plan page ────────────────────────────────────────────
     window.startEventFromPlan = async function() {
         const vmCount = previewData ? previewData.summary.total_vms : '?';
-        const cost = previewData ? '$' + previewData.summary.estimated_monthly_cost.toFixed(2) + '/mo' : '';
+        const monthly = previewData?.summary?.estimated_monthly_cost;
+        const cost = monthly == null ? 'Cost unavailable' : '$' + monthly.toFixed(2) + '/mo';
         const msg = `Start event and provision ${vmCount} VMs${cost ? ' (est. ' + cost + ')' : ''}?\n\nThis will begin actual deployment. Continue?`;
         if (!confirm(msg)) return;
 

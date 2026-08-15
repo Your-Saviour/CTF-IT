@@ -48,7 +48,9 @@ def _aws_resource_plan(infrastructure: dict, team_count: int):
 
 
 def _check_aws_readiness(plan):
-    from api.services.aws import AwsConfig, AwsReadinessService, AwsSessionFactory
+    from api.services.aws import (
+        AwsCatalogueService, AwsConfig, AwsReadinessService, AwsSessionFactory,
+    )
     config = AwsConfig.from_env()
     sessions = AwsSessionFactory(config)
     service = AwsReadinessService(
@@ -58,8 +60,24 @@ def _check_aws_readiness(plan):
         ami_ids=tuple(dict.fromkeys((*config.ubuntu_amis.values(), *config.freebsd_amis.values()))),
         vpc_id=config.standard_vpc_id, subnet_id=config.standard_subnet_id,
         security_group_ids=config.standard_security_group_ids,
+        pricing=AwsCatalogueService(
+            sessions.client("ec2"), sessions.client("pricing", "us-east-1"),
+            region=config.default_region,
+            availability_zone=config.availability_zone(config.default_region),
+        ),
     )
     return service.check(plan)
+
+
+def _aws_instance_catalogue():
+    from api.services.aws import AwsCatalogueService, AwsConfig, AwsSessionFactory
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    return AwsCatalogueService(
+        sessions.client("ec2"), sessions.client("pricing", "us-east-1"),
+        region=config.default_region,
+        availability_zone=config.availability_zone(config.default_region),
+    ).catalogue(config.instance_types)
 
 
 def _readiness_payload(report):
@@ -1106,9 +1124,13 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
 
-    # Sizing consumes the approved EC2 catalogue; pricing is optional.
-    available_plans = []
-    plan_costs = {}
+    # Pricing failure is explicitly represented as unavailable; it never
+    # bypasses the independent capacity checks used when an event starts.
+    try:
+        available_plans = await asyncio.to_thread(_aws_instance_catalogue)
+    except Exception:
+        available_plans = []
+    plan_costs = {row["instance_type"]: row["hourly_cost"] for row in available_plans}
 
     team_count = len(teams)
     first_team = teams[0] if teams else None
@@ -1121,7 +1143,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     vm_types = []
     total_modules = 0
     total_attack_paths = 0
-    total_cost = 0.0
+    total_hourly_cost = 0.0 if available_plans else None
 
     machine_types = [{
         "type_key": "vpn_gateway", "role": "infrastructure", "count": 1,
@@ -1167,7 +1189,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                         selected = select_modules(quota, library_list, base_type_id=base_type_id)
                     except ValueError as e:
                         return JSONResponse({"error": str(e)}, status_code=422)
-                    sized_plan = plan_for_vm(base_type, selected, default_plan, available_plans)
+                    sized_plan = plan_for_vm(
+                        base_type, selected, default_plan, available_plans, region=region,
+                    )
                     module_objs = [library[m.id] for m in selected if m.id in library]
                     tree = build_attack_tree(module_objs)
                     serialized_tree = serialize_tree(tree)
@@ -1184,7 +1208,11 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                     serialized_tree = None
                     module_list = []
 
-                total_cost += plan_costs.get(sized_plan, 0)
+                if total_hourly_cost is not None:
+                    if sized_plan not in plan_costs:
+                        total_hourly_cost = None
+                    else:
+                        total_hourly_cost += plan_costs[sized_plan]
 
                 vm_node_id = f"vm-projected-{type_key}-{team.name}-{i + 1}"
                 # Only include first team's VMs in topology (canonical — all teams identical)
@@ -1253,7 +1281,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             **infrastructure_counts,
             "total_vms": infrastructure_counts["vms"],
             "teams": len(teams),
-            "estimated_monthly_cost": round(total_cost, 2),
+            "estimated_monthly_cost": (
+                round(total_hourly_cost * 730, 2) if total_hourly_cost is not None else None
+            ),
             "total_modules": total_modules,
             "total_attack_paths": total_attack_paths,
         },
@@ -1263,7 +1293,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         "warnings": warnings,
         "address_plan": address_plan,
         "infrastructure": infrastructure,
-        "total_cost": round(total_cost, 2),
+        "total_cost": round(total_hourly_cost * 730, 2) if total_hourly_cost is not None else None,
         "aws_resources": {
             "vpcs": _aws_resource_plan(infrastructure, len(teams)).vpcs,
             "subnets": _aws_resource_plan(infrastructure, len(teams)).subnets,
@@ -1272,7 +1302,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             "instances_by_type": dict(_aws_resource_plan(infrastructure, len(teams)).instances_by_type),
         },
         "aws_capacity": None,
-        "estimated_hourly_cost": None,
+        "estimated_hourly_cost": (
+            round(total_hourly_cost, 6) if total_hourly_cost is not None else None
+        ),
     }
 
 

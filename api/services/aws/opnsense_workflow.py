@@ -10,6 +10,7 @@ from .network import AwsNetworkProvider, SecurityGroupSpec, SiteNetworkSpec
 from .session import AwsSessionFactory
 from .tags import ownership_tags
 from .tags import assert_owned, aws_tag_dict
+from .types import ImageResult
 
 
 class AwsOpnsenseWorkflow:
@@ -42,7 +43,14 @@ class AwsOpnsenseWorkflow:
             network_interfaces=tuple(interfaces), tags={**tags, "ImageRole": role},
             key_name=key_name,
         ))
-        self.compute.wait_running(result.instance_id)
+        if result.state in {"stopping", "stopped"} and role == "builder":
+            if result.state == "stopping":
+                self.compute.wait_stopped(result.instance_id)
+            result = replace(result, state="stopped")
+        else:
+            if result.state == "stopped":
+                self.compute.start(result.instance_id)
+            self.compute.wait_running(result.instance_id)
         allocation = self.compute.ensure_eip({**tags, "ImageRole": role})
         self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
         return replace(result, public_ip=allocation.public_ip,
@@ -74,7 +82,7 @@ class AwsOpnsenseWorkflow:
             egress, {**tags, "NetworkRole": "validation"},
         ))
         _, public_key = get_or_create_platform_keypair(db)
-        key_name = f"ctf-it-opnsense-{image.id}"
+        key_name = self.config.resource_token("opnsense", image.id, "key")
         self.compute.ensure_key_pair(key_name, public_key, tags)
         builder = self._launch(
             image, "builder", self.config.freebsd_ami(image.region),
@@ -89,37 +97,60 @@ class AwsOpnsenseWorkflow:
         image.phase = image.status = "bootstrapping"
         db.commit()
 
-        workflow._verify_freebsd_base(db, builder.public_ip)
-        script, digest = bootstrap_downloader(image.bootstrap_source_url)
-        image.bootstrap_sha256 = digest; db.commit()
-        workflow._upload_atomic(db, builder.public_ip, "/conf/config.xml",
-                                workflow.render_golden_config(db, image, cidr).encode())
-        workflow._upload_atomic(db, builder.public_ip, "/root/opnsense-bootstrap.sh", script, 0o700)
-        code, _, error = workflow._ssh(
-            db, builder.public_ip,
-            f"nohup sh /root/opnsense-bootstrap.sh -r {image.version} -y >/var/log/opnsense-bootstrap.log 2>&1 </dev/null &",
-            timeout=30,
-        )
-        if code:
-            raise RuntimeError(f"could not launch OPNsense bootstrap: {error[:300]}")
-        workflow._wait_for_opnsense(db, builder.public_ip, image.version)
-        workflow._validate_builder(db, image, builder.public_ip, cidr, "AWS builder validation")
-        builder_key = workflow._fingerprint(db, builder.public_ip)
-
-        adapter = type("ComputeStopAdapter", (), {
-            "halt": lambda _, instance_id: self.compute.stop(instance_id),
-            "wait_stopped": lambda _, instance_id: self.compute.wait_stopped(instance_id),
-        })()
-        workflow._sanitize_and_halt(db, adapter, image, builder.public_ip)
-        image.phase = image.status = "snapshotting"; db.commit()
-        artifact = self.images.ensure_image(
-            builder.instance_id,
-            self.config.resource_token("opnsense", image.version.replace('.', '-'), image.id),
-            tags,
-        )
-        image.ami_id = artifact.ami_id
-        image.backing_snapshot_ids_json = json.dumps(artifact.snapshot_ids)
-        db.commit()
+        evidence = json.loads(image.validation_results or "{}")
+        builder_key = evidence.get("builder", {}).get("ssh_host_key")
+        if image.ami_id:
+            artifact = ImageResult(
+                image.ami_id, tuple(json.loads(image.backing_snapshot_ids_json or "[]")),
+                "available",
+            )
+        else:
+            if builder.state != "stopped":
+                guest_state = workflow._guest_state(db, builder.public_ip)
+                if guest_state == "freebsd":
+                    workflow._verify_freebsd_base(db, builder.public_ip)
+                    script, digest = bootstrap_downloader(image.bootstrap_source_url)
+                    image.bootstrap_sha256 = digest; db.commit()
+                    workflow._upload_atomic(
+                        db, builder.public_ip, "/conf/config.xml",
+                        workflow.render_golden_config(db, image, cidr).encode(),
+                    )
+                    workflow._upload_atomic(
+                        db, builder.public_ip, "/root/opnsense-bootstrap.sh", script, 0o700,
+                    )
+                    code, _, error = workflow._ssh(
+                        db, builder.public_ip,
+                        f"nohup sh /root/opnsense-bootstrap.sh -r {image.version} -y "
+                        ">/var/log/opnsense-bootstrap.log 2>&1 </dev/null &",
+                        timeout=30,
+                    )
+                    if code:
+                        raise RuntimeError(f"could not launch OPNsense bootstrap: {error[:300]}")
+                elif guest_state not in {"converting", "opnsense"}:
+                    raise RuntimeError(f"unexpected builder guest state: {guest_state}")
+                workflow._wait_for_opnsense(db, builder.public_ip, image.version)
+                workflow._validate_builder(
+                    db, image, builder.public_ip, cidr, "AWS builder validation",
+                )
+                builder_key = workflow._fingerprint(db, builder.public_ip)
+                workflow._record_validation(image, "builder", ssh_host_key=builder_key)
+                db.commit()
+                adapter = type("ComputeStopAdapter", (), {
+                    "halt": lambda _, instance_id: self.compute.stop(instance_id),
+                    "wait_stopped": lambda _, instance_id: self.compute.wait_stopped(instance_id),
+                })()
+                workflow._sanitize_and_halt(db, adapter, image, builder.public_ip)
+            if not builder_key:
+                raise RuntimeError("stopped builder is missing persisted host-key evidence")
+            image.phase = image.status = "snapshotting"; db.commit()
+            artifact = self.images.ensure_image(
+                builder.instance_id,
+                self.config.resource_token("opnsense", image.version.replace('.', '-'), image.id),
+                tags,
+            )
+            image.ami_id = artifact.ami_id
+            image.backing_snapshot_ids_json = json.dumps(artifact.snapshot_ids)
+            db.commit()
 
         peer_lan = self.network.ensure_eni(
             network.subnet_ids["validation"], "172.31.254.2", [validation_sg],
@@ -133,9 +164,12 @@ class AwsOpnsenseWorkflow:
             tags, key_name,
         )
         image.test_instance_id = public_clone.instance_id; db.commit()
-        public_key_fingerprint = workflow._validate_clone_one(
-            db, image, public_clone.public_ip, cidr,
-        )
+        evidence = json.loads(image.validation_results or "{}")
+        public_key_fingerprint = evidence.get("clone_wan", {}).get("ssh_host_key")
+        if not public_key_fingerprint:
+            public_key_fingerprint = workflow._validate_clone_one(
+                db, image, public_clone.public_ip, cidr,
+            )
         if public_key_fingerprint == builder_key:
             raise RuntimeError("public clone reused the builder SSH host key")
         peer_ip = workflow._configure_validation_peer(
@@ -154,11 +188,14 @@ class AwsOpnsenseWorkflow:
             tags, key_name,
         )
         image.second_test_instance_id = private_clone.instance_id; db.commit()
-        private_key_fingerprint = workflow._validate_clone_two(
-            db, image, private_clone.public_ip,
-            {"ip_address": lan.private_ip, "mac_address": lan.mac_address},
-            cidr, public_clone.public_ip, peer_ip,
-        )
+        evidence = json.loads(image.validation_results or "{}")
+        private_key_fingerprint = evidence.get("clone_vpc", {}).get("ssh_host_key")
+        if not private_key_fingerprint:
+            private_key_fingerprint = workflow._validate_clone_two(
+                db, image, private_clone.public_ip,
+                {"ip_address": lan.private_ip, "mac_address": lan.mac_address},
+                cidr, public_clone.public_ip, peer_ip,
+            )
         if len({builder_key, public_key_fingerprint, private_key_fingerprint}) != 3:
             raise RuntimeError("builder and AMI clone SSH host keys are not unique")
         return {
