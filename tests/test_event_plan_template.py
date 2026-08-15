@@ -43,6 +43,15 @@ def test_infrastructure_rejects_non_string_planner_address_annotations():
     assert "sites[0].zones[0].endpoints[0].address must be a string" in errors
 
 
+def test_firewall_zone_team_defaults_blue_and_rejects_unknown_roles():
+    infrastructure = default_infrastructure()
+
+    assert infrastructure["sites"][0]["firewall_team"] == "blue"
+    infrastructure["sites"][0]["firewall_team"] = "purple"
+
+    assert "sites[0].firewall_team must be one of: blue, red" in validate_infrastructure(infrastructure, BASES)
+
+
 def test_layout_theme_validation_accepts_known_nodes_and_strict_hex_colours():
     layout = {
         "version": 1,
@@ -213,19 +222,21 @@ def test_planner_recovers_catalogues_and_guards_read_only_mutations():
     assert "$('#planner-save').disabled=READ_ONLY||saveBlocked||errors.length>0||!dirty" in compact
 
 
-def test_planner_renders_system_firewall_zone_as_workload_route_parent():
+def test_planner_renders_generated_firewall_zone_as_team_managed_workload_route_parent():
     source = CONTROLLER.read_text()
     compact = "".join(source.split())
 
     assert "normalizeClientLayout" in source
     assert "node.visualParent||node.parent" in source
     assert "node.type==='firewall-zone'" in source
-    assert "System managed" in source
+    assert "Generated firewall zone" in source
+    assert "teamFieldForNode" in source
+    assert "teamForNode(node)" in compact
     assert "Automatically allocated" in source
     assert "['site','firewall-zone','firewall','zone','vm']" in source
     assert "['zone','vm']" in source
-    assert "systemManaged:node.type==='firewall-zone'" in compact
-    assert "team:node.type==='zone'?node.value.team:null" in compact
+    assert "systemManaged:node.type==='firewall-zone'" not in compact
+    assert "team:node.type==='zone'?node.value.team:null" not in compact
     assert "childCount" in source
     assert "onArrangeZone" in source
     assert "state.layout=nextLayout" in compact

@@ -78,6 +78,9 @@ def validate_infrastructure(
             region_counts[region] += max(team_count, 0)
             if valid_regions is not None and region not in valid_regions:
                 errors.append(f"{path}.region references unavailable region '{region}'")
+        firewall_team = site.get("firewall_team", "blue")
+        if firewall_team not in TEAM_ROLES:
+            errors.append(f"{path}.firewall_team must be one of: blue, red")
         firewall_zone_address_range = site.get("firewall_zone_address_range")
         if firewall_zone_address_range is not None and not isinstance(firewall_zone_address_range, str):
             errors.append(f"{path}.firewall_zone_address_range must be a string")

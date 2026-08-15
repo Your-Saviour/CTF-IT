@@ -31,6 +31,13 @@ test('canvas address annotations enrich accessible labels without inventing plac
   assert.equal(canvas.topologyAccessibleLabel({type: 'vm', label: 'Web', annotation: ''}), 'vm: Web');
 });
 
+test('canvas labels firewall zones by team ownership rather than generated structure', () => {
+  assert.equal(
+    canvas.topologyAccessibleLabel({type: 'firewall-zone', label: 'Firewall Zone', team: 'blue'}),
+    'Blue team firewall-zone: Firewall Zone',
+  );
+});
+
 test('visual address annotations are constrained while short values remain exact', () => {
   assert.equal(canvas.truncatedAnnotation('1234567890', 8), '12345…');
   assert.equal(canvas.truncatedAnnotation('short', 8), 'short');

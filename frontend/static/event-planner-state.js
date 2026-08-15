@@ -19,6 +19,7 @@ export function normalizeClientInfrastructure(value) {
     },
     sites: [],
   });
+  for (const site of result.sites || []) site.firewall_team ??= 'blue';
   for (const site of result.sites || []) for (const zone of site.zones || []) {
     const reserved = new Set((zone.endpoints || []).filter(row => row.count == null).map(row => row.key));
     const generated = new Set(), rows = [];
@@ -175,6 +176,7 @@ export function validateClientInfrastructure(value, catalogues = {}) {
     key(site.key, `${path}.key`, sid, siteKeys);
     if (!String(site.name || '').trim()) add(`${path}.name`, sid, 'Site name is required');
     if (!String(site.region || '').trim()) add(`${path}.region`, sid, 'Region is required');
+    if (!['blue', 'red'].includes(site.firewall_team)) add(`${path}.firewall_team`, `firewall-zone:${site.key}`, 'Team role must be blue or red');
     if (site.firewall_zone_address_range != null && typeof site.firewall_zone_address_range !== 'string') add(`${path}.firewall_zone_address_range`, `firewall-zone:${site.key}`, 'Address range must be text');
     machine(site.firewall, `${path}.firewall`, `firewall:${site.key}/primary`);
     if (site.firewall?.address != null && typeof site.firewall.address !== 'string') add(`${path}.firewall.address`, `firewall:${site.key}/primary`, 'Address must be text');

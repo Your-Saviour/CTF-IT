@@ -19,6 +19,7 @@ _DEFAULT_INFRASTRUCTURE = {
         "key": "head_office",
         "name": "Head Office",
         "region": "ewr",
+        "firewall_team": "blue",
         "firewall": {"base_type": "opnsense", "default_plan": "vc2-2c-4gb"},
         "zones": [
             {
@@ -69,6 +70,7 @@ def normalize_infrastructure(value: dict) -> dict:
     """Deep-copy a plan and expand legacy count-based endpoint groups."""
     result = deepcopy(value)
     for site in result.get("sites", []):
+        site.setdefault("firewall_team", "blue")
         for zone in site.get("zones", []):
             zone["endpoints"] = zone_endpoint_instances(zone.get("endpoints", []))
     return result

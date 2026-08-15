@@ -3,7 +3,8 @@ export function topologyNodeClass(node) {
 }
 
 export function topologyAccessibleLabel(node) {
-  const base = `${node.systemManaged ? 'System-managed zone' : node.type}: ${node.label}`;
+  const owner = node.team === 'red' ? 'Red team ' : node.team === 'blue' ? 'Blue team ' : '';
+  const base = `${owner || !node.systemManaged ? `${owner}${node.type}` : 'System-managed zone'}: ${node.label}`;
   return typeof node.annotation === 'string' && node.annotation !== ''
     ? `${base}, address ${node.annotation}`
     : base;
@@ -390,7 +391,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     containers.append('line').attr('class', 'zone-container-divider');
     containers.append('text').attr('class', 'zone-container-title').attr('x', 12).attr('y', 16).text(d => d.label);
     containers.append('text').attr('class', 'zone-container-meta').attr('x', 12).attr('y', 29)
-      .text(d => d.systemManaged ? `System managed · ${d.childCount ?? 0} VM` : `${d.team === 'red' ? 'Red' : 'Blue'} team · ${d.childCount ?? 0} VM${d.childCount === 1 ? '' : 's'}`);
+      .text(d => d.team ? `${d.team === 'red' ? 'Red' : 'Blue'} team · ${d.childCount ?? 0} VM${d.childCount === 1 ? '' : 's'}` : `System managed · ${d.childCount ?? 0} VM`);
     const annotatedZones = containers.filter(d => topologyAnnotationPresentation(d));
     annotatedZones.append('rect')
       .attr('class', d => topologyAnnotationPresentation(d).className)

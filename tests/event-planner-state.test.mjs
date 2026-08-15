@@ -32,6 +32,15 @@ test('null infrastructure opens as an editable empty network', () => {
   assert.equal(nodeIndex(infrastructure).has('gateway'), true);
 });
 
+test('legacy firewall zones normalize to blue-team ownership', () => {
+  const normalized = normalizeClientInfrastructure(infrastructure);
+
+  assert.equal(normalized.sites[0].firewall_team, 'blue');
+  normalized.sites[0].firewall_team = 'purple';
+  const errors = validateClientInfrastructure(normalized, {bases: [{id: 'ubuntu'}, {id: 'opnsense'}]});
+  assert.equal(errors.some(error => error.path === 'sites[0].firewall_team'), true);
+});
+
 test('free-form planner address annotations survive normalization and validation', () => {
   const value = structuredClone(infrastructure);
   value.sites[0].zones[0].address_range = 'x.x.{{team_id}}.0/24';
