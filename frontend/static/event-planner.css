@@ -97,6 +97,24 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-zone.red { fill: rgba(255, 23, 68, .035); stroke: rgba(255, 23, 68, .4); }
 .topo-link { stroke: #40576d; stroke-width: 1.5; transition: stroke .15s ease, stroke-width .15s ease; }
 .topo-link.selected-adjacent { stroke: var(--cyan-dim); stroke-width: 2; }
+.zone-container .zone-container-body { fill: rgba(14, 29, 45, .78); stroke: #466887; stroke-width: 1.5; }
+.zone-container .zone-container-header { fill: #17283c; stroke: #58728c; stroke-width: 1.5; }
+.zone-container .zone-container-divider { stroke: #466887; stroke-width: 1; }
+.zone-container.team-red .zone-container-body { fill: rgba(65, 18, 31, .55); stroke: rgba(255, 23, 68, .55); }
+.zone-container.team-red .zone-container-header { fill: #351827; stroke: rgba(255, 23, 68, .72); }
+.zone-container.system-managed .zone-container-body { fill: rgba(58, 42, 12, .38); stroke: rgba(255, 184, 0, .58); }
+.zone-container.system-managed .zone-container-header { fill: #302817; stroke: rgba(255, 184, 0, .72); }
+.zone-container.selected .zone-container-body, .zone-container.selected .zone-container-header { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }
+.zone-container.invalid .zone-container-body, .zone-container.invalid .zone-container-header { stroke: var(--red); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--red-glow)); }
+.zone-container text { fill: var(--text-primary); font-family: 'JetBrains Mono', monospace; pointer-events: none; }
+.zone-container-title { font-size: 11px; font-weight: 700; }
+.zone-container-meta { fill: var(--text-muted) !important; font-size: 8px; text-transform: uppercase; }
+.zone-container-header { cursor: move; }
+.zone-arrange { cursor: pointer; }
+.zone-arrange rect { fill: var(--bg-deep); stroke: var(--border); stroke-width: 1; }
+.zone-arrange text { fill: var(--cyan) !important; font-size: 8px; }
+.zone-arrange:hover rect, .zone-arrange:focus rect { fill: var(--cyan-subtle); stroke: var(--cyan); }
+.zone-arrange[aria-disabled="true"] { display: none; }
 .topo-node .node-body { fill: #111d2d; stroke: #58728c; stroke-width: 1.5; transition: fill .15s ease, stroke .15s ease; }
 .topo-node.site .node-body { fill: #18283c; stroke: #7890a8; stroke-width: 2; }
 .topo-node.firewall-zone .node-body { fill: var(--cyan-subtle); stroke: var(--cyan-dim); stroke-dasharray: 5 4; }

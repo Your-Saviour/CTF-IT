@@ -151,3 +151,20 @@ test('zone arrangement packs children deterministically and translation is atomi
   assert.deepEqual(moved.nodes['zone:a/blue'], {x: 125, y: 190});
   assert.deepEqual(moved.nodes.one, {x: 185, y: 282});
 });
+
+test('topology links omit contained machines and target container boundaries', () => {
+  const nodes = [
+    {id: 'site:a', type: 'site', x: 0, y: 0},
+    {id: 'zone:a/blue', type: 'zone', parent: 'site:a', x: 100, y: 100},
+    {id: 'vm:a/blue/web', type: 'vm', parent: 'zone:a/blue', x: 160, y: 200},
+  ];
+  const links = canvas.topologyLinks(nodes);
+  assert.deepEqual(links.map(link => [link.source.id, link.target.id]), [
+    ['site:a', 'zone:a/blue'],
+  ]);
+  const points = canvas.linkEndpoints(links[0], new Map([
+    ['zone:a/blue', {x: 100, y: 100, width: 280, height: 190}],
+  ]));
+  assert.equal(points.x2, 100);
+  assert.equal(points.y2 >= 100 && points.y2 <= 290, true);
+});

@@ -67,6 +67,39 @@ export function translateZoneLayout(layout, zoneId, childIds, dx, dy) {
   return {version: 1, nodes};
 }
 
+export function topologyLinks(nodes) {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  return nodes
+    .filter(node => {
+      const parent = byId.get(node.parent);
+      return parent && !(isZoneContainer(parent) && ['vm', 'firewall'].includes(node.type));
+    })
+    .map(node => ({source: byId.get(node.parent), target: node}));
+}
+
+export function linkEndpoints(link, containerBounds = new Map()) {
+  const sourceBounds = containerBounds.get(link.source.id);
+  const targetBounds = containerBounds.get(link.target.id);
+  const sourcePoint = sourceBounds
+    ? nearestBoundaryPoint(sourceBounds, link.target)
+    : {x: link.source.x, y: link.source.y};
+  const targetPoint = targetBounds
+    ? nearestBoundaryPoint(targetBounds, link.source)
+    : {x: link.target.x, y: link.target.y};
+  return {x1: sourcePoint.x, y1: sourcePoint.y, x2: targetPoint.x, y2: targetPoint.y};
+}
+
+function isZoneContainer(node) {
+  return ['zone', 'firewall-zone'].includes(node?.type);
+}
+
+function nearestBoundaryPoint(bounds, point) {
+  return {
+    x: Math.max(bounds.x, Math.min(bounds.x + bounds.width, point.x)),
+    y: Math.max(bounds.y, Math.min(bounds.y + bounds.height, point.y)),
+  };
+}
+
 const ROOT_X = 120;
 const ROOT_Y = 70;
 const HORIZONTAL_GAP = 190;
@@ -159,25 +192,105 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       ...currentLayout.nodes[row.id],
     }));
     const byId = new Map(nodes.map(row => [row.id, row]));
-    const links = nodes
-      .filter(row => row.parent && byId.has(row.parent))
-      .map(row => ({source: byId.get(row.parent), target: row}));
-    const linkSelection = scene.selectAll('line')
+    const links = topologyLinks(nodes);
+    const linkLayer = scene.append('g').attr('class', 'topology-links');
+    const containerLayer = scene.append('g').attr('class', 'topology-containers');
+    const structuralLayer = scene.append('g').attr('class', 'topology-structures');
+    const machineLayer = scene.append('g').attr('class', 'topology-machines');
+    const linkSelection = linkLayer.selectAll('line')
       .data(links)
       .join('line')
       .attr('class', topologyLinkClass);
 
+    function containerBounds() {
+      return new Map(nodes.filter(isZoneContainer).map(zone => [
+        zone.id,
+        calculateZoneBounds(zone, zoneChildren(nodes, zone.id)),
+      ]));
+    }
+
     function updateLinks() {
+      const bounds = containerBounds();
       linkSelection
-        .attr('x1', d => d.source.x)
-        .attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x)
-        .attr('y2', d => d.target.y);
+        .attr('x1', d => linkEndpoints(d, bounds).x1)
+        .attr('y1', d => linkEndpoints(d, bounds).y1)
+        .attr('x2', d => linkEndpoints(d, bounds).x2)
+        .attr('y2', d => linkEndpoints(d, bounds).y2);
     }
     updateLinks();
 
-    let groups = scene.selectAll('g.topo-node')
-      .data(nodes, d => d.id)
+    const containers = containerLayer.selectAll('g.zone-container')
+      .data(nodes.filter(isZoneContainer), d => d.id)
+      .join('g')
+      .attr('class', d => [
+        'zone-container',
+        d.team && `team-${d.team}`,
+        d.systemManaged && 'system-managed',
+        d.selected && 'selected',
+        d.invalid && 'invalid',
+      ].filter(Boolean).join(' '))
+      .attr('data-node-id', d => d.id)
+      .attr('role', 'group')
+      .attr('tabindex', 0)
+      .attr('aria-label', d => `${d.systemManaged ? 'System-managed zone' : 'Zone'}: ${d.label}`)
+      .attr('transform', d => `translate(${d.x},${d.y})`)
+      .on('click', (_, d) => callbacks.onSelect?.(d.id))
+      .on('keydown', (event, d) => {
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+          event.preventDefault();
+          callbacks.onSelect?.(d.id);
+        }
+      });
+    containers.append('rect').attr('class', 'zone-container-body').attr('rx', 10);
+    containers.append('rect').attr('class', 'zone-container-header').attr('rx', 9);
+    containers.append('line').attr('class', 'zone-container-divider');
+    containers.append('text').attr('class', 'zone-container-title').attr('x', 12).attr('y', 16).text(d => d.label);
+    containers.append('text').attr('class', 'zone-container-meta').attr('x', 12).attr('y', 29)
+      .text(d => d.systemManaged ? `System managed · ${d.childCount ?? 0} VM` : `${d.team === 'red' ? 'Red' : 'Blue'} team · ${d.childCount ?? 0} VM${d.childCount === 1 ? '' : 's'}`);
+    const arrangeControls = containers.append('g')
+      .attr('class', 'zone-arrange')
+      .attr('role', 'button')
+      .attr('tabindex', callbacks.readOnly ? null : 0)
+      .attr('aria-label', d => `Arrange VMs in ${d.label}`)
+      .attr('aria-disabled', callbacks.readOnly ? 'true' : null);
+    arrangeControls.append('rect').attr('width', 96).attr('height', 28).attr('rx', 5);
+    arrangeControls.append('text').attr('x', 48).attr('y', 18).attr('text-anchor', 'middle').text('Arrange VMs');
+
+    function updateContainers() {
+      const bounds = containerBounds();
+      containers.attr('transform', d => `translate(${d.x},${d.y})`);
+      containers.select('.zone-container-body')
+        .attr('width', d => bounds.get(d.id).width)
+        .attr('height', d => bounds.get(d.id).height);
+      containers.select('.zone-container-header')
+        .attr('width', d => bounds.get(d.id).width)
+        .attr('height', ZONE_CONTAINER_GEOMETRY.headerHeight);
+      containers.select('.zone-container-divider')
+        .attr('x2', d => bounds.get(d.id).width)
+        .attr('y1', ZONE_CONTAINER_GEOMETRY.headerHeight)
+        .attr('y2', ZONE_CONTAINER_GEOMETRY.headerHeight);
+      arrangeControls.attr('transform', d => `translate(${bounds.get(d.id).width - 104},4)`);
+    }
+    updateContainers();
+
+    let groups = structuralLayer.selectAll('g.topo-node')
+      .data(nodes.filter(node => !isZoneContainer(node) && topologyNodePresentation(node) === 'structural'), d => d.id)
+      .join('g')
+      .attr('class', topologyNodeClass)
+      .attr('data-node-id', d => d.id)
+      .attr('role', 'button')
+      .attr('tabindex', 0)
+      .attr('aria-label', d => `${d.type}: ${d.label}`)
+      .attr('transform', d => `translate(${d.x},${d.y})`)
+      .on('click', (_, d) => callbacks.onSelect?.(d.id))
+      .on('keydown', (event, d) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          callbacks.onSelect?.(d.id);
+        }
+      });
+    let machineGroups = machineLayer.selectAll('g.topo-node')
+      .data(nodes.filter(node => topologyNodePresentation(node) === 'machine'), d => d.id)
       .join('g')
       .attr('class', topologyNodeClass)
       .attr('data-node-id', d => d.id)
@@ -205,10 +318,21 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
           currentLayout.nodes[d.id] = {x: d.x, y: d.y};
           callbacks.onLayoutChange?.(structuredClone(currentLayout));
         }));
+      machineGroups = machineGroups.call(d3.drag()
+        .on('drag', function(event, d) {
+          d.x = event.x;
+          d.y = event.y;
+          d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
+          updateContainers();
+          updateLinks();
+        })
+        .on('end', (_, d) => {
+          currentLayout.nodes[d.id] = {x: d.x, y: d.y};
+          callbacks.onLayoutChange?.(structuredClone(currentLayout));
+        }));
     }
 
-    const structuralGroups = groups.filter(d => topologyNodePresentation(d) === 'structural');
-    const machineGroups = groups.filter(d => topologyNodePresentation(d) === 'machine');
+    const structuralGroups = groups;
 
     structuralGroups.append('rect')
       .attr('class', 'node-body')

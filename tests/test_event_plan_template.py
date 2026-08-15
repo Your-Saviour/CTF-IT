@@ -178,3 +178,17 @@ def test_machine_nodes_render_as_standalone_icons_with_labels_below():
     assert "machine-label" in canvas
     assert "topologyNodePresentation" in canvas
     assert "machine-badge" not in canvas
+
+
+def test_planner_renders_framed_zone_container_layers_and_states():
+    canvas = CANVAS.read_text()
+    css = CSS.read_text()
+
+    assert "zone-container-header" in canvas
+    assert "zone-arrange" in canvas
+    assert "topology-containers" in canvas
+    assert "topology-machines" in canvas
+    assert ".zone-container.team-red" in css
+    assert ".zone-container.system-managed" in css
+    assert ".zone-container.selected" in css
+    assert ".zone-container.invalid" in css
