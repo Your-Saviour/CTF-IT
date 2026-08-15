@@ -23,8 +23,8 @@ test('machine nodes use icon-first presentation while structural nodes retain ca
 });
 
 test('secondary machine icon uses a prominent badge and glyph', () => {
-  assert.equal(canvas.MACHINE_ICON_GEOMETRY.secondaryBadgeRadius, 11);
-  assert.equal(canvas.MACHINE_ICON_GEOMETRY.secondarySize, 14);
+  assert.equal(canvas.MACHINE_ICON_GEOMETRY.secondaryBadgeRadius, 14);
+  assert.equal(canvas.MACHINE_ICON_GEOMETRY.secondarySize, 18);
 });
 
 test('hierarchical layout balances siblings beneath their visual parent', () => {

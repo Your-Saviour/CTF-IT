@@ -11,8 +11,8 @@ export function topologyNodePresentation(node) {
 }
 
 export const MACHINE_ICON_GEOMETRY = Object.freeze({
-  secondaryBadgeRadius: 11,
-  secondarySize: 14,
+  secondaryBadgeRadius: 14,
+  secondarySize: 18,
 });
 
 const ROOT_X = 120;
