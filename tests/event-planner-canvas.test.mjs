@@ -115,3 +115,39 @@ test('collision fallback chooses the free slot nearest the preferred sibling pos
 
   assert.deepEqual(result.nodes['site:new'], {x: 310, y: 180});
 });
+
+test('zone bounds use minimum size and grow around direct machine children', () => {
+  const zone = {id: 'zone:a/blue', x: 100, y: 200};
+  assert.deepEqual(canvas.calculateZoneBounds(zone, []), {
+    x: 100, y: 200, width: 280, height: 190,
+  });
+  assert.deepEqual(canvas.calculateZoneBounds(zone, [
+    {id: 'vm:a/blue/web', type: 'vm', x: 430, y: 390},
+  ]), {x: 100, y: 200, width: 390, height: 246});
+
+  const graph = [
+    {id: 'zone:a/blue', type: 'zone'},
+    {id: 'vm:a/blue/web', type: 'vm', parent: 'zone:a/blue'},
+    {id: 'zone:a/red', type: 'zone'},
+    {id: 'vm:a/red/kali', type: 'vm', parent: 'zone:a/red'},
+  ];
+  assert.deepEqual(canvas.zoneChildren(graph, 'zone:a/blue').map(row => row.id), [
+    'vm:a/blue/web',
+  ]);
+});
+
+test('zone arrangement packs children deterministically and translation is atomic', () => {
+  const zone = {id: 'zone:a/blue', x: 100, y: 200};
+  const children = ['one', 'two', 'three', 'four', 'five'].map(id => ({id, type: 'vm'}));
+  const arranged = canvas.arrangeZoneChildren(zone, children);
+  assert.deepEqual(arranged.one, {x: 160, y: 292});
+  assert.deepEqual(arranged.two, {x: 264, y: 292});
+  assert.deepEqual(arranged.four, {x: 160, y: 388});
+
+  const moved = canvas.translateZoneLayout(
+    {version: 1, nodes: {'zone:a/blue': {x: 100, y: 200}, one: arranged.one}},
+    'zone:a/blue', ['one'], 25, -10,
+  );
+  assert.deepEqual(moved.nodes['zone:a/blue'], {x: 125, y: 190});
+  assert.deepEqual(moved.nodes.one, {x: 185, y: 282});
+});

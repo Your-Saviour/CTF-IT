@@ -16,6 +16,57 @@ export const MACHINE_ICON_GEOMETRY = Object.freeze({
   secondaryY: -7,
 });
 
+export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
+  headerHeight: 36,
+  padding: 20,
+  machineWidth: 80,
+  machineHeight: 72,
+  columnGap: 24,
+  rowGap: 24,
+  minWidth: 280,
+  minHeight: 190,
+});
+
+export function zoneChildren(graph, zoneId) {
+  return graph.filter(node => node.parent === zoneId && ['vm', 'firewall'].includes(node.type));
+}
+
+export function calculateZoneBounds(zone, children) {
+  const geometry = ZONE_CONTAINER_GEOMETRY;
+  const requiredWidth = children.reduce((width, child) => Math.max(
+    width,
+    child.x + geometry.machineWidth / 2 + geometry.padding - zone.x,
+  ), geometry.minWidth);
+  const requiredHeight = children.reduce((height, child) => Math.max(
+    height,
+    child.y + geometry.machineHeight / 2 + geometry.padding - zone.y,
+  ), geometry.minHeight);
+  return {x: zone.x, y: zone.y, width: requiredWidth, height: requiredHeight};
+}
+
+export function arrangeZoneChildren(zone, children) {
+  if (!children.length) return {};
+  const geometry = ZONE_CONTAINER_GEOMETRY;
+  const columns = Math.ceil(Math.sqrt(children.length));
+  return Object.fromEntries(children.map((child, index) => [child.id, {
+    x: zone.x + geometry.padding + geometry.machineWidth / 2
+      + (index % columns) * (geometry.machineWidth + geometry.columnGap),
+    y: zone.y + geometry.headerHeight + geometry.padding + geometry.machineHeight / 2
+      + Math.floor(index / columns) * (geometry.machineHeight + geometry.rowGap),
+  }]));
+}
+
+export function translateZoneLayout(layout, zoneId, childIds, dx, dy) {
+  const nodes = structuredClone(layout?.nodes || {});
+  for (const id of [zoneId, ...childIds]) {
+    const position = nodes[id];
+    if (Number.isFinite(position?.x) && Number.isFinite(position?.y)) {
+      nodes[id] = {x: position.x + dx, y: position.y + dy};
+    }
+  }
+  return {version: 1, nodes};
+}
+
 const ROOT_X = 120;
 const ROOT_Y = 70;
 const HORIZONTAL_GAP = 190;
