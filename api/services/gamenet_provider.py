@@ -24,7 +24,9 @@ import httpx
 
 from dataclasses import replace
 
-from api.services.aws import InstanceSpec, NetworkInterfaceSpec, ownership_tags
+from api.services.aws import (
+    InstanceSpec, NetworkInterfaceSpec, SecurityGroupSpec, SiteNetworkSpec, ownership_tags,
+)
 
 
 class AwsGameNetProvider:
@@ -35,6 +37,9 @@ class AwsGameNetProvider:
         self.network = network
         self.config = config
 
+    def close(self):
+        return None
+
     def _tags(self, site, vm):
         return ownership_tags(
             self.config.environment,
@@ -43,6 +48,52 @@ class AwsGameNetProvider:
             site_id=site.id,
             vm_id=vm.id,
         )
+
+    def create_vpc(self, site):
+        tags = ownership_tags(
+            self.config.environment,
+            event_id=site.event_id,
+            team_id=site.team_id,
+            site_id=site.id,
+        )
+        subnets = {"wan": "172.31.255.0/28", "infra": site.infrastructure_subnet}
+        subnets.update({zone.key: zone.subnet for zone in site.zones})
+        return self.network.ensure_site_network(SiteNetworkSpec(
+            region=site.region,
+            availability_zone=site.availability_zone,
+            vpc_cidr=site.allocated_cidr,
+            subnets=subnets,
+            tags=tags,
+            secondary_cidrs=("172.31.255.0/28",),
+        ))
+
+    def ensure_site_security_groups(self, site):
+        tags = ownership_tags(
+            self.config.environment, event_id=site.event_id,
+            team_id=site.team_id, site_id=site.id,
+        )
+        all_traffic = lambda cidr: ({
+            "IpProtocol": "-1", "IpRanges": [{"CidrIp": cidr}],
+        },)
+        groups = {
+            "wan": self.network.ensure_security_group(SecurityGroupSpec(
+                site.vpc_id, f"ctf-it-site-{site.id}-wan", "GameNet firewall WAN",
+                (), ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},),
+                {**tags, "NetworkRole": "wan"},
+            )),
+            "lan": self.network.ensure_security_group(SecurityGroupSpec(
+                site.vpc_id, f"ctf-it-site-{site.id}-lan", "GameNet firewall LAN",
+                all_traffic(site.allocated_cidr), all_traffic(site.allocated_cidr),
+                {**tags, "NetworkRole": "lan"},
+            )),
+        }
+        for zone in site.zones:
+            groups[zone.key] = self.network.ensure_security_group(SecurityGroupSpec(
+                site.vpc_id, f"ctf-it-site-{site.id}-{zone.key}", f"GameNet zone {zone.key}",
+                all_traffic(zone.subnet), all_traffic(site.allocated_cidr),
+                {**tags, "NetworkRole": zone.key},
+            ))
+        return groups
 
     def create_firewall(self, site, vm, *, ami_id: str):
         tags = self._tags(site, vm)

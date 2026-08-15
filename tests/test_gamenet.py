@@ -973,3 +973,98 @@ def test_aws_private_interface_netplan_matches_recorded_eni_mac():
     assert "set-name: ctf-lan" in template
     assert "ens7" not in playbook + template
     assert "1450" not in playbook + template
+
+
+def test_gamenet_orchestration_requires_aws_configuration_not_vultr(monkeypatch):
+    from api.services import gamenet_provisioning
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-southeast-2")
+    monkeypatch.setenv("AWS_ENVIRONMENT", "test")
+    monkeypatch.setenv("AWS_STANDARD_VPC_ID", "vpc-standard")
+    monkeypatch.setenv("AWS_STANDARD_SUBNET_ID", "subnet-standard")
+    monkeypatch.setenv("AWS_UBUNTU_AMIS", '{"ap-southeast-2":"ami-ubuntu"}')
+    monkeypatch.setenv("AWS_FREEBSD_AMIS", '{"ap-southeast-2":"ami-freebsd"}')
+    monkeypatch.setenv("AWS_AVAILABILITY_ZONES", '{"ap-southeast-2":"ap-southeast-2a"}')
+    monkeypatch.setenv("AWS_INSTANCE_TYPES", "t3.small,t3.medium")
+    gamenet_provisioning._require_provider()
+
+
+def test_gamenet_placeholders_store_ec2_type_and_region_not_vultr_fields():
+    from pathlib import Path
+    source = Path("api/services/gamenet_provisioning.py").read_text()
+    placeholder_section = source[source.index("def ensure_vm_placeholders"):source.index("def allocate_keys_and_addresses")]
+    assert "instance_type=" in placeholder_section
+    assert "cloud_region=" in placeholder_section
+    assert "vultr_plan=" not in placeholder_section
+    assert "vultr_region=" not in placeholder_section
+
+
+def test_aws_gamenet_site_network_uses_secondary_wan_cidr():
+    from types import SimpleNamespace
+    from api.services.aws import SiteNetworkResult
+    from api.services.gamenet_provider import AwsGameNetProvider
+
+    class Network:
+        def ensure_site_network(self, spec):
+            self.spec = spec
+            return SiteNetworkResult("vpc-1", spec.availability_zone, {
+                "wan": "subnet-wan", "infra": "subnet-infra", "blue": "subnet-blue",
+            }, {"wan": "rtb-wan", "infra": "rtb-infra", "blue": "rtb-blue"}, "igw-1")
+    network = Network()
+    provider = AwsGameNetProvider(SimpleNamespace(), network, SimpleNamespace(environment="test"))
+    site = SimpleNamespace(
+        id=3, event_id=1, team_id=2, region="ap-southeast-2",
+        availability_zone="ap-southeast-2a", allocated_cidr="10.128.0.0/20",
+        infrastructure_subnet="10.128.0.0/24",
+        zones=[SimpleNamespace(key="blue", subnet="10.128.1.0/24")],
+    )
+    result = provider.create_vpc(site)
+    assert network.spec.vpc_cidr == "10.128.0.0/20"
+    assert network.spec.secondary_cidrs == ("172.31.255.0/28",)
+    assert network.spec.subnets == {
+        "wan": "172.31.255.0/28", "infra": "10.128.0.0/24", "blue": "10.128.1.0/24",
+    }
+    assert result.vpc_id == "vpc-1"
+
+
+def test_create_provider_vpc_persists_all_aws_network_ids(monkeypatch, db_session):
+    from api.services.aws import SiteNetworkResult
+    from api.services import gamenet_provisioning
+    event = Event(name="GameNet", quota="{}"); db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    site = Site(
+        event_id=event.id, team_id=team.id, key="hq", name="HQ", region="ap-southeast-2",
+        allocated_cidr="10.128.0.0/20", infrastructure_subnet="10.128.0.0/24",
+        order=0,
+    )
+    db_session.add(site); db_session.flush()
+    zone = __import__("api.models", fromlist=["Zone"]).Zone(
+        site_id=site.id, key="blue", name="Blue", team_role="blue",
+        subnet="10.128.1.0/24", gateway_address="10.128.1.1", order=0,
+    )
+    db_session.add(zone); db_session.commit()
+    class Provider:
+        def create_vpc(self, selected):
+            assert selected.availability_zone == "ap-southeast-2a"
+            return SiteNetworkResult(
+                "vpc-1", "ap-southeast-2a",
+                {"wan": "subnet-wan", "infra": "subnet-infra", "blue": "subnet-blue"},
+                {"wan": "rtb-wan", "infra": "rtb-infra", "blue": "rtb-blue"}, "igw-1",
+            )
+        def ensure_site_security_groups(self, selected):
+            return {"wan": "sg-wan", "lan": "sg-lan", "blue": "sg-blue"}
+        def close(self): pass
+    monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())
+    monkeypatch.setattr(
+        gamenet_provisioning, "_configured_availability_zone",
+        lambda region: "ap-southeast-2a",
+        raising=False,
+    )
+    assert gamenet_provisioning._create_provider_vpc(site) == "vpc-1"
+    assert site.public_subnet_id == "subnet-wan"
+    assert site.infrastructure_subnet_id == "subnet-infra"
+    assert zone.subnet_id == "subnet-blue"
+    assert site.wan_security_group_id == "sg-wan"
+    assert site.lan_security_group_id == "sg-lan"
+    assert zone.security_group_id == "sg-blue"
+    assert json.loads(site.route_table_ids_json)["infra"] == "rtb-infra"

@@ -22,7 +22,7 @@ from api.models import (
     VPNCredential, Zone, utcnow,
 )
 from api.services.gamenet_provider import (
-    GameNetProviderError, VultrGameNetProvider, add_deterministic_endpoint_address,
+    AwsGameNetProvider, GameNetProviderError, add_deterministic_endpoint_address,
     bootstrap_opnsense, configure_snapshot_opnsense, configure_gateway,
     configure_site_wireguard, finalize_endpoint_network, install_local_wireguard,
     ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
@@ -112,8 +112,8 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
             gateway_vm = VM(
                 hostname=gamenet_hostname(event.id, team.id, "gateway"), team_id=team.id,
                 event_id=event.id, status="creating", role="vpn_gateway", vm_type="vpn_gateway",
-                base_type=gateway_spec["base_type"], vultr_plan=gateway_spec["default_plan"],
-                vultr_region=gateway_spec["region"],
+                base_type=gateway_spec["base_type"], instance_type=gateway_spec["default_plan"],
+                cloud_region=gateway_spec["region"],
                 ust_prompt=gateway_spec.get("ust_prompt"),
             )
             db.add(gateway_vm)
@@ -132,7 +132,7 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
                     team_id=team.id, event_id=event.id, site_id=site.id,
                     status="creating", role="site_firewall", vm_type=f"{site.key}_firewall",
                     base_type=site_spec["firewall"]["base_type"],
-                    vultr_plan=site_spec["firewall"]["default_plan"], vultr_region=site.region,
+                    instance_type=site_spec["firewall"]["default_plan"], cloud_region=site.region,
                     ust_prompt=site_spec["firewall"].get("ust_prompt"),
                 )
                 db.add(firewall)
@@ -158,7 +158,7 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
                                 site_id=site.id, zone_id=zone.id, status="creating",
                                 role=f"{zone.team_role}_endpoint", vm_type=endpoint["key"],
                                 base_type=endpoint["base_type"],
-                                vultr_plan=endpoint["default_plan"], vultr_region=site.region,
+                                instance_type=endpoint["default_plan"], cloud_region=site.region,
                                 private_ip=private_ip, ip_address=private_ip,
                                 ust_prompt=endpoint.get("ust_prompt"),
                             )
@@ -585,12 +585,21 @@ def run_acceptance_checks(db, event, infrastructure):
 
 
 def _require_provider():
-    if not os.environ.get("VULTR_API_KEY"):
-        raise RuntimeError("VULTR_API_KEY is required for GameNet provisioning")
+    from api.services.aws import AwsConfig
+    AwsConfig.from_env()
 
 
 def _provider():
-    return VultrGameNetProvider()
+    from api.services.aws import AwsComputeProvider, AwsConfig, AwsNetworkProvider, AwsSessionFactory
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    ec2 = sessions.client("ec2")
+    return AwsGameNetProvider(AwsComputeProvider(ec2), AwsNetworkProvider(ec2), config)
+
+
+def _configured_availability_zone(region: str) -> str:
+    from api.services.aws import AwsConfig
+    return AwsConfig.from_env().availability_zone(region)
 
 
 def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None,
@@ -629,9 +638,26 @@ def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None,
 
 
 def _create_provider_vpc(site):
+    if not site.availability_zone:
+        site.availability_zone = _configured_availability_zone(site.region)
     provider = _provider()
     try:
-        return provider.create_vpc(site)
+        result = provider.create_vpc(site)
+        site.vpc_id = result.vpc_id
+        site.availability_zone = result.availability_zone
+        site.public_subnet_id = result.subnet_ids["wan"]
+        site.infrastructure_subnet_id = result.subnet_ids["infra"]
+        site.internet_gateway_id = result.internet_gateway_id
+        site.route_table_ids_json = json.dumps(dict(result.route_table_ids), sort_keys=True)
+        for zone in site.zones:
+            zone.subnet_id = result.subnet_ids[zone.key]
+        groups = provider.ensure_site_security_groups(site)
+        site.wan_security_group_id = groups["wan"]
+        site.lan_security_group_id = groups["lan"]
+        for zone in site.zones:
+            zone.security_group_id = groups[zone.key]
+        object_session(site).commit()
+        return result.vpc_id
     finally:
         provider.close()
 

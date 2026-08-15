@@ -17,6 +17,7 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("AWS_STANDARD_SUBNET_ID", "subnet-123")
     monkeypatch.setenv("AWS_UBUNTU_AMIS", '{"ap-southeast-2":"ami-ubuntu"}')
     monkeypatch.setenv("AWS_FREEBSD_AMIS", '{"ap-southeast-2":"ami-freebsd"}')
+    monkeypatch.setenv("AWS_AVAILABILITY_ZONES", '{"ap-southeast-2":"ap-southeast-2a"}')
     monkeypatch.setenv("AWS_INSTANCE_TYPES", "t3.small,t3.medium")
 
 
@@ -31,6 +32,7 @@ def test_config_loads_network_approved_amis_and_instance_types(monkeypatch):
     assert config.ubuntu_ami("ap-southeast-2") == "ami-ubuntu"
     assert config.freebsd_ami("ap-southeast-2") == "ami-freebsd"
     assert config.instance_types == ("t3.small", "t3.medium")
+    assert config.availability_zone("ap-southeast-2") == "ap-southeast-2a"
 
 
 def test_config_rejects_missing_approved_ami_mapping(monkeypatch):

@@ -35,6 +35,7 @@ class AwsConfig:
     standard_subnet_id: str
     ubuntu_amis: Mapping[str, str]
     freebsd_amis: Mapping[str, str]
+    availability_zones: Mapping[str, str]
     instance_types: tuple[str, ...]
     profile: str | None = None
 
@@ -54,6 +55,7 @@ class AwsConfig:
             standard_subnet_id=_required("AWS_STANDARD_SUBNET_ID"),
             ubuntu_amis=_mapping("AWS_UBUNTU_AMIS"),
             freebsd_amis=_mapping("AWS_FREEBSD_AMIS"),
+            availability_zones=_mapping("AWS_AVAILABILITY_ZONES"),
             instance_types=instance_types,
             profile=os.environ.get("AWS_PROFILE") or None,
         )
@@ -69,3 +71,9 @@ class AwsConfig:
 
     def freebsd_ami(self, region: str) -> str:
         return self._ami(self.freebsd_amis, "FreeBSD", region)
+
+    def availability_zone(self, region: str) -> str:
+        try:
+            return self.availability_zones[region]
+        except KeyError as exc:
+            raise AwsConfigurationError(f"No approved Availability Zone for region {region}") from exc
