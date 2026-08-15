@@ -41,6 +41,16 @@ export function topologyThemeStyle(node) {
   return node?.color ? {'--node-theme-color': node.color} : {};
 }
 
+export function arrangeControlPresentation() {
+  return {
+    width: 32,
+    height: 28,
+    viewBox: '0 0 24 24',
+    path: 'M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z',
+    title: 'Arrange VMs',
+  };
+}
+
 export function mergeLayoutNodes(layout, nodes) {
   return {version: 1, nodes: structuredClone(nodes), themes: structuredClone(layout?.themes || {})};
 }
@@ -65,7 +75,7 @@ export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
   titleInset: 12,
   headerTextWidth: 104,
   headerControlGap: 8,
-  arrangeControlWidth: 96,
+  arrangeControlWidth: 32,
   headerRightInset: 8,
 });
 
@@ -407,15 +417,22 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
           callbacks.onArrangeZone?.(d.id);
         }
       });
+    const arrangeControl = arrangeControlPresentation();
+    arrangeControls.append('title').text(arrangeControl.title);
     arrangeControls.append('rect')
-      .attr('width', ZONE_CONTAINER_GEOMETRY.arrangeControlWidth)
-      .attr('height', 28)
+      .attr('width', arrangeControl.width)
+      .attr('height', arrangeControl.height)
       .attr('rx', 5);
-    arrangeControls.append('text')
-      .attr('x', ZONE_CONTAINER_GEOMETRY.arrangeControlWidth / 2)
-      .attr('y', 18)
-      .attr('text-anchor', 'middle')
-      .text('Arrange VMs');
+    arrangeControls.append('svg')
+      .attr('x', 8)
+      .attr('y', 6)
+      .attr('width', 16)
+      .attr('height', 16)
+      .attr('viewBox', arrangeControl.viewBox)
+      .attr('aria-hidden', 'true')
+      .append('path')
+      .attr('d', arrangeControl.path)
+      .attr('aria-hidden', 'true');
 
     function updateContainers() {
       const bounds = containerBounds();

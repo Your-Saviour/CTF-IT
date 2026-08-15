@@ -133,7 +133,7 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .zone-container-header { cursor: move; }
 .zone-arrange { cursor: pointer; }
 .zone-arrange rect { fill: var(--bg-deep); stroke: var(--border); stroke-width: 1; }
-.zone-arrange text { fill: var(--cyan) !important; font-size: 8px; }
+.zone-arrange path { fill: var(--cyan); pointer-events: none; }
 .zone-arrange:hover rect, .zone-arrange:focus rect { fill: var(--cyan-subtle); stroke: var(--cyan); }
 .zone-arrange[aria-disabled="true"] { display: none; }
 .topo-node .node-body { fill: #111d2d; stroke: #58728c; stroke-width: 1.5; transition: fill .15s ease, stroke .15s ease; }

@@ -2,6 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as canvas from '../frontend/static/event-planner-canvas.js';
 
+test('arrange control uses a compact labelled grid icon', () => {
+  assert.deepEqual(canvas.arrangeControlPresentation(), {
+    width: 32,
+    height: 28,
+    viewBox: '0 0 24 24',
+    path: 'M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z',
+    title: 'Arrange VMs',
+  });
+});
+
 test('canvas presentation marks node roles and links beside the selection', () => {
   assert.equal(typeof canvas.topologyNodeClass, 'function');
   assert.equal(typeof canvas.topologyLinkClass, 'function');
@@ -161,7 +171,7 @@ test('collision fallback chooses the free slot nearest the preferred sibling pos
 test('empty zone bounds preserve a compact selectable body and grow around direct machine children', () => {
   const zone = {id: 'zone:a/blue', x: 100, y: 200};
   assert.deepEqual(canvas.calculateZoneBounds(zone, []), {
-    x: 100, y: 200, width: 228, height: 76, headerHeight: 36,
+    x: 100, y: 200, width: 164, height: 76, headerHeight: 36,
   });
   assert.deepEqual(canvas.calculateZoneBounds(zone, [
     {id: 'vm:a/blue/web', type: 'vm', x: 430, y: 390},
@@ -187,7 +197,7 @@ test('subnet rail expands workload zone geometry and shifts arranged VMs below i
   assert.equal(canvas.zoneHeaderHeight(plain), 36);
   assert.equal(canvas.zoneHeaderHeight(firewall), 60);
   assert.deepEqual(canvas.calculateZoneBounds(annotated, []), {
-    x: 100, y: 200, width: 228, height: 100, headerHeight: 60,
+    x: 100, y: 200, width: 164, height: 100, headerHeight: 60,
   });
   assert.deepEqual(canvas.arrangeZoneChildren(annotated, [{id: 'vm', type: 'vm'}]).vm, {x: 160, y: 316});
   assert.deepEqual(
@@ -207,10 +217,10 @@ test('zone bounds compact to their arranged VM grid in both dimensions', () => {
   const arrangedOne = canvas.arrangeZoneChildren(plainZone, one);
   const arrangedFour = canvas.arrangeZoneChildren(plainZone, four);
   assert.deepEqual(canvas.calculateZoneBounds(plainZone, one.map(node => ({...node, ...arrangedOne[node.id]}))), {
-    x: 100, y: 200, width: 228, height: 154, headerHeight: 36,
+    x: 100, y: 200, width: 164, height: 154, headerHeight: 36,
   });
   assert.deepEqual(canvas.calculateZoneBounds(plainZone, four.map(node => ({...node, ...arrangedFour[node.id]}))), {
-    x: 100, y: 200, width: 228, height: 250, headerHeight: 36,
+    x: 100, y: 200, width: 224, height: 250, headerHeight: 36,
   });
 });
 
@@ -219,7 +229,7 @@ test('compact zone bounds include address rails, VM labels, and manual expansion
   const child = {id: 'one', type: 'vm', annotation: '10.2.0.1'};
   const arranged = {...child, ...canvas.arrangeZoneChildren(zone, [child]).one};
   assert.deepEqual(canvas.calculateZoneBounds(zone, [arranged]), {
-    x: 100, y: 200, width: 228, height: 190, headerHeight: 60,
+    x: 100, y: 200, width: 164, height: 190, headerHeight: 60,
   });
   assert.deepEqual(canvas.calculateZoneBounds(zone, [{...child, x: 420, y: 460}]), {
     x: 100, y: 200, width: 380, height: 334, headerHeight: 60,
