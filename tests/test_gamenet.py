@@ -947,6 +947,23 @@ def test_gamenet_materialises_complete_vm_plan_before_cloud_calls(db_session):
     assert db_session.query(Site).one().firewall_vm_id is not None
 
 
+def test_gamenet_materialises_individual_endpoint_records(db_session):
+    from builder.infrastructure_planner import normalize_infrastructure
+
+    infrastructure = normalize_infrastructure(INFRASTRUCTURE)
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(infrastructure))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], infrastructure)
+
+    placeholders = ensure_vm_placeholders(db_session, event, infrastructure)
+    endpoints = [vm for vm in placeholders if vm.role == "blue_endpoint"]
+
+    assert [vm.vm_type for vm in endpoints] == ["workstation_1", "workstation_2"]
+    assert [vm.private_ip for vm in endpoints] == ["10.128.1.10", "10.128.1.11"]
+    assert len({vm.hostname for vm in endpoints}) == 2
+
+
 def test_semaphore_endpoint_proxy_is_team_gateway_not_firewall(db_session):
     event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
     db_session.add(event); db_session.flush()
@@ -1003,6 +1020,6 @@ def test_gamenet_plan_preview_returns_counts_cost_shape_and_addresses(monkeypatc
     assert response["summary"]["endpoints"] == 2
     assert response["summary"]["estimated_monthly_cost"] == 0
     assert response["total_cost"] == 0
-    assert len(response["vm_types"]) == 3
+    assert len(response["vm_types"]) == 4
     assert len(response["address_plan"]) == 1
     assert response["address_plan"][0]["zones"][0]["subnet"].endswith("/24")

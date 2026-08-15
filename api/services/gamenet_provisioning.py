@@ -31,6 +31,7 @@ from api.services.gamenet_provider import (
 )
 from api.services.secrets import decrypt_secret
 from builder.infrastructure_validation import gamenet_hostname
+from builder.infrastructure_planner import endpoint_instances
 
 log = logging.getLogger(__name__)
 
@@ -145,10 +146,10 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
             for zone_spec in site_spec["zones"]:
                 zone = zones[zone_spec["key"]]
                 next_host = 10
-                for endpoint in zone_spec["endpoints"]:
-                    for index in range(endpoint["count"]):
+                for endpoint_group in zone_spec["endpoints"]:
+                    for endpoint in endpoint_instances(endpoint_group):
                         hostname = gamenet_hostname(
-                            event.id, team.id, site.key, zone.key, endpoint["key"], index + 1,
+                            event.id, team.id, site.key, zone.key, endpoint["key"],
                         )
                         vm = db.query(VM).filter_by(event_id=event.id, hostname=hostname).first()
                         if not vm:
@@ -269,10 +270,10 @@ def create_private_endpoints(db, event, infrastructure):
         zone_defs = {zone["key"]: zone for zone in definitions[site.key]["zones"]}
         for zone in site.zones:
             next_host = 10
-            for endpoint in zone_defs[zone.key]["endpoints"]:
-                for index in range(endpoint["count"]):
+            for endpoint_group in zone_defs[zone.key]["endpoints"]:
+                for endpoint in endpoint_instances(endpoint_group):
                     hostname = gamenet_hostname(
-                        event.id, site.team_id, site.key, zone.key, endpoint["key"], index + 1,
+                        event.id, site.team_id, site.key, zone.key, endpoint["key"],
                     )
                     existing = db.query(VM).filter_by(event_id=event.id, hostname=hostname).first()
                     private_ip = str(__import__("ipaddress").ip_network(zone.subnet).network_address + next_host)
@@ -343,8 +344,8 @@ def certify_private_boot(db, event, infrastructure):
         base_types = {
             endpoint["base_type"]
             for zone in definitions[site.key]["zones"]
-            for endpoint in zone["endpoints"]
-            if endpoint.get("count", 0) > 0
+            for endpoint_group in zone["endpoints"]
+            for endpoint in endpoint_instances(endpoint_group)
         }
         unique_images = {}
         for base_type_id in sorted(base_types):
@@ -652,8 +653,8 @@ def _require_endpoint_prerequisites(db, event, infrastructure):
         required_os = {
             load_base_type(endpoint["base_type"]).os.casefold()
             for zone in definitions[site.key]["zones"]
-            for endpoint in zone["endpoints"]
-            if endpoint.get("count", 0) > 0
+            for endpoint_group in zone["endpoints"]
+            for endpoint in endpoint_instances(endpoint_group)
         }
         valid = db.query(PrivateBootCertification).filter_by(
             site_id=site.id, region=site.region, vpc_id=site.vpc_id,

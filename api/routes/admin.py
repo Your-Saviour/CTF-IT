@@ -1060,6 +1060,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     from builder.attack_tree import build_attack_tree, serialize_tree
     from builder.base_loader import load_base_type
     from builder.infrastructure_validation import gamenet_hostname
+    from builder.infrastructure_planner import endpoint_instances
 
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
@@ -1119,14 +1120,15 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             "hostname": lambda team, index, site_key=site["key"]: gamenet_hostname(event_id, team.id, site_key, "fw"),
         })
         for zone in site["zones"]:
-            for endpoint in zone["endpoints"]:
-                machine_types.append({
-                    "type_key": f"{site['key']}_{zone['key']}_{endpoint['key']}",
-                    "role": "attacker" if zone["team"] == "red" else "target",
-                    "count": endpoint["count"], "spec": endpoint, "region": site["region"],
-                    "hostname": lambda team, index, site_key=site["key"], zone_key=zone["key"], endpoint_key=endpoint["key"]:
-                        gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key, index + 1),
-                })
+            for endpoint_group in zone["endpoints"]:
+                for endpoint in endpoint_instances(endpoint_group):
+                    machine_types.append({
+                        "type_key": f"{site['key']}_{zone['key']}_{endpoint['key']}",
+                        "role": "attacker" if zone["team"] == "red" else "target",
+                        "count": 1, "spec": endpoint, "region": site["region"],
+                        "hostname": lambda team, index, site_key=site["key"], zone_key=zone["key"], endpoint_key=endpoint["key"]:
+                            gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key),
+                    })
 
     for definition in machine_types:
         type_key = definition["type_key"]
