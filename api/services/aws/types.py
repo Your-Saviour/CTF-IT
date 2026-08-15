@@ -30,6 +30,13 @@ class InstanceResult:
 
 
 @dataclass(frozen=True)
+class ElasticIpResult:
+    allocation_id: str
+    public_ip: str
+    association_id: str | None = None
+
+
+@dataclass(frozen=True)
 class SiteNetworkResult:
     vpc_id: str
     availability_zone: str
