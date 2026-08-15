@@ -54,7 +54,8 @@ def close_client(engine):
     Base.metadata.drop_all(engine)
 
 
-def test_invitation_is_hashed_single_use_and_event_bound():
+def test_invitation_is_hashed_single_use_and_event_bound(monkeypatch):
+    monkeypatch.setenv("LEARNER_TRAINING_ENABLED", "false")
     client, sessions, engine = managed_client()
     db = sessions()
     event = Event(name="Invited Event", quota="{}", status="draft")

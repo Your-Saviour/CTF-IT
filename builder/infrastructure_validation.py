@@ -159,6 +159,9 @@ def _key(value, path: str, seen: set[str], errors: list[str]) -> None:
 
 
 def _validate_machine(spec: dict, path: str, bases: set[str], errors: list[str], require_region=False) -> None:
+    prompt = spec.get("ust_prompt")
+    if prompt is not None and (not isinstance(prompt, str) or len(prompt) > 8000):
+        errors.append(f"{path}.ust_prompt must be a string of at most 8000 characters")
     base = spec.get("base_type")
     if not isinstance(base, str) or base not in bases:
         errors.append(f"{path}.base_type references unknown or disabled base type '{base}'")

@@ -6,7 +6,7 @@ import socket
 import paramiko
 from sqlalchemy.orm import Session
 
-from api.models import VM
+from api.models import TeamVPNGateway, VM
 from api.services.ssh_keys import get_or_create_platform_keypair
 
 
@@ -14,26 +14,34 @@ def _key_text(key: paramiko.PKey) -> str:
     return f"{key.get_name()} {key.get_base64()}"
 
 
+def _gateway_channel(vm: VM, db: Session):
+    """Open the mandatory endpoint path through the team's public VPN gateway."""
+    if not isinstance(vm.role, str) or not vm.role.endswith("_endpoint"):
+        return None, None
+    gateway = db.query(TeamVPNGateway).filter_by(team_id=vm.team_id).first()
+    gateway_vm = db.get(VM, gateway.vm_id) if gateway and gateway.vm_id else None
+    if not gateway_vm or not gateway_vm.public_ip:
+        raise paramiko.SSHException("team VPN gateway is unavailable for endpoint SSH")
+    private_key_pem, _ = get_or_create_platform_keypair(db)
+    pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key_pem))
+    jump_client = paramiko.SSHClient()
+    jump_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    jump_client.connect(
+        gateway_vm.public_ip, username=gateway_vm.ssh_user or "root", pkey=pkey,
+        timeout=10, allow_agent=False, look_for_keys=False,
+    )
+    channel = jump_client.get_transport().open_channel(
+        "direct-tcpip", (vm.ip_address, vm.ssh_port or 22), ("127.0.0.1", 0)
+    )
+    return channel, jump_client
+
+
 def read_remote_host_key(vm: VM, db: Session | None = None) -> str:
     jump_client = None
-    try:
+    if db and isinstance(vm.role, str) and vm.role.endswith("_endpoint"):
+        sock, jump_client = _gateway_channel(vm, db)
+    else:
         sock = socket.create_connection((vm.ip_address, vm.ssh_port or 22), timeout=10)
-    except OSError:
-        if not db or not isinstance(vm.site_id, int):
-            raise
-        from api.models import Site
-        site = db.query(Site).filter_by(id=vm.site_id).first()
-        jump = db.query(VM).filter_by(id=site.firewall_vm_id).first() if site else None
-        if not jump or not jump.public_ip:
-            raise
-        private_key_pem, _ = get_or_create_platform_keypair(db)
-        pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key_pem))
-        jump_client = paramiko.SSHClient()
-        jump_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        jump_client.connect(jump.public_ip, username=jump.ssh_user or "root", pkey=pkey, timeout=10)
-        sock = jump_client.get_transport().open_channel(
-            "direct-tcpip", (vm.ip_address, vm.ssh_port or 22), ("127.0.0.1", 0)
-        )
     transport = paramiko.Transport(sock)
     try:
         transport.start_client(timeout=10)
@@ -69,20 +77,8 @@ def connect_vm(vm: VM, db: Session) -> paramiko.SSHClient:
     client.set_missing_host_key_policy(_PinnedHostKeyPolicy(vm.ssh_host_key))
     proxy_sock = None
     jump_client = None
-    try:
-        socket.create_connection((vm.ip_address, vm.ssh_port or 22), timeout=3).close()
-    except OSError:
-        if isinstance(vm.site_id, int):
-            from api.models import Site
-            site = db.query(Site).filter_by(id=vm.site_id).first()
-            jump = db.query(VM).filter_by(id=site.firewall_vm_id).first() if site else None
-            if jump and jump.public_ip:
-                jump_client = paramiko.SSHClient()
-                jump_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                jump_client.connect(jump.public_ip, username=jump.ssh_user or "root", pkey=pkey, timeout=10)
-                proxy_sock = jump_client.get_transport().open_channel(
-                    "direct-tcpip", (vm.ip_address, vm.ssh_port or 22), ("127.0.0.1", 0)
-                )
+    if isinstance(vm.role, str) and vm.role.endswith("_endpoint"):
+        proxy_sock, jump_client = _gateway_channel(vm, db)
     client.connect(
         hostname=vm.ip_address,
         port=vm.ssh_port or 22,

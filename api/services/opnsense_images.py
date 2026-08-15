@@ -520,6 +520,9 @@ def _sanitize_and_halt(db: Session, client: VultrImageClient, image: OpnsenseIma
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
         "/var/db/dhclient.leases.* /var/db/dhclient.leases /root/.*history /root/.sh_history "
         "/root/opnsense-bootstrap.sh /var/log/opnsense-bootstrap.log; "
+        "rm -f /conf/ctf-site-ready /conf/ctf-site-applying /conf/ctf-site-failed "
+        "/conf/ctf-site-apply.lock /var/log/ctf-site-apply.log "
+        "/usr/local/etc/inc/plugins.inc.d/gamenet.inc; "
         "find /var/log -type f -exec sh -c ': > \"$1\"' _ {} \\;; "
         "rm -rf /tmp/* /var/tmp/* /root/.cache; touch /firstboot; sync"
     )

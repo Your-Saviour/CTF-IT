@@ -8,6 +8,7 @@ exercise the exact security ordering.
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import os
 import shlex
@@ -16,11 +17,17 @@ from ipaddress import ip_network
 from sqlalchemy.orm import object_session
 
 from api.database import SessionLocal
-from api.models import Event, Site, Team, VM, VMGoal, VMModule, VPNCredential, Zone, utcnow
+from api.models import (
+    Event, PrivateBootCertification, Site, Team, VM, VMGoal, VMModule,
+    VPNCredential, Zone, utcnow,
+)
 from api.services.gamenet_provider import (
-    GameNetProviderError, VultrGameNetProvider, bootstrap_opnsense, configure_endpoint_network, configure_snapshot_opnsense,
-    configure_gateway, configure_site_wireguard, endpoint_cloud_init, install_local_wireguard,
-    ssh_command, tcp_closed, ubuntu_cloud_init, update_vm_addresses, upload_text, validate_snapshot_wan,
+    GameNetProviderError, VultrGameNetProvider, add_deterministic_endpoint_address,
+    bootstrap_opnsense, configure_snapshot_opnsense, configure_gateway,
+    configure_site_wireguard, finalize_endpoint_network, install_local_wireguard,
+    ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
+    update_vm_addresses, upload_text, validate_site_tunnel, validate_snapshot_wan,
+    validate_vpc_only_instance,
 )
 from api.services.secrets import decrypt_secret
 from builder.infrastructure_validation import gamenet_hostname
@@ -29,8 +36,9 @@ log = logging.getLogger(__name__)
 
 PROVISIONING_STEPS = (
     "allocate_keys_and_addresses", "create_gateways", "create_site_firewalls",
-    "establish_site_tunnels", "create_private_endpoints", "apply_blue_modules",
-    "connect_control_plane", "lock_down_public_ingress", "run_acceptance_checks",
+    "establish_site_tunnels", "connecting_control_plane", "certifying_private_boot",
+    "create_private_endpoints", "apply_blue_modules", "lock_down_public_ingress",
+    "run_acceptance_checks",
 )
 
 
@@ -61,6 +69,9 @@ def provision_event_gamenets(event_id: int) -> None:
         event.ends_at = (event.started_at + __import__("datetime").timedelta(minutes=event.time_limit_minutes)
                          if event.time_limit_minutes else None)
         db.commit()
+        from api.services.expo_ust import configured, synchronize
+        if configured():
+            asyncio.run(synchronize(event.id))
     except Exception as exc:
         db.rollback()
         event = db.query(Event).filter_by(id=event_id).first()
@@ -103,12 +114,14 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
                 event_id=event.id, status="creating", role="vpn_gateway", vm_type="vpn_gateway",
                 base_type=gateway_spec["base_type"], vultr_plan=gateway_spec["default_plan"],
                 vultr_region=gateway_spec["region"],
+                ust_prompt=gateway_spec.get("ust_prompt"),
             )
             db.add(gateway_vm)
             db.flush()
         if gateway:
             gateway.vm_id = gateway_vm.id
         created.append(gateway_vm)
+        gateway_vm.ust_prompt = gateway_spec.get("ust_prompt")
 
         for site in db.query(Site).filter_by(team_id=team.id).order_by(Site.order):
             site_spec = definitions[site.key]
@@ -120,11 +133,13 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
                     status="creating", role="site_firewall", vm_type=f"{site.key}_firewall",
                     base_type=site_spec["firewall"]["base_type"],
                     vultr_plan=site_spec["firewall"]["default_plan"], vultr_region=site.region,
+                    ust_prompt=site_spec["firewall"].get("ust_prompt"),
                 )
                 db.add(firewall)
                 db.flush()
                 site.firewall_vm_id = firewall.id
             created.append(firewall)
+            firewall.ust_prompt = site_spec["firewall"].get("ust_prompt")
 
             zones = {zone.key: zone for zone in site.zones}
             for zone_spec in site_spec["zones"]:
@@ -145,10 +160,12 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
                                 base_type=endpoint["base_type"],
                                 vultr_plan=endpoint["default_plan"], vultr_region=site.region,
                                 private_ip=private_ip, ip_address=private_ip,
+                                ust_prompt=endpoint.get("ust_prompt"),
                             )
                             db.add(vm)
                             db.flush()
                         created.append(vm)
+                        vm.ust_prompt = endpoint.get("ust_prompt")
                         next_host += 1
     return created
 
@@ -175,6 +192,7 @@ def create_gateways(db, event, infrastructure):
             _create_provider_instance(vm, public=True)
         if not vm.public_ip:
             raise RuntimeError("VPN gateway did not receive a public address")
+        _apply_temporary_gateway_firewall(event, team, vm)
         vm.ip_address, vm.status, team.vpn_gateway.status = vm.public_ip, "active", "active"
         sites = db.query(Site).filter_by(team_id=team.id).order_by(Site.order).all()
         participants = db.query(VPNCredential).filter_by(team_id=team.id, status="active").all()
@@ -235,6 +253,9 @@ def create_site_firewalls(db, event, infrastructure):
 
 
 def establish_site_tunnels(db, event, infrastructure):
+    for team in db.query(Team).filter_by(event_id=event.id):
+        gateway_vm = db.get(VM, team.vpn_gateway.vm_id)
+        _apply_temporary_gateway_firewall(event, team, gateway_vm)
     for site in db.query(Site).filter_by(event_id=event.id):
         if site.tunnel_status != "active":
             _configure_site_tunnel(site)
@@ -242,6 +263,7 @@ def establish_site_tunnels(db, event, infrastructure):
 
 
 def create_private_endpoints(db, event, infrastructure):
+    _require_endpoint_prerequisites(db, event, infrastructure)
     definitions = {site["key"]: site for site in infrastructure["sites"]}
     for site in db.query(Site).filter_by(event_id=event.id):
         zone_defs = {zone["key"]: zone for zone in definitions[site.key]["zones"]}
@@ -260,16 +282,26 @@ def create_private_endpoints(db, event, infrastructure):
                                         vultr_region=site.region, private_ip=private_ip, ip_address=private_ip)
                     if not existing:
                         db.add(vm); db.flush()
-                    if not vm.vultr_id:
+                    if not vm.vultr_id or not vm.vpc_ip or not vm.vpc_mac:
                         _create_provider_instance(
                             vm, public=False, vpc_ids=[site.vpc_id],
-                            user_data=endpoint_cloud_init(vm.private_ip, site.allocated_cidr),
+                            stock_image=True,
                         )
-                    if vm.public_ip:
-                        raise RuntimeError("private endpoint unexpectedly received a public address")
-                    firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
-                    if vm.status == "creating":
-                        configure_endpoint_network(vm, site, firewall)
+                        vm.network_phase = "provider_created"
+                        db.commit()
+                    if vm.public_ip or not vm.vpc_ip or not vm.vpc_mac:
+                        raise GameNetProviderError("missing VPC attachment metadata or unexpected public endpoint address")
+                    gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
+                    if vm.network_phase in {None, "provider_created"}:
+                        add_deterministic_endpoint_address(vm, site, gateway_vm)
+                        vm.network_phase = "address_added"
+                        db.commit()
+                    if vm.network_phase == "address_added":
+                        finalize_endpoint_network(vm, site, gateway_vm)
+                        vm.network_phase = "network_converted"
+                        vm.ip_address = vm.private_ip
+                        db.commit()
+                    if vm.network_phase == "network_converted":
                         vm.status = "registered"
                     if zone.team_role == "blue":
                         _assign_blue_modules(db, vm, event)
@@ -285,6 +317,257 @@ def apply_blue_modules(db, event, infrastructure):
 
 def connect_control_plane(db, event, infrastructure):
     _configure_control_plane_peers(event)
+    for site in db.query(Site).filter_by(event_id=event.id):
+        firewall = db.get(VM, site.firewall_vm_id)
+        code, _, error = ssh_command(
+            firewall, "true", host=firewall.private_ip, connect_timeout=120,
+        )
+        if code:
+            raise GameNetProviderError(
+                f"control-plane VPN could not reach firewall LAN {firewall.private_ip}: {error[:300]}"
+            )
+        site.control_plane_status = "active"
+        db.commit()
+
+
+def connecting_control_plane(db, event, infrastructure):
+    connect_control_plane(db, event, infrastructure)
+
+
+def certify_private_boot(db, event, infrastructure):
+    """Certify every distinct stock endpoint image before creating workloads."""
+    from builder.base_loader import load_base_type
+
+    definitions = {row["key"]: row for row in infrastructure["sites"]}
+    for site in db.query(Site).filter_by(event_id=event.id).order_by(Site.id):
+        base_types = {
+            endpoint["base_type"]
+            for zone in definitions[site.key]["zones"]
+            for endpoint in zone["endpoints"]
+            if endpoint.get("count", 0) > 0
+        }
+        unique_images = {}
+        for base_type_id in sorted(base_types):
+            base = load_base_type(base_type_id)
+            unique_images.setdefault(base.os.casefold(), base_type_id)
+        for base_type_id in unique_images.values():
+            _certify_site_image(db, event, site, base_type_id)
+
+
+def certifying_private_boot(db, event, infrastructure):
+    certify_private_boot(db, event, infrastructure)
+
+
+def _certify_site_image(db, event, site, base_type_id):
+    from builder.base_loader import load_base_type
+
+    base = load_base_type(base_type_id)
+    firewall = db.get(VM, site.firewall_vm_id)
+    if not firewall or not firewall.vultr_id:
+        raise GameNetProviderError("site firewall instance is missing before private-boot certification")
+    if site.tunnel_status != "active" or site.control_plane_status != "active":
+        raise GameNetProviderError("site tunnel and control-plane VPN must be active before private-boot certification")
+    provider = _provider()
+    try:
+        os_id = provider._resolve_os_id(base.os)
+    finally:
+        provider.close()
+    cert = db.query(PrivateBootCertification).filter_by(
+        site_id=site.id, os_id=os_id,
+        region=site.region, vpc_id=site.vpc_id, firewall_instance_id=firewall.vultr_id,
+    ).first()
+    if cert and cert.status == "passed" and cert.cleanup_completed_at:
+        return
+    if not cert:
+        cert = PrivateBootCertification(
+            site_id=site.id, base_type=base_type_id, os_id=os_id,
+            region=site.region, vpc_id=site.vpc_id, firewall_instance_id=firewall.vultr_id,
+            plan=base.default_plan,
+            status="creating", phase="creating_instance", started_at=utcnow(),
+        )
+        db.add(cert)
+        db.commit()
+
+    if cert.status in {"creating", "testing"} and cert.instance_id:
+        cert.phase = "cleanup_after_failure"
+        cert.diagnostic_detail = "interrupted private-boot certification; recreating canary"
+        db.commit()
+        try:
+            _cleanup_canary(db, cert)
+        except Exception as exc:
+            cert.status = "cleanup_failed"
+            cert.diagnostic_detail = f"canary cleanup failure after interrupted certification: {exc}"[:4000]
+            db.commit()
+            raise GameNetProviderError(cert.diagnostic_detail) from exc
+        cert.instance_id = None
+        cert.provider_ip = None
+        cert.mac_address = None
+        db.commit()
+
+    # A worker may have stopped while deleting. Finish that exact cleanup
+    # before deciding whether a failed certification needs a new instance.
+    if cert.status == "cleanup_failed" and cert.instance_id:
+        cleanup_after_pass = cert.phase == "cleanup_after_pass"
+        _cleanup_canary(db, cert)
+        if cleanup_after_pass:
+            cert.status, cert.phase = "passed", "passed"
+            cert.completed_at = cert.completed_at or utcnow()
+            cert.diagnostic_detail = None
+            db.commit()
+            return
+        cert.instance_id = None
+        cert.provider_ip = None
+        cert.mac_address = None
+        db.commit()
+
+    if cert.status == "failed" and cert.cleanup_completed_at:
+        cert.instance_id = None
+        cert.provider_ip = None
+        cert.mac_address = None
+        db.commit()
+
+    cert.status, cert.phase = "creating", "creating_instance"
+    cert.started_at, cert.completed_at = utcnow(), None
+    cert.cleanup_completed_at = None
+    cert.diagnostic_detail = None
+    db.commit()
+    success = False
+    failure = None
+    try:
+        provider = _provider()
+        try:
+            instance = provider.create_private_boot_canary(
+                cert,
+                hostname=gamenet_hostname(
+                    event.id, site.team_id, site.key, base_type_id, "canary",
+                ),
+                db=db,
+            )
+        except Exception as exc:
+            if "missing VPC attachment metadata" in str(exc):
+                raise GameNetProviderError(str(exc)) from exc
+            raise GameNetProviderError(f"provider instance creation failure: {exc}") from exc
+        finally:
+            provider.close()
+        validate_vpc_only_instance(instance, label="private-boot canary")
+        cert.provider_ip = instance.get("internal_ip")
+        cert.mac_address = instance.get("vpc_mac")
+        if not cert.provider_ip or not cert.mac_address:
+            raise GameNetProviderError("missing VPC attachment metadata for private-boot canary")
+        cert.status, cert.phase, cert.updated_at = "testing", "testing_reachability", utcnow()
+        db.commit()
+        _validate_private_boot_canary(db, cert, site, base.os)
+        success = True
+        cert.phase = "cleanup_after_pass"
+        cert.completed_at = utcnow()
+        db.commit()
+    except Exception as exc:
+        failure = exc
+        cert.status = "failed"
+        cert.phase = "cleanup_after_failure"
+        cert.diagnostic_detail = str(exc)[:4000]
+        cert.completed_at = utcnow()
+        db.commit()
+    try:
+        _cleanup_canary(db, cert)
+    except Exception as cleanup_exc:
+        cert.status = "cleanup_failed"
+        cert.diagnostic_detail = (
+            f"{cert.diagnostic_detail + '; ' if cert.diagnostic_detail else ''}"
+            f"canary cleanup failure: {cleanup_exc}"
+        )[:4000]
+        db.commit()
+        raise GameNetProviderError(cert.diagnostic_detail) from cleanup_exc
+    if success:
+        cert.status, cert.phase = "passed", "passed"
+        cert.diagnostic_detail = None
+        db.commit()
+        return
+    cert.status, cert.phase = "failed", "failed"
+    db.commit()
+    raise GameNetProviderError(
+        f"Vultr region/OS private boot certification failed for {site.region}/{base.os}: {failure}"
+    ) from failure
+
+
+def _cleanup_canary(db, cert):
+    if cert.instance_id:
+        provider = _provider()
+        try:
+            provider.delete_instance(cert.instance_id)
+        finally:
+            provider.close()
+    cert.cleanup_completed_at = utcnow()
+    cert.updated_at = utcnow()
+    db.commit()
+
+
+def _validate_private_boot_canary(db, cert, site, expected_os):
+    firewall = db.get(VM, site.firewall_vm_id)
+    gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
+    target = shlex.quote(cert.provider_ip)
+    arp_target = shlex.quote("(" + cert.provider_ip + ")")
+    probe_body = (
+        f"target={target}; attempt=0; ping_status=1; tcp_status=1; arp_status=1; "
+        'while [ "$attempt" -lt 24 ]; do '
+        'if timeout 2 ping -c 1 "$target" >/dev/null 2>&1; then ping_status=0; else ping_status=$?; fi; '
+        f"if arp -an | grep -F {arp_target} | grep -Fv '(incomplete)' >/dev/null 2>&1; "
+        "then arp_status=0; else arp_status=$?; fi; "
+        'if nc -z -w 2 "$target" 22 >/dev/null 2>&1; then tcp_status=0; else tcp_status=$?; fi; '
+        'if [ "$ping_status" -eq 0 ] && [ "$tcp_status" -eq 0 ] && [ "$arp_status" -eq 0 ]; '
+        "then exit 0; fi; attempt=$((attempt + 1)); sleep 3; done; "
+        "printf 'ping=%s tcp=%s arp=%s attempts=%s\\n' "
+        '"$ping_status" "$tcp_status" "$arp_status" "$attempt" >&2; exit 1'
+    )
+    probe = "sh -c " + shlex.quote(probe_body)
+    try:
+        code, _, error = ssh_command(
+            firewall, probe, host=firewall.private_ip, jump=gateway_vm,
+            timeout=140, connect_timeout=120,
+        )
+    except Exception as exc:
+        raise GameNetProviderError(f"no ARP/TCP reachability to canary: {exc}") from exc
+    if code:
+        raise GameNetProviderError(f"no ARP/TCP reachability to canary: {error[:300]}")
+    cert.phase = "testing_ssh"
+    db.commit()
+    try:
+        code, _, error = ssh_host_command(
+            db, cert.provider_ip, "true", jump=gateway_vm,
+            connect_timeout=120, label="private-boot canary",
+        )
+    except Exception as exc:
+        raise GameNetProviderError(f"SSH-key injection failure: {exc}") from exc
+    if code:
+        raise GameNetProviderError(f"SSH-key injection failure: {error[:300]}")
+    cert.phase = "testing_cloud_init"
+    db.commit()
+    code, output, error = ssh_host_command(
+        db, cert.provider_ip, "cloud-init status --wait --long", jump=gateway_vm,
+        timeout=CREATE_TIMEOUT, connect_timeout=120, label="private-boot canary",
+    )
+    if code or "status: done" not in output.lower():
+        raise GameNetProviderError(f"cloud-init failure: {(error or output)[:500]}")
+    cert.phase = "testing_guest"
+    db.commit()
+    command = (
+        ". /etc/os-release; printf 'os=%s\\n' \"$ID\"; uname -m; "
+        f"iface=''; for p in /sys/class/net/*/address; do if [ \"$(tr A-F a-f < \"$p\")\" = {shlex.quote(cert.mac_address.lower())} ]; "
+        "then iface=$(basename \"$(dirname \"$p\")\"); break; fi; done; "
+        "test -n \"$iface\"; ip -4 address show dev \"$iface\"; "
+        f"ip route get {shlex.quote(str(ip_network(site.allocated_cidr).network_address + 1))}"
+    )
+    code, output, error = ssh_host_command(
+        db, cert.provider_ip, command, jump=gateway_vm,
+        timeout=120, connect_timeout=120, label="private-boot canary",
+    )
+    expected_id = expected_os.split()[0].lower()
+    expected_arch = (
+        "x86_64" if "x64" in expected_os.lower()
+        else "aarch64" if "arm64" in expected_os.lower() else ""
+    )
+    if code or f"os={expected_id}" not in output.lower() or (expected_arch and expected_arch not in output):
+        raise GameNetProviderError(f"stock guest OS, architecture, VPC interface, or route check failed: {(error or output)[:500]}")
 
 
 def lock_down_public_ingress(db, event, infrastructure):
@@ -310,21 +593,37 @@ def _provider():
     return VultrGameNetProvider()
 
 
-def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None, image_source=None):
+def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None,
+                              image_source=None, stock_image=False):
     provider = _provider()
     try:
         instance = provider.create_instance(
             vm, public=public, vpc_ids=vpc_ids,
-            user_data=(user_data if user_data is not None else ubuntu_cloud_init()) if not image_source else None,
+            user_data=(None if stock_image else (user_data if user_data is not None else ubuntu_cloud_init()))
+            if not image_source else None,
             image_source=image_source,
         )
         if public:
             update_vm_addresses(vm, instance, public=True)
         else:
+            try:
+                validate_vpc_only_instance(instance, label=f"endpoint {vm.hostname}")
+            except Exception as exc:
+                try:
+                    provider.delete_instance(vm.vultr_id)
+                    vm.vultr_id = None
+                    object_session(vm).commit()
+                except Exception as cleanup_exc:
+                    raise GameNetProviderError(
+                        f"{exc}; rejected endpoint cleanup failure: {cleanup_exc}"
+                    ) from cleanup_exc
+                raise
             vm.public_ip = None
-            vm.vpc_ip = instance.get("internal_ip") or instance.get("vpc_ip") or vm.private_ip
-            if instance.get("vpc_only") is not True:
-                raise GameNetProviderError("Vultr did not create the endpoint as VPC-only")
+            vm.vpc_ip = instance.get("internal_ip") or instance.get("vpc_ip")
+            vm.vpc_mac = instance.get("vpc_mac")
+            if not vm.vpc_ip or not vm.vpc_mac:
+                raise GameNetProviderError(f"missing VPC attachment metadata for endpoint {vm.hostname}")
+            object_session(vm).commit()
     finally:
         provider.close()
 
@@ -335,6 +634,39 @@ def _create_provider_vpc(site):
         return provider.create_vpc(site)
     finally:
         provider.close()
+
+
+def _require_endpoint_prerequisites(db, event, infrastructure):
+    from builder.base_loader import load_base_type
+
+    definitions = {row["key"]: row for row in infrastructure["sites"]}
+    for site in db.query(Site).filter_by(event_id=event.id):
+        gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id) if site.team.vpn_gateway else None
+        firewall = db.get(VM, site.firewall_vm_id) if site.firewall_vm_id else None
+        if (not gateway_vm or gateway_vm.status != "active" or not firewall or
+                firewall.status != "active" or site.tunnel_status != "active" or
+                site.control_plane_status != "active"):
+            raise GameNetProviderError(
+                "gateway, firewall, site tunnel, and control-plane VPN must pass before endpoint creation"
+            )
+        required_os = {
+            load_base_type(endpoint["base_type"]).os.casefold()
+            for zone in definitions[site.key]["zones"]
+            for endpoint in zone["endpoints"]
+            if endpoint.get("count", 0) > 0
+        }
+        valid = db.query(PrivateBootCertification).filter_by(
+            site_id=site.id, region=site.region, vpc_id=site.vpc_id,
+            firewall_instance_id=firewall.vultr_id, status="passed",
+        ).all()
+        certified_os = {
+            load_base_type(cert.base_type).os.casefold()
+            for cert in valid if cert.cleanup_completed_at is not None
+        }
+        if not required_os <= certified_os:
+            raise GameNetProviderError(
+                "all endpoint stock images must pass private-boot certification before endpoint creation"
+            )
 
 
 def _attach_provider_vpc(vm, vpc_id):
@@ -352,6 +684,38 @@ def _configure_site_tunnel(site):
     gateway_vm = db.query(VM).filter_by(id=gateway.vm_id).one()
     team_sites = db.query(Site).filter_by(team_id=site.team_id).all()
     configure_site_wireguard(site, firewall, gateway, gateway_vm, team_sites)
+    validate_site_tunnel(site, firewall, gateway, gateway_vm)
+
+
+def _apply_temporary_gateway_firewall(event, team, gateway_vm):
+    value = os.environ.get("CTF_CONTROL_PLANE_CIDR", "").strip()
+    try:
+        control_plane = ip_network(value)
+    except ValueError as exc:
+        raise GameNetProviderError("CTF_CONTROL_PLANE_CIDR must be a valid IPv4 CIDR") from exc
+    if control_plane.version != 4:
+        raise GameNetProviderError("CTF_CONTROL_PLANE_CIDR must be an IPv4 CIDR")
+    rules = [
+        {"ip_type": "v4", "protocol": "udp", "subnet": str(control_plane.network_address),
+         "subnet_size": control_plane.prefixlen, "port": str(team.vpn_gateway.listen_port), "source": ""},
+        {"ip_type": "v4", "protocol": "tcp", "subnet": str(control_plane.network_address),
+         "subnet_size": control_plane.prefixlen, "port": "22", "source": ""},
+    ]
+    for site in team.sites:
+        firewall = object_session(team).get(VM, site.firewall_vm_id) if site.firewall_vm_id else None
+        if firewall and firewall.public_ip:
+            rules.append({
+                "ip_type": "v4", "protocol": "udp", "subnet": firewall.public_ip,
+                "subnet_size": 32, "port": str(team.vpn_gateway.listen_port), "source": "",
+            })
+    provider = _provider()
+    try:
+        group = provider.create_firewall_group(
+            f"gamenet-e{event.id}-t{team.id}-gateway-bootstrap", rules,
+        )
+        provider.attach_firewall_group(gateway_vm, group)
+    finally:
+        provider.close()
 
 
 def _assign_blue_modules(db, vm, event):
@@ -370,8 +734,8 @@ def _assign_blue_modules(db, vm, event):
 
 
 def _apply_modules_through_jump_access(vm):
-    # Semaphore reaches private endpoints through the site's temporary public
-    # firewall SSH path. _run_provision raises via persisted VM failure state,
+    # Semaphore reaches private endpoints through the team's public VPN
+    # gateway ProxyJump. _run_provision raises via persisted VM failure state,
     # so verify the final state before the orchestrator advances.
     from api.routes.vm import _run_provision
     _run_provision(vm.id)
@@ -466,17 +830,22 @@ def _run_connectivity_and_exposure_checks(event, infrastructure):
         provider.close()
     for site in sites:
         firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
+        gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
         private_management &= _tcp_probe(firewall.private_ip, 443)
         public_exposure &= _wait_ports_closed(firewall.public_ip, (22, 80, 443))
         endpoints = db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all()
         if len(endpoints) > 1:
-            code, _, _ = ssh_command(endpoints[0], f"ping -c 1 -W 3 {endpoints[1].private_ip}")
+            code, _, _ = ssh_command(
+                endpoints[0], f"ping -c 1 -W 3 {endpoints[1].private_ip}", jump=gateway_vm,
+            )
             same_site &= code == 0
         other_sites = [other for other in sites if other.team_id == site.team_id and other.id != site.id]
         if endpoints and other_sites:
             target = db.query(VM).filter(VM.site_id == other_sites[0].id, VM.role.like("%_endpoint")).first()
             if target:
-                code, _, _ = ssh_command(endpoints[0], f"ping -c 1 -W 3 {target.private_ip}")
+                code, _, _ = ssh_command(
+                    endpoints[0], f"ping -c 1 -W 3 {target.private_ip}", jump=gateway_vm,
+                )
                 site_isolation &= code != 0
     for team in teams:
         gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
@@ -488,7 +857,9 @@ def _run_connectivity_and_exposure_checks(event, infrastructure):
             source = db.query(VM).filter(VM.team_id == team.id, VM.role.like("%_endpoint")).first()
             if source:
                 destination = str(ip_network(other.sites[0].allocated_cidr).network_address + 1)
-                code, _, _ = ssh_command(source, f"ping -c 1 -W 3 {destination}")
+                code, _, _ = ssh_command(
+                    source, f"ping -c 1 -W 3 {destination}", jump=gateway_vm,
+                )
                 team_isolation &= code != 0
     return {"vpn_routes": vpn_routes, "same_site": same_site, "site_isolation": site_isolation,
             "team_isolation": team_isolation, "private_management": private_management,

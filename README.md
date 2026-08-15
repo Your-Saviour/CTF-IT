@@ -445,6 +445,17 @@ To destroy: VM detail page → **Destroy on Vultr** — runs `playbooks/destroy-
 
 ### GameNet auto-provisioning on event start
 
+> [!WARNING]
+> **Vultr GameNet provisioning is currently blocked in production.** A stock
+> Ubuntu VPC-only canary receives Vultr attachment metadata, but its guest VPC
+> interface does not become usable on the ordinary VPC connectivity mode. The
+> canary consequently cannot pass ARP, SSH, or cloud-init certification, so no
+> workload endpoints are created. Do not start or retry a production GameNet
+> until the provider-networking issue is resolved. In particular, retrying an
+> interrupted or failed certification can delete its recorded canary as part of
+> cleanup. See [the Vultr private-boot known issue](docs/KNOWN_ISSUES_VULTR_PRIVATE_BOOT.md)
+> for verified evidence, operational safeguards, and the remaining validation.
+
 An event with GameNet infrastructure materialises its team VPN gateways, site
 firewalls, private zones, and endpoints when the event starts. The platform
 validates Vultr VPC capacity and requires an active managed OPNsense image

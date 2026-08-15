@@ -76,8 +76,12 @@ async def lifespan(app: FastAPI):
                 "public_ip": "VARCHAR(45)",
                 "private_ip": "VARCHAR(45)",
                 "vpc_ip": "VARCHAR(45)",
+                "vpc_mac": "VARCHAR(32)",
+                "network_boot_id": "VARCHAR(128)",
+                "network_phase": "VARCHAR(32)",
                 "admin_password": "VARCHAR(128)",
                 "ssh_host_key": "VARCHAR(512)",
+                "ust_prompt": "TEXT",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE vms ADD COLUMN {col} {typ}"))
@@ -90,6 +94,10 @@ async def lifespan(app: FastAPI):
                 "infrastructure": "TEXT",
                 "started_at": "DATETIME",
                 "ends_at": "DATETIME",
+                "expo_sync_status": "VARCHAR(24)",
+                "expo_sync_last_error": "TEXT",
+                "expo_sync_attempts": "INTEGER NOT NULL DEFAULT 0",
+                "expo_sync_completed_at": "DATETIME",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))

@@ -40,6 +40,14 @@ TEMPLATES_DIR = _HERE / "templates"
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 
+def _gamenet_gateway_proxy(db, vm: VM) -> str | None:
+    """Return the public team gateway used to route all endpoint automation."""
+    if not vm.zone_id or not vm.team or not vm.team.vpn_gateway or not vm.team.vpn_gateway.vm_id:
+        return None
+    gateway_vm = db.get(VM, vm.team.vpn_gateway.vm_id)
+    return gateway_vm.public_ip if gateway_vm else None
+
+
 def _record_vm_failure(vm_id: int, error: str, *, agent: bool = False) -> None:
     """Persist background-worker failure using a clean transaction."""
     from api.database import SessionLocal
@@ -255,6 +263,7 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db), in
         "ssh_user": vm.ssh_user,
         "ssh_host_key": vm.ssh_host_key,
         "notes": vm.notes,
+        "ust_prompt": vm.ust_prompt,
         "team_id": vm.team_id,
         "team_name": vm.team.name if vm.team else None,
         "event_id": vm.event_id,
@@ -309,6 +318,7 @@ async def create_vm(request: Request, db: Session = Depends(get_db)):
         ssh_port=body.get("ssh_port") or 22,
         ssh_user=body.get("ssh_user") or "root",
         notes=body.get("notes") or None,
+        ust_prompt=body.get("ust_prompt") or None,
         team_id=team_id,
         event_id=team.event_id,
     )
@@ -329,7 +339,9 @@ async def update_vm(vm_id: int, request: Request, db: Session = Depends(get_db))
         return JSONResponse({"error": "VM not found"}, status_code=404)
 
     body = await request.json()
-    for field in ("hostname", "ip_address", "os", "status", "ssh_port", "ssh_user", "notes"):
+    if len(body.get("ust_prompt") or "") > 8000:
+        return JSONResponse({"error": "ust_prompt must be at most 8000 characters"}, status_code=422)
+    for field in ("hostname", "ip_address", "os", "status", "ssh_port", "ssh_user", "notes", "ust_prompt"):
         if field in body:
             setattr(vm, field, body[field] or None if field not in ("ssh_port",) else body[field])
 
@@ -678,8 +690,7 @@ def _run_provision(vm_id: int) -> None:
                     ssh_user=vm.ssh_user or "root",
                     ssh_port=vm.ssh_port or 22,
                     key_id=key_id,
-                    proxy_host=(vm.zone.site and db.query(VM).filter(VM.id == vm.zone.site.firewall_vm_id).first().public_ip)
-                    if vm.zone_id and vm.zone and vm.zone.site else None,
+                    proxy_host=_gamenet_gateway_proxy(db, vm),
                 )
                 repo_id = client.create_repository(
                     project_id,
@@ -767,8 +778,7 @@ def _run_provision(vm_id: int) -> None:
                 ssh_user=vm.ssh_user or "root",
                 ssh_port=vm.ssh_port or 22,
                 key_id=key_id,
-                proxy_host=(vm.zone.site and db.query(VM).filter(VM.id == vm.zone.site.firewall_vm_id).first().public_ip)
-                if vm.zone_id and vm.zone and vm.zone.site else None,
+                proxy_host=_gamenet_gateway_proxy(db, vm),
             )
             repo_id = client.create_repository(
                 project_id,

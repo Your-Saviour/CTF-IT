@@ -10,17 +10,26 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.database import Base
-from api.models import Event, OpnsenseImage, PlatformSettings, Site, Team, User, VM, VPNCredential, utcnow
+from api.models import (
+    Event, OpnsenseImage, PlatformSettings, PrivateBootCertification,
+    Site, Team, User, VM, VPNCredential, utcnow,
+)
 from api.routes.admin import PlanPreviewRequest, overview, plan_preview
+from api.routes.vm import _gamenet_gateway_proxy
 from api.services.gamenet import (
     allocate_event_networks, ensure_user_vpn_credential, render_user_config,
     site_dns_zone, vm_dns_name,
 )
 from api.services.gamenet_provider import (
-    VultrGameNetProvider, endpoint_cloud_init, render_opnsense_config,
-    snapshot_site_validation_command, ubuntu_cloud_init,
+    GameNetProviderError, VultrGameNetProvider, add_deterministic_endpoint_address,
+    endpoint_cloud_init, opnsense_config_fingerprint, render_opnsense_config,
+    snapshot_site_validation_command, ubuntu_cloud_init, validate_site_tunnel,
+    validate_vpc_only_instance,
 )
-from api.services.gamenet_provisioning import ensure_vm_placeholders
+from api.services.gamenet_provisioning import (
+    PROVISIONING_STEPS, certify_private_boot, create_private_endpoints,
+    ensure_vm_placeholders,
+)
 from api.services.secrets import decrypt_secret
 from builder.infrastructure_validation import gamenet_hostname, infrastructure_summary, validate_infrastructure
 
@@ -40,6 +49,7 @@ BASES = {"ubuntu_24_server", "opnsense"}
 
 def test_snapshot_site_validation_checks_effective_pf_policy():
     command = snapshot_site_validation_command(
+        token="generation-token",
         expected_version="26.7", public_ip="198.51.100.12", private_ip="10.128.0.1",
         wan_interface="vtnet0", lan_interface="vtnet1", lan_mac="00:11:22:33:44:55",
         management_cidr="192.0.2.8/32",
@@ -47,12 +57,146 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
     assert "pass in quick on vtnet1 inet from (vtnet1:network) to any" in command
     assert "nat on" in command and "from 192.0.2.8 to" in command
     assert "Allow management SSH" not in command
+    assert "printf '%s\\n' generation-token" in command
+    assert "/conf/ctf-site-ready" in command
+
+
+def test_opnsense_config_fingerprint_is_stable_and_tracks_semantic_inputs():
+    site = MagicMock(id=7, allocated_cidr="10.128.0.0/20")
+    vm = MagicMock(id=9, vultr_id="instance-1", public_ip="198.51.100.12",
+                   private_ip="10.128.0.1", hostname="firewall")
+    gateway_vm = MagicMock(public_ip="198.51.100.20")
+    values = dict(
+        site=site, vm=vm, expected_version="26.7", lan_mac="00:11:22:33:44:55",
+        wan_interface="vtnet0", lan_interface="vtnet1", gateway_vm=gateway_vm,
+        gateway_listen_port=51820, management_cidr="192.0.2.8/32",
+        platform_public_key="ssh-ed25519 TEST",
+    )
+    first = opnsense_config_fingerprint(**values)
+    assert first == opnsense_config_fingerprint(**values)
+    assert len(first) == 64
+    assert first != opnsense_config_fingerprint(**{**values, "lan_mac": "00:11:22:33:44:66"})
+
+
+def test_vm_persists_opnsense_configuration_generation(db_session):
+    event = Event(name="GameNet", quota="{}")
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id)
+    db_session.add(team); db_session.flush()
+    vm = VM(
+        hostname="firewall", team_id=team.id, event_id=event.id,
+        opnsense_config_token="a" * 64,
+        opnsense_config_fingerprint="b" * 64,
+        opnsense_config_status="applying",
+        opnsense_config_started_at=utcnow(),
+    )
+    db_session.add(vm); db_session.commit(); db_session.expire_all()
+    saved = db_session.get(VM, vm.id)
+    assert saved.opnsense_config_token == "a" * 64
+    assert saved.opnsense_config_fingerprint == "b" * 64
+    assert saved.opnsense_config_status == "applying"
+
+
+def test_schema_repair_migration_covers_existing_database_feature_columns():
+    migration = Path("migrations/versions/0009_existing_feature_columns.py").read_text()
+    assert '"ust_prompt"' in migration
+    assert '"expo_sync_status"' in migration
+    assert '"expo_sync_last_error"' in migration
+    assert '"expo_sync_attempts"' in migration
+    assert '"expo_sync_completed_at"' in migration
+
+
+def test_snapshot_configuration_resume_does_not_relaunch_live_generation(monkeypatch, db_session):
+    from api.services.gamenet_provider import configure_snapshot_opnsense
+
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    site = db_session.query(Site).one()
+    gateway_vm = VM(hostname="gateway", team_id=team.id, event_id=event.id,
+                    role="vpn_gateway", public_ip="198.51.100.20")
+    db_session.add(gateway_vm); db_session.flush()
+    team.vpn_gateway.vm_id = gateway_vm.id
+    vm = VM(
+        hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id,
+        public_ip="198.51.100.12", private_ip="10.128.0.1", vultr_id="firewall-1",
+        opnsense_config_token="a" * 64, opnsense_config_fingerprint="fingerprint",
+        opnsense_config_status="applying",
+    )
+    db_session.add(vm); db_session.commit()
+    monkeypatch.setattr("api.services.gamenet_provider.get_or_create_platform_keypair",
+                        lambda _db: ("private", "ssh-ed25519 TEST"))
+    monkeypatch.setattr("api.services.gamenet_provider._snapshot_interface_mapping",
+                        lambda *_args: ("vtnet0", "vtnet1"))
+    monkeypatch.setattr("api.services.gamenet_provider.opnsense_config_fingerprint",
+                        lambda **_kwargs: "fingerprint")
+    monkeypatch.setattr("api.services.gamenet_provider._capture_ssh_host_key", lambda _vm: None)
+    uploads = []
+    monkeypatch.setattr("api.services.gamenet_provider.upload_text",
+                        lambda *_args, **_kwargs: uploads.append(_args[1]))
+    responses = iter([
+        (1, "", "not ready"),  # semantic validation before resume
+        (0, "", ""),           # exact applying process is alive
+        (0, "OPNsense 26.7", ""),
+    ])
+    monkeypatch.setattr("api.services.gamenet_provider.ssh_command",
+                        lambda *_args, **_kwargs: next(responses))
+    configure_snapshot_opnsense(site, vm, "26.7", lan_mac="00:11:22:33:44:55")
+    assert uploads == []
+    assert vm.opnsense_config_status == "applied"
 
 
 def test_snapshot_site_apply_uses_posix_shell_for_opnsense_root():
     source = Path("api/services/gamenet_provider.py").read_text()
     assert 'ssh_command(vm, "/bin/sh -c " + shlex.quote(launch)' in source
-    assert 'launch = "nohup /bin/sh /tmp/ctf-apply.sh' in source
+    assert "nohup lockf -t 0 /conf/ctf-site-apply.lock /bin/sh" in source
+
+
+def test_gateway_resets_unbound_start_limit_after_wireguard_is_ready():
+    source = Path("api/services/gamenet_provider.py").read_text()
+    command = "systemctl reset-failed unbound && systemctl enable unbound && systemctl restart unbound"
+    assert command in source
+    assert source.index("systemctl start wg-quick@gamenet") < source.index(command)
+
+
+def test_gateway_waits_for_cloud_init_and_dpkg_locks():
+    source = Path("api/services/gamenet_provider.py").read_text()
+    assert '"cloud-init status --wait && "' in source
+    assert source.count("DPkg::Lock::Timeout=300") >= 2
+
+
+def test_gateway_skips_apt_when_required_packages_are_already_installed(monkeypatch):
+    from api.services import gamenet_provider
+
+    gateway = MagicMock(
+        private_key_encrypted="encrypted", vpn_address="10.64.0.1",
+        listen_port=51820, platform_public_key=None, platform_address=None,
+    )
+    vm = MagicMock()
+    commands = []
+    monkeypatch.setattr(gamenet_provider, "decrypt_secret", lambda _value: "private-key")
+    monkeypatch.setattr(gamenet_provider, "upload_text", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        gamenet_provider,
+        "ssh_command",
+        lambda _vm, command, **_kwargs: commands.append(command) or (0, "", ""),
+    )
+
+    gamenet_provider.configure_gateway(gateway, vm, [], [])
+
+    assert len(commands) == 1
+    assert (
+        "if ! command -v wg >/dev/null 2>&1 || "
+        "! command -v iptables >/dev/null 2>&1 || "
+        "! command -v unbound >/dev/null 2>&1; then "
+    ) in commands[0]
+    assert "install -y wireguard iptables unbound; fi &&" in commands[0]
+
+
+def test_gateway_guest_firewall_allows_wireguard_listener():
+    source = Path("api/services/gamenet_provider.py").read_text()
+    assert 'ufw allow {gateway.listen_port}/udp' in source
 
 
 @pytest.fixture
@@ -83,7 +227,8 @@ def test_gamenet_hostname_is_provider_safe_stable_and_bounded():
     assert "_" not in hostname
 
 
-def test_opnsense_config_encodes_authorized_key(db_session):
+def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
+    monkeypatch.setenv("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32")
     event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
     db_session.add(event); db_session.flush()
     team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
@@ -106,6 +251,52 @@ def test_opnsense_config_encodes_authorized_key(db_session):
     assert "<if>vtnet3</if>" in rendered
     assert "<passwordauth>" not in rendered
     assert "<ssl-certref>self-signed</ssl-certref>" not in rendered
+
+
+def test_opnsense_config_uses_replyto_free_wan_outbound_without_ad_hoc_wireguard_rule(db_session):
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    site = db_session.query(Site).one()
+    vm = VM(hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id)
+    db_session.add(vm); db_session.flush()
+    rendered = render_opnsense_config(
+        site, vm, "ssh-ed25519 TEST", "password", temporary_management=True,
+    )
+    assert "Allow site WireGuard replies" not in rendered
+    outbound_rule = rendered.split("Allow WAN outbound")[0].rsplit("<rule>", 1)[-1]
+    assert "<disablereplyto>1</disablereplyto>" in outbound_rule
+
+
+def test_validate_site_tunnel_requires_both_handshakes_and_private_ssh(monkeypatch):
+    site = MagicMock(tunnel_public_key="SITE", tunnel_address="10.64.0.3")
+    firewall = MagicMock(private_ip="10.128.0.1")
+    gateway = MagicMock(public_key="GATEWAY")
+    gateway_vm = MagicMock()
+    responses = iter([
+        (0, "0", ""), (0, "0", ""),
+        (0, "1700000000", ""), (0, "1700000000", ""), (0, "", ""),
+    ])
+    monkeypatch.setattr("api.services.gamenet_provider.ssh_command",
+                        lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setattr("api.services.gamenet_provider.time.time", lambda: 1700000010)
+    monkeypatch.setattr("api.services.gamenet_provider.time.sleep", lambda *_args: None)
+    validate_site_tunnel(site, firewall, gateway, gateway_vm, timeout=1)
+
+
+def test_validate_site_tunnel_rejects_missing_handshake(monkeypatch):
+    site = MagicMock(tunnel_public_key="SITE", tunnel_address="10.64.0.3")
+    firewall = MagicMock(private_ip="10.128.0.1")
+    gateway = MagicMock(public_key="GATEWAY")
+    gateway_vm = MagicMock()
+    monkeypatch.setattr("api.services.gamenet_provider.ssh_command",
+                        lambda *_args, **_kwargs: (0, "0", ""))
+    ticks = iter([0.0, 2.0])
+    monkeypatch.setattr("api.services.gamenet_provider.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("api.services.gamenet_provider.time.sleep", lambda *_args: None)
+    with pytest.raises(GameNetProviderError, match="WireGuard handshake"):
+        validate_site_tunnel(site, firewall, gateway, gateway_vm, timeout=1)
 
 
 def test_managed_dns_names_normalize_keys_and_preserve_endpoint_ordinals(db_session):
@@ -277,8 +468,18 @@ def test_site_wireguard_runs_redirects_under_posix_shell(monkeypatch):
     assert "/usr/bin/wg setconf wg0" in startup
     assert "/sbin/ifconfig wg0 inet 10.64.0.3/32 alias" in startup
     assert "wg-quick" not in startup
-    assert "port 53" in uploads["/usr/local/etc/gamenet.pf"]
+    assert "/usr/local/etc/gamenet.pf" not in uploads
     assert uploads["/usr/local/etc/unbound.opnsense.d/gamenet.conf"] == "resolver-config"
+    plugin = uploads["/usr/local/etc/inc/plugins.inc.d/gamenet.inc"]
+    assert "function gamenet_firewall" in plugin
+    assert "'interface' => 'gamenet'" in plugin
+    assert "'from' => '10.64.0.0/10'" in plugin
+    assert "'to' => \"10.128.0.0/20\"" in plugin
+    assert "'to_port' => 53" in plugin
+    assert "configctl filter reload" in commands[-1]
+    assert "Configure GameNet tunnel interface" in commands[-1]
+    assert 'require_once("util.inc")' in commands[-1]
+    assert "pfctl -a gamenet" not in startup
 
 
 def test_site_resolver_is_private_and_contains_managed_records(db_session):
@@ -342,7 +543,7 @@ def test_vultr_private_instance_request_is_vpc_only(monkeypatch, db_session):
     responses = iter([
         {"instances": []},
         {"instance": {"id": "instance-id"}},
-        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.16.10"}]},
+        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.16.10", "mac_address": "5a:00:00:00:00:10"}]},
     ])
     monkeypatch.setattr(provider, "_request", lambda method, path, **kwargs: calls.append((method, path, kwargs)) or next(responses))
     monkeypatch.setattr(provider, "_wait_instance", lambda instance_id: {
@@ -357,6 +558,188 @@ def test_vultr_private_instance_request_is_vpc_only(monkeypatch, db_session):
     assert body["enable_ipv6"] is False
     assert result["main_ip"] == "0.0.0.0"
     provider.close()
+
+
+def test_firewall_and_certification_phases_precede_endpoint_creation():
+    assert PROVISIONING_STEPS.index("create_site_firewalls") < PROVISIONING_STEPS.index("establish_site_tunnels")
+    assert PROVISIONING_STEPS.index("establish_site_tunnels") < PROVISIONING_STEPS.index("connecting_control_plane")
+    assert PROVISIONING_STEPS.index("connecting_control_plane") < PROVISIONING_STEPS.index("certifying_private_boot")
+    assert PROVISIONING_STEPS.index("certifying_private_boot") < PROVISIONING_STEPS.index("create_private_endpoints")
+
+
+def test_vpc_only_validation_rejects_public_or_ambiguous_responses():
+    with pytest.raises(GameNetProviderError, match="vpc_only=true"):
+        validate_vpc_only_instance({"vpc_only": 1, "main_ip": "0.0.0.0"})
+    with pytest.raises(GameNetProviderError, match="public address"):
+        validate_vpc_only_instance({
+            "vpc_only": True,
+            "main_ip": "8.8.8.8",
+            "internal_ip": "10.128.0.8",
+        })
+
+
+def test_vpc_only_validation_accepts_vpc_address_repeated_as_main_ip():
+    validate_vpc_only_instance({
+        "vpc_only": True,
+        "main_ip": "10.128.0.8",
+        "internal_ip": "10.128.0.8",
+        "v6_main_ip": "",
+        "ipv4": None,
+    })
+
+
+def test_private_boot_canary_request_has_no_user_data_and_persists_before_poll(monkeypatch, db_session):
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    site = db_session.query(Site).one(); site.vpc_id = "vpc-id"
+    cert = PrivateBootCertification(
+        site_id=site.id, base_type="ubuntu_24_server", os_id=2284, region="ewr",
+        vpc_id="vpc-id", firewall_instance_id="firewall-id", plan="vc2-1c-2gb",
+    )
+    db_session.add(cert); db_session.commit()
+    monkeypatch.setenv("VULTR_API_KEY", "test")
+    provider = VultrGameNetProvider(); calls = []
+    monkeypatch.setattr("api.services.gamenet_provider.get_or_create_platform_keypair", lambda _db: ("private", "public"))
+    monkeypatch.setattr(provider, "_ensure_ssh_key", lambda *_args: "key-id")
+    responses = iter([
+        {"instances": []}, {"instance": {"id": "canary-id"}},
+        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.0.9", "mac_address": "5a:00:00:00:00:09"}]},
+    ])
+    monkeypatch.setattr(provider, "_request", lambda method, path, **kwargs: calls.append((method, path, kwargs)) or next(responses))
+    def wait(instance_id):
+        assert db_session.get(PrivateBootCertification, cert.id).instance_id == "canary-id"
+        return {"id": instance_id, "vpc_only": True, "main_ip": "0.0.0.0"}
+    monkeypatch.setattr(provider, "_wait_instance", wait)
+    result = provider.create_private_boot_canary(cert, hostname="canary", db=db_session)
+    body = next(call[2]["json"] for call in calls if call[0] == "POST")
+    assert body["vpc_only"] is True and body["attach_vpc"] == ["vpc-id"]
+    assert "user_data" not in body
+    assert result["vpc_mac"] == "5a:00:00:00:00:09"
+    provider.close()
+
+
+def test_private_boot_reachability_probe_uses_posix_shell_on_opnsense(monkeypatch):
+    from api.services import gamenet_provisioning
+
+    firewall = MagicMock(private_ip="10.128.0.1")
+    gateway = MagicMock()
+    site = MagicMock(firewall_vm_id=94, allocated_cidr="10.128.0.0/20")
+    site.team.vpn_gateway.vm_id = 93
+    cert = MagicMock(provider_ip="10.128.0.5", mac_address="5a:00:00:00:00:05")
+    db = MagicMock()
+    db.get.side_effect = lambda _model, vm_id: firewall if vm_id == 94 else gateway
+    commands = []
+    monkeypatch.setattr(
+        gamenet_provisioning,
+        "ssh_command",
+        lambda _vm, command, **_kwargs: commands.append(command) or (1, "", "probe failed"),
+    )
+
+    with pytest.raises(GameNetProviderError, match="no ARP/TCP reachability"):
+        gamenet_provisioning._validate_private_boot_canary(
+            db, cert, site, "Ubuntu 24.04 LTS x64",
+        )
+
+    assert len(commands) == 1
+    assert commands[0].startswith("sh -c ")
+    assert 'while [ "$attempt" -lt 24 ]' in commands[0]
+    assert 'timeout 2 ping -c 1 "$target"' in commands[0]
+    assert "grep -Fv" in commands[0]
+    assert "(incomplete)" in commands[0]
+    assert "ping=%s tcp=%s arp=%s attempts=%s" in commands[0]
+
+
+def test_endpoint_creation_uses_stock_image_and_persisted_mac_stages(monkeypatch, db_session):
+    from api.services import gamenet_provisioning
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    site = db_session.query(Site).one(); site.vpc_id = "vpc-id"
+    site.tunnel_status = site.control_plane_status = "active"
+    gateway = db_session.get(VM, team.vpn_gateway.vm_id)
+    gateway.public_ip, gateway.status = "198.51.100.10", "active"
+    firewall = db_session.get(VM, site.firewall_vm_id)
+    firewall.vultr_id, firewall.status = "firewall-id", "active"
+    db_session.add(PrivateBootCertification(
+        site_id=site.id, base_type="ubuntu_24_server", os_id=2284, region="ewr",
+        vpc_id="vpc-id", firewall_instance_id="firewall-id", plan="vc2-1c-2gb",
+        status="passed", phase="passed", cleanup_completed_at=utcnow(),
+    ))
+    db_session.commit()
+    calls = []
+    def create(vm, **kwargs):
+        calls.append(kwargs); vm.vultr_id = "instance-" + str(vm.id)
+        vm.vpc_ip, vm.vpc_mac = "10.128.0." + str(vm.id + 10), "5a:00:00:00:00:10"
+    monkeypatch.setattr(gamenet_provisioning, "_create_provider_instance", create)
+    monkeypatch.setattr(gamenet_provisioning, "add_deterministic_endpoint_address", lambda *_args: None)
+    monkeypatch.setattr(gamenet_provisioning, "finalize_endpoint_network", lambda *_args: None)
+    monkeypatch.setattr(gamenet_provisioning, "_assign_blue_modules", lambda *_args: None)
+    create_private_endpoints(db_session, event, INFRASTRUCTURE)
+    endpoints = db_session.query(VM).filter_by(role="blue_endpoint").all()
+    assert calls and all(call["stock_image"] is True and "user_data" not in call for call in calls)
+    assert all(vm.network_phase == "network_converted" for vm in endpoints)
+
+
+def test_endpoint_stage_one_selects_nic_by_attachment_mac_and_jumps_gateway(monkeypatch, db_session):
+    event = Event(name="GameNet", quota="{}"); db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    site = Site(event_id=event.id, team_id=team.id, key="site", name="Site", region="ewr",
+                allocated_cidr="10.128.0.0/20", infrastructure_subnet="10.128.0.0/24")
+    db_session.add(site); db_session.flush()
+    endpoint = VM(hostname="endpoint", team_id=team.id, event_id=event.id, site_id=site.id,
+                  role="blue_endpoint", vpc_ip="10.128.0.8", private_ip="10.128.1.10",
+                  vpc_mac="5A:00:00:00:00:08")
+    gateway = VM(hostname="gateway", team_id=team.id, event_id=event.id, public_ip="198.51.100.10")
+    db_session.add_all([endpoint, gateway]); db_session.flush()
+    calls = []
+    responses = iter([(0, "", ""), (0, "boot-one\n", "")])
+    monkeypatch.setattr("api.services.gamenet_provider.ssh_command",
+                        lambda vm, command, **kwargs: calls.append((command, kwargs)) or next(responses))
+    add_deterministic_endpoint_address(endpoint, site, gateway)
+    assert "/sys/class/net/*/address" in calls[0][0]
+    assert "5a:00:00:00:00:08" in calls[0][0]
+    assert calls[0][1]["host"] == endpoint.vpc_ip and calls[0][1]["jump"] is gateway
+    assert calls[1][1]["host"] == endpoint.private_ip
+    assert endpoint.network_boot_id == "boot-one"
+
+
+def test_failed_canary_is_cleaned_and_creates_no_workload_instances(monkeypatch, db_session):
+    from api.services import gamenet_provisioning
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    site = db_session.query(Site).one(); site.vpc_id = "vpc-id"
+    site.tunnel_status = site.control_plane_status = "active"
+    firewall = db_session.get(VM, site.firewall_vm_id); firewall.vultr_id = "firewall-id"
+    gateway = db_session.get(VM, team.vpn_gateway.vm_id); gateway.vultr_id = "gateway-id"
+    deleted = []
+    requested_hostnames = []
+    class Provider:
+        def close(self): pass
+        def _resolve_os_id(self, _name): return 2284
+        def create_private_boot_canary(self, cert, **kwargs):
+            requested_hostnames.append(kwargs["hostname"])
+            cert.instance_id = "canary-id"; db_session.commit()
+            return {"id": "canary-id", "vpc_only": True, "main_ip": "0.0.0.0",
+                    "internal_ip": "10.128.0.9", "vpc_mac": "5a:00:00:00:00:09"}
+        def delete_instance(self, instance_id): deleted.append(instance_id)
+    monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())
+    monkeypatch.setattr(gamenet_provisioning, "_validate_private_boot_canary",
+                        lambda *_args: (_ for _ in ()).throw(GameNetProviderError("no ARP/TCP reachability")))
+    with pytest.raises(GameNetProviderError, match="private boot certification failed"):
+        certify_private_boot(db_session, event, INFRASTRUCTURE)
+    cert = db_session.query(PrivateBootCertification).one()
+    assert cert.status == "failed" and cert.cleanup_completed_at is not None
+    assert cert.instance_id == "canary-id" and deleted == ["canary-id"]
+    assert requested_hostnames == [f"gamenet-e{event.id}-t{team.id}-head-office-ubuntu-24-server-canary"]
+    endpoints = db_session.query(VM).filter(VM.role.like("%_endpoint")).all()
+    assert all(vm.vultr_id is None for vm in endpoints)
 
 
 def test_snapshot_instance_boots_without_vpc_then_attaches_explicitly(monkeypatch, db_session):
@@ -461,6 +844,20 @@ def test_gamenet_materialises_complete_vm_plan_before_cloud_calls(db_session):
     assert {vm.role for vm in placeholders} == {"vpn_gateway", "site_firewall", "blue_endpoint"}
     assert team.vpn_gateway.vm_id is not None
     assert db_session.query(Site).one().firewall_vm_id is not None
+
+
+def test_semaphore_endpoint_proxy_is_team_gateway_not_firewall(db_session):
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    gateway = db_session.get(VM, team.vpn_gateway.vm_id); gateway.public_ip = "198.51.100.10"
+    site = db_session.query(Site).one()
+    firewall = db_session.get(VM, site.firewall_vm_id); firewall.public_ip = "198.51.100.20"
+    endpoint = db_session.query(VM).filter_by(role="blue_endpoint").first()
+    assert _gamenet_gateway_proxy(db_session, endpoint) == gateway.public_ip
+    assert _gamenet_gateway_proxy(db_session, endpoint) != firewall.public_ip
 
 
 def test_gamenet_failure_marks_all_unfinished_placeholders_and_overview(monkeypatch, db_session):

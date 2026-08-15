@@ -433,6 +433,7 @@
             <div class="provision-progress">
                 <div class="provision-progress-bar" id="provision-bar" style="width: 0%;"></div>
             </div>
+            <div id="private-boot-status" style="color: var(--text-secondary); font-size: 0.8rem; margin: 0.6rem 0;"></div>
             <table style="font-size: 0.85rem;">
                 <thead>
                     <tr>
@@ -1220,9 +1221,19 @@ function pollProvisionStatus() {
 function updateProvisionDashboard(data) {
     var pct = data.total > 0 ? Math.round((data.active / data.total) * 100) : 0;
     document.getElementById('provision-bar').style.width = pct + '%';
+    var phase = (data.phase || '').replaceAll('_', ' ');
     document.getElementById('provision-summary').textContent =
-        data.active + ' / ' + data.total + ' active' +
+        (phase ? phase + ' · ' : '') + data.active + ' / ' + data.total + ' active' +
         (data.failed > 0 ? ' (' + data.failed + ' failed)' : '');
+
+    var certifications = data.private_boot_certifications || [];
+    document.getElementById('private-boot-status').innerHTML = certifications.length
+        ? certifications.map(function(cert) {
+            var detail = cert.diagnostic_detail ? ' — ' + esc(cert.diagnostic_detail) : '';
+            return '<div>Private boot · ' + esc(cert.region) + ' · ' + esc(cert.base_type) +
+                ' · <strong>' + esc(cert.status.replaceAll('_', ' ')) + '</strong>' + detail + '</div>';
+        }).join('')
+        : '';
 
     var retryBtn = document.getElementById('provision-retry-btn');
     retryBtn.style.display = data.failed > 0 ? '' : 'none';
@@ -1231,12 +1242,12 @@ function updateProvisionDashboard(data) {
     (data.vms || []).forEach(function(vm) {
         var statusClass = vm.status;
         html += '<tr>';
-        html += '<td>' + (vm.hostname || '-') + '</td>';
-        html += '<td>' + (vm.team || '-') + '</td>';
-        html += '<td>' + (vm.vm_type || '-') + '</td>';
-        html += '<td><span class="status-badge ' + statusClass + '">' + vm.status + '</span></td>';
-        html += '<td>' + (vm.provision_step || '-') + '</td>';
-        html += '<td>' + (vm.ip_address || '-') + '</td>';
+        html += '<td>' + esc(vm.hostname || '-') + '</td>';
+        html += '<td>' + esc(vm.team || '-') + '</td>';
+        html += '<td>' + esc(vm.vm_type || '-') + '</td>';
+        html += '<td><span class="status-badge ' + esc(statusClass) + '">' + esc(vm.status) + '</span></td>';
+        html += '<td>' + esc((vm.provision_step || '-').replaceAll('_', ' ')) + '</td>';
+        html += '<td>' + esc(vm.ip_address || '-') + '</td>';
         html += '</tr>';
     });
     document.getElementById('provision-body').innerHTML = html;
@@ -1244,18 +1255,14 @@ function updateProvisionDashboard(data) {
 
 function retryFailedVMs() {
     if (!provisionEventId) return;
-    fetch('/admin/api/events/' + provisionEventId + '/provision-status')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var failedVMs = (data.vms || []).filter(function(vm) { return vm.status === 'failed'; });
-            failedVMs.forEach(function(vm) {
-                fetch('/admin/api/vms/' + vm.id + '/retry-create', { method: 'POST' });
-            });
-            if (failedVMs.length > 0) {
-                showToast('Retrying ' + failedVMs.length + ' failed VM(s)...');
-                startProvisionPoll(provisionEventId);
-            }
-        });
+    fetch('/admin/api/events/' + provisionEventId + '/retry-provisioning', { method: 'POST' })
+        .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+        .then(function(result) {
+            if (!result.ok) throw new Error(result.data.error || 'Retry failed');
+            showToast('Retrying event provisioning...');
+            startProvisionPoll(provisionEventId);
+        })
+        .catch(function(err) { showToast(err.message); });
 }
 
 // ── Event Form Submit ──

@@ -26,7 +26,7 @@ import bcrypt
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import object_session
 
-from api.models import Site, TeamVPNGateway, VM, VPNCredential
+from api.models import Site, TeamVPNGateway, VM, VPNCredential, utcnow
 from api.services.secrets import decrypt_secret
 from api.services.ssh_keys import get_or_create_platform_keypair
 from builder.base_loader import load_base_type
@@ -36,6 +36,7 @@ POLL_SECONDS = int(os.environ.get("GAMENET_PROVIDER_POLL_SECONDS", "10"))
 CREATE_TIMEOUT = int(os.environ.get("GAMENET_INSTANCE_TIMEOUT_SECONDS", "900"))
 WG_INTERFACE = os.environ.get("GAMENET_WG_INTERFACE", "ctf-gamenet")
 OPNSENSE_RELEASE = os.environ.get("GAMENET_OPNSENSE_RELEASE", "26.7")
+OPNSENSE_SITE_CONFIG_SCHEMA = 2
 
 
 class GameNetProviderError(RuntimeError):
@@ -128,6 +129,49 @@ class VultrGameNetProvider:
         result = self._wait_instance(instance["id"])
         return self._instance_with_vpc(result, vpc_ids)
 
+    def create_private_boot_canary(self, certification, *, hostname: str, db) -> dict:
+        """Create or recover the disposable stock-image VPC-only canary.
+
+        The instance ID is committed immediately after the provider accepts the
+        request, before any readiness polling, so an interrupted worker resumes
+        the same instance instead of creating a duplicate.
+        """
+        if certification.instance_id:
+            result = self._wait_instance(certification.instance_id)
+            return self._instance_with_vpc(result, [certification.vpc_id])
+        for instance in self._request("GET", "/instances", params={"per_page": 500}).get("instances", []):
+            if instance.get("label") == hostname:
+                certification.instance_id = instance["id"]
+                certification.phase = "polling_instance"
+                certification.updated_at = utcnow()
+                db.commit()
+                return self._instance_with_vpc(self._wait_instance(instance["id"]), [certification.vpc_id])
+
+        _, public_key = get_or_create_platform_keypair(db)
+        ssh_key_id = self._ensure_ssh_key("ctf-platform", public_key)
+        body = {
+            "region": certification.region,
+            "plan": certification.plan,
+            "os_id": certification.os_id,
+            "label": hostname,
+            "hostname": hostname,
+            "enable_ipv6": False,
+            "backups": "disabled",
+            "ddos_protection": False,
+            "attach_vpc": [certification.vpc_id],
+            "vpc_only": True,
+            "sshkey_id": [ssh_key_id],
+        }
+        instance = self._request("POST", "/instances", json=body)["instance"]
+        certification.instance_id = instance["id"]
+        certification.phase = "polling_instance"
+        certification.updated_at = utcnow()
+        db.commit()
+        return self._instance_with_vpc(self._wait_instance(instance["id"]), [certification.vpc_id])
+
+    def delete_instance(self, instance_id: str) -> None:
+        self._request("DELETE", f"/instances/{instance_id}")
+
     def attach_vpc(self, vm: VM, vpc_id: str) -> dict:
         """Attach a VPC after WAN-only snapshot boot and return its observed NIC metadata."""
         path = f"/instances/{vm.vultr_id}/vpcs"
@@ -149,9 +193,12 @@ class VultrGameNetProvider:
         if vpc_ids:
             attached = self._request("GET", f"/instances/{result['id']}/vpcs", params={"per_page": 100}).get("vpcs", [])
             selected = next((row for row in attached if row.get("id") in vpc_ids), None)
-            if not selected or not selected.get("ip_address"):
-                raise GameNetProviderError(f"instance {result['id']} did not attach to the requested VPC")
+            if not selected or not selected.get("ip_address") or not selected.get("mac_address"):
+                raise GameNetProviderError(
+                    f"missing VPC attachment metadata for instance {result['id']}"
+                )
             result["internal_ip"] = selected["ip_address"]
+            result["vpc_mac"] = selected["mac_address"]
         return result
 
     def _resolve_os_id(self, name: str) -> int:
@@ -229,6 +276,25 @@ def _canonical_rule(rule: dict) -> tuple:
     return tuple(str(rule.get(key, "")) for key in ("ip_type", "protocol", "subnet", "subnet_size", "port", "source"))
 
 
+def validate_vpc_only_instance(instance: dict, *, label: str = "instance") -> None:
+    if instance.get("vpc_only") is not True:
+        raise GameNetProviderError(f"{label} was not created with vpc_only=true")
+    internal_ip = str(instance.get("internal_ip") or "")
+    public_values = []
+    for key in ("main_ip", "v6_main_ip"):
+        value = instance.get(key)
+        if value and value not in {"0.0.0.0", "::", internal_ip}:
+            public_values.append(str(value))
+    public_values.extend(
+        str(value) for value in (instance.get("ipv4") or [])
+        if value and str(value) not in {"0.0.0.0", internal_ip}
+    )
+    if public_values:
+        raise GameNetProviderError(
+            f"{label} unexpectedly received a public address: {', '.join(public_values)}"
+        )
+
+
 def update_vm_addresses(vm: VM, instance: dict, *, public: bool) -> None:
     main_ip = instance.get("main_ip")
     internal_ip = instance.get("internal_ip") or instance.get("vpc_ip")
@@ -247,10 +313,9 @@ runcmd:
 
 
 def endpoint_cloud_init(private_ip: str, cidr: str) -> str:
-    """Configure a VPC-only guest before any operation that needs internet."""
+    """Legacy renderer retained for historical records; new endpoints never use it."""
     network = ip_network(cidr)
     gateway = str(network.network_address + 1)
-    prefix = network.prefixlen
     return f"""#cloud-config
 write_files:
   - path: /usr/local/sbin/gamenet-network.sh
@@ -264,7 +329,7 @@ write_files:
         version: 2
         ethernets:
           $iface:
-            addresses: [{private_ip}/{prefix}]
+            addresses: [{private_ip}/{network.prefixlen}]
             routes: [{{to: default, via: {gateway}}}]
             nameservers: {{addresses: [{gateway}]}}
       EOF
@@ -278,14 +343,27 @@ runcmd:
 def ssh_command(vm: VM, command: str, *, host: str | None = None, jump: VM | None = None,
                 timeout: int = 60, connect_timeout: int | None = None) -> tuple[int, str, str]:
     db = object_session(vm)
+    return ssh_host_command(
+        db, host or vm.public_ip or vm.private_ip or vm.ip_address, command,
+        jump=jump, ssh_user=vm.ssh_user or "root", ssh_port=vm.ssh_port or 22,
+        password=decrypt_secret(vm.admin_password) if vm.admin_password else None,
+        timeout=timeout, connect_timeout=connect_timeout,
+        label=f"VM {vm.id}",
+    )
+
+
+def ssh_host_command(db, host: str | None, command: str, *, jump: VM | None = None,
+                     ssh_user: str = "root", ssh_port: int = 22, password: str | None = None,
+                     timeout: int = 60, connect_timeout: int | None = None,
+                     label: str = "host") -> tuple[int, str, str]:
+    """Run a key-only SSH command, optionally through the public team gateway."""
     private_key, _ = get_or_create_platform_keypair(db)
     key = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key))
-    target_host = host or vm.public_ip or vm.private_ip or vm.ip_address
+    target_host = host
     if not target_host:
-        raise GameNetProviderError(f"VM {vm.id} has no reachable address")
+        raise GameNetProviderError(f"{label} has no reachable address")
     jump_client = None
     sock = None
-    password = decrypt_secret(vm.admin_password) if vm.admin_password else None
     if jump:
         jump_client = _connect_ssh(
             jump.public_ip or jump.ip_address, jump.ssh_user or "root", key,
@@ -296,7 +374,7 @@ def ssh_command(vm: VM, command: str, *, host: str | None = None, jump: VM | Non
         while time.monotonic() < channel_deadline:
             try:
                 sock = jump_client.get_transport().open_channel(
-                    "direct-tcpip", (target_host, vm.ssh_port or 22), ("127.0.0.1", 0), timeout=15,
+                    "direct-tcpip", (target_host, ssh_port), ("127.0.0.1", 0), timeout=15,
                 )
                 break
             except Exception as exc:
@@ -308,8 +386,8 @@ def ssh_command(vm: VM, command: str, *, host: str | None = None, jump: VM | Non
                 f"SSH jump channel did not become ready for {target_host}: {last_channel_error}"
             )
     client = _connect_ssh(
-        target_host, vm.ssh_user or "root", key, password=password,
-        port=vm.ssh_port or 22, sock=sock, connect_timeout=connect_timeout,
+        target_host, ssh_user, key, password=password,
+        port=ssh_port, sock=sock, connect_timeout=connect_timeout,
     )
     try:
         _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
@@ -386,7 +464,9 @@ def bootstrap_opnsense(site: Site, vm: VM) -> None:
         db.flush()
     else:
         password = decrypt_secret(vm.admin_password)
-    config = render_opnsense_config(site, vm, public_key, password, temporary_management=True)
+    config = render_opnsense_config(
+        site, vm, public_key, password, temporary_management=True,
+    )
     upload_text(vm, "/tmp/gamenet-config.xml", config)
     command = (
         "mkdir -p /conf /root/.ssh && cp /tmp/gamenet-config.xml /conf/config.xml && "
@@ -467,12 +547,40 @@ def _snapshot_interface_mapping(vm: VM, lan_mac: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def snapshot_site_validation_command(*, expected_version: str, public_ip: str, private_ip: str,
+def opnsense_config_fingerprint(*, site: Site, vm: VM, expected_version: str, lan_mac: str,
+                                wan_interface: str, lan_interface: str, gateway_vm: VM,
+                                gateway_listen_port: int, management_cidr: str,
+                                platform_public_key: str) -> str:
+    """Hash stable desired state, excluding randomized password hashes and secrets."""
+    desired = {
+        "schema": OPNSENSE_SITE_CONFIG_SCHEMA,
+        "site_id": site.id,
+        "site_cidr": site.allocated_cidr,
+        "vm_id": vm.id,
+        "vultr_id": vm.vultr_id,
+        "hostname": vm.hostname,
+        "release": expected_version,
+        "public_ip": vm.public_ip,
+        "private_ip": vm.private_ip,
+        "lan_mac": lan_mac.lower(),
+        "wan_interface": wan_interface,
+        "lan_interface": lan_interface,
+        "gateway_public_ip": gateway_vm.public_ip,
+        "gateway_listen_port": gateway_listen_port,
+        "management_cidr": management_cidr,
+        "platform_public_key": platform_public_key,
+    }
+    encoded = json.dumps(desired, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def snapshot_site_validation_command(*, token: str, expected_version: str, public_ip: str, private_ip: str,
                                      wan_interface: str, lan_interface: str, lan_mac: str,
                                      management_cidr: str) -> str:
     management_source = str(ip_network(management_cidr).network_address)
     return (
-        f"test -f /conf/ctf-site-ready && {_opnsense_release_test(expected_version)} && "
+        f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready && "
+        f"{_opnsense_release_test(expected_version)} && "
         f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {public_ip}' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {private_ip}' >/dev/null && "
@@ -482,6 +590,57 @@ def snapshot_site_validation_command(*, expected_version: str, public_ip: str, p
         f"pfctl -sr | grep -F {shlex.quote('from ' + management_source + ' to')} | "
         "grep -E 'port = (ssh|22)' >/dev/null && opnsense-version -v"
     )
+
+
+def _opnsense_apply_script(token: str, config_path: str, script_path: str) -> str:
+    php = ('require_once("config.inc"); require_once("util.inc"); '
+           '$c=\\OPNsense\\Core\\Config::getInstance(); '
+           f'if(!$c->restoreBackup("{config_path}")){{exit(1);}} $c->forceReload();')
+    quoted_token = shlex.quote(token)
+    failure = (
+        "status=$?; if [ \"$status\" -ne 0 ]; then "
+        f"printf '%s\\n' {quoted_token} > /conf/ctf-site-failed.tmp; "
+        "mv /conf/ctf-site-failed.tmp /conf/ctf-site-failed; "
+        "fi; exit \"$status\""
+    )
+    return "\n".join([
+        "#!/bin/sh", "set -eu", f"trap {shlex.quote(failure)} EXIT",
+        f"/usr/local/bin/php -r {shlex.quote(php)}",
+        "/usr/local/sbin/pluginctl -M", "/usr/local/opnsense/scripts/auth/sync_user.php -u root",
+        "rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder /usr/local/etc/rc.syshook.d/start/99-ctf-builder",
+        "/usr/local/sbin/configctl interface reconfigure lan",
+        "/usr/local/sbin/configctl interface reconfigure wan",
+        "/usr/local/sbin/configctl openssh restart", "/usr/local/sbin/configctl filter reload",
+        f"rm -f {shlex.quote(config_path)}",
+        f"printf '%s\\n' {quoted_token} > /conf/ctf-site-ready.tmp",
+        "mv /conf/ctf-site-ready.tmp /conf/ctf-site-ready",
+        "rm -f /conf/ctf-site-applying /conf/ctf-site-failed",
+        "trap - EXIT", f"rm -f {shlex.quote(script_path)}", "",
+    ])
+
+
+def _opnsense_apply_launch(token: str, script_path: str) -> str:
+    quoted_token = shlex.quote(token)
+    return (
+        "rm -f /conf/ctf-site-ready /conf/ctf-site-failed; "
+        f"printf '%s\\n' {quoted_token} > /conf/ctf-site-applying.tmp; "
+        "mv /conf/ctf-site-applying.tmp /conf/ctf-site-applying; "
+        f"nohup lockf -t 0 /conf/ctf-site-apply.lock /bin/sh {shlex.quote(script_path)} "
+        ">>/var/log/ctf-site-apply.log 2>&1 </dev/null &"
+    )
+
+
+def _capture_ssh_host_key(vm: VM) -> None:
+    host = vm.public_ip or vm.ip_address
+    if not host:
+        return
+    transport = paramiko.Transport((host, vm.ssh_port or 22))
+    try:
+        transport.start_client(timeout=15)
+        key = transport.get_remote_server_key()
+        vm.ssh_host_key = f"{key.get_name()} {key.get_base64()}"
+    finally:
+        transport.close()
 
 
 def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, lan_mac: str) -> None:
@@ -495,57 +654,107 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     else:
         password = decrypt_secret(vm.admin_password)
     wan_interface, lan_interface = _snapshot_interface_mapping(vm, lan_mac)
-    config = render_opnsense_config(
-        site, vm, public_key, password, temporary_management=True,
-        wan_interface=wan_interface, lan_interface=lan_interface,
+    gateway = site.team.vpn_gateway
+    gateway_vm = db.get(VM, gateway.vm_id)
+    management_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32")
+    fingerprint = opnsense_config_fingerprint(
+        site=site, vm=vm, expected_version=expected_version, lan_mac=lan_mac,
+        wan_interface=wan_interface, lan_interface=lan_interface, gateway_vm=gateway_vm,
+        gateway_listen_port=gateway.listen_port, management_cidr=management_cidr,
+        platform_public_key=public_key,
     )
-    upload_text(vm, "/tmp/ctf-site-config.xml", config)
-    php = ('require_once("config.inc"); require_once("util.inc"); '
-           '$c=\\OPNsense\\Core\\Config::getInstance(); '
-           'if(!$c->restoreBackup("/tmp/ctf-site-config.xml")){exit(1);} $c->forceReload();')
-    apply_script = "\n".join([
-        "#!/bin/sh", "set -eu", f"/usr/local/bin/php -r {shlex.quote(php)}",
-        "/usr/local/sbin/pluginctl -M", "/usr/local/opnsense/scripts/auth/sync_user.php -u root",
-        "rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder /usr/local/etc/rc.syshook.d/start/99-ctf-builder",
-        "/usr/local/sbin/configctl interface reconfigure lan",
-        "/usr/local/sbin/configctl interface reconfigure wan",
-        "/usr/local/sbin/configctl openssh restart", "/usr/local/sbin/configctl filter reload",
-        "rm -f /tmp/ctf-site-config.xml", "echo ready > /conf/ctf-site-ready",
-    ]) + "\n"
-    upload_text(vm, "/tmp/ctf-apply.sh", apply_script, mode=0o700)
-    launch = "nohup /bin/sh /tmp/ctf-apply.sh >/tmp/ctf-apply.log 2>&1 </dev/null &"
-    code, _, error = ssh_command(vm, "/bin/sh -c " + shlex.quote(launch), timeout=30)
-    if code:
-        raise GameNetProviderError(f"failed to launch snapshot configuration: {error[:300]}")
+    if (vm.opnsense_config_fingerprint != fingerprint or not vm.opnsense_config_token
+            or vm.opnsense_config_status == "failed"):
+        vm.opnsense_config_token = secrets.token_hex(32)
+        vm.opnsense_config_fingerprint = fingerprint
+        vm.opnsense_config_status = "pending"
+        vm.opnsense_config_started_at = utcnow()
+        vm.opnsense_config_completed_at = None
+        vm.provision_error = None
+        db.commit()
+    token = vm.opnsense_config_token
+    validation = snapshot_site_validation_command(
+        token=token, expected_version=expected_version, public_ip=vm.public_ip,
+        private_ip=vm.private_ip, wan_interface=wan_interface, lan_interface=lan_interface,
+        lan_mac=lan_mac, management_cidr=management_cidr,
+    )
+    if vm.opnsense_config_status in {"applying", "applied"}:
+        try:
+            code, output, _ = ssh_command(
+                vm, "/bin/sh -c " + shlex.quote(validation), timeout=60, connect_timeout=60,
+            )
+            if code == 0 and expected_version in output:
+                vm.opnsense_config_status = "applied"
+                vm.opnsense_config_completed_at = vm.opnsense_config_completed_at or utcnow()
+                vm.provision_error = None
+                db.commit()
+                _capture_ssh_host_key(vm)
+                return
+        except Exception:
+            pass
+    config_path = f"/tmp/ctf-site-config-{token}.xml"
+    script_path = f"/tmp/ctf-apply-{token}.sh"
+    launch_needed = True
+    if vm.opnsense_config_status == "applying":
+        live_generation = (
+            f"test \"$(cat /conf/ctf-site-applying 2>/dev/null)\" = {shlex.quote(token)} && "
+            f"pgrep -f {shlex.quote('/bin/sh ' + script_path)} >/dev/null"
+        )
+        try:
+            live_code, _, _ = ssh_command(
+                vm, "/bin/sh -c " + shlex.quote(live_generation), timeout=30, connect_timeout=30,
+            )
+            launch_needed = live_code != 0
+        except Exception:
+            launch_needed = True
+    if launch_needed:
+        config = render_opnsense_config(
+            site, vm, public_key, password, temporary_management=True,
+            wan_interface=wan_interface, lan_interface=lan_interface,
+        )
+        upload_text(vm, config_path, config)
+        upload_text(vm, script_path, _opnsense_apply_script(token, config_path, script_path), mode=0o700)
+        launch = _opnsense_apply_launch(token, script_path)
+        code, _, error = ssh_command(vm, "/bin/sh -c " + shlex.quote(launch), timeout=30)
+        if code:
+            vm.opnsense_config_status = "failed"
+            vm.provision_error = f"failed to launch snapshot configuration: {error[:300]}"
+            db.commit()
+            raise GameNetProviderError(f"failed to launch snapshot configuration: {error[:300]}")
+        vm.opnsense_config_status = "applying"
+        db.commit()
     deadline = time.monotonic() + 600
     output = error = ""
     while time.monotonic() < deadline:
         try:
-            validation = snapshot_site_validation_command(
-                expected_version=expected_version, public_ip=vm.public_ip, private_ip=vm.private_ip,
-                wan_interface=wan_interface, lan_interface=lan_interface, lan_mac=lan_mac,
-                management_cidr=os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32"),
-            )
             code, output, error = ssh_command(
                 vm, "/bin/sh -c " + shlex.quote(validation),
                 timeout=60, connect_timeout=60,
             )
             if code == 0 and expected_version in output:
                 break
+            failure_check = f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-failed"
+            failed, _, _ = ssh_command(vm, "/bin/sh -c " + shlex.quote(failure_check), timeout=30)
+            if failed == 0:
+                _, log_output, log_error = ssh_command(
+                    vm, "tail -n 80 /var/log/ctf-site-apply.log", timeout=30,
+                )
+                error = (log_error or log_output or "guest apply failed")[-2000:]
+                break
         except Exception as exc:
             error = str(exc)
         time.sleep(POLL_SECONDS)
-    else:
-        raise GameNetProviderError(f"snapshot OPNsense validation failed: {(error or output)[:300]}")
-    host = vm.public_ip or vm.ip_address
-    if host:
-        transport = paramiko.Transport((host, vm.ssh_port or 22))
-        try:
-            transport.start_client(timeout=15)
-            key = transport.get_remote_server_key()
-            vm.ssh_host_key = f"{key.get_name()} {key.get_base64()}"
-        finally:
-            transport.close()
+    if code != 0 or expected_version not in output:
+        detail = f"snapshot OPNsense validation failed for generation {token}: {(error or output)[:2000]}"
+        vm.opnsense_config_status = "failed"
+        vm.provision_error = detail
+        db.commit()
+        raise GameNetProviderError(detail)
+    vm.opnsense_config_status = "applied"
+    vm.opnsense_config_completed_at = utcnow()
+    vm.provision_error = None
+    db.commit()
+    _capture_ssh_host_key(vm)
 
 
 def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_mac: str,
@@ -572,6 +781,9 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
     if code or len(interfaces) != 2:
         raise ImageWorkflowError(f"could not map validation VPC MAC: {(error or output)[:300]}")
     wan_interface, lan_interface = interfaces
+    token = secrets.token_hex(32)
+    config_path = f"/tmp/ctf-site-config-{token}.xml"
+    script_path = f"/tmp/ctf-apply-{token}.sh"
     _, public_key = get_or_create_platform_keypair(db)
     password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
     # The /28 network and .1 gateway exactly mirror a minimal GameNet site.
@@ -589,22 +801,10 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
             os.environ.pop("CTF_CONTROL_PLANE_CIDR", None)
         else:
             os.environ["CTF_CONTROL_PLANE_CIDR"] = previous_cidr
-    _upload_atomic(db, host, "/tmp/ctf-site-config.xml", config.encode())
-    php = ('require_once("config.inc"); require_once("util.inc"); '
-           '$c=\\OPNsense\\Core\\Config::getInstance(); '
-           'if(!$c->restoreBackup("/tmp/ctf-site-config.xml")){exit(1);} $c->forceReload();')
-    commands = "\n".join([
-        "#!/bin/sh", "set -eu", f"/usr/local/bin/php -r {shlex.quote(php)}",
-        "/usr/local/sbin/pluginctl -M",
-        "/usr/local/opnsense/scripts/auth/sync_user.php -u root",
-        "/usr/local/sbin/configctl interface reconfigure lan",
-        "/usr/local/sbin/configctl interface reconfigure wan",
-        "/usr/local/sbin/configctl openssh restart",
-        "/usr/local/sbin/configctl filter reload",
-        "rm -f /tmp/ctf-site-config.xml", "echo ready > /conf/ctf-site-ready", "",
-    ])
-    _upload_atomic(db, host, "/tmp/ctf-apply.sh", commands.encode(), 0o700)
-    code, _, error = _ssh(db, host, "nohup /bin/sh /tmp/ctf-apply.sh >/tmp/ctf-apply.log 2>&1 </dev/null &", timeout=30)
+    _upload_atomic(db, host, config_path, config.encode())
+    _upload_atomic(db, host, script_path, _opnsense_apply_script(token, config_path, script_path).encode(), 0o700)
+    launch = "/bin/sh -c " + shlex.quote(_opnsense_apply_launch(token, script_path))
+    code, _, error = _ssh(db, host, launch, timeout=30)
     if code:
         raise ImageWorkflowError(f"failed to launch validation site configuration: {error[:300]}")
     deadline = time.monotonic() + 600
@@ -612,7 +812,8 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
         try:
             code, output, error = _ssh(
                 db, host,
-                f"test -f /conf/ctf-site-ready && {_opnsense_release_test(expected_version)} && "
+                f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready && "
+                f"{_opnsense_release_test(expected_version)} && "
                 f"ifconfig {shlex.quote(lan_interface)} | grep -F {shlex.quote('inet ' + private_ip)} >/dev/null",
                 retry=False,
             )
@@ -709,10 +910,20 @@ def configure_gateway(gateway: TeamVPNGateway, vm: VM, sites: list[Site], partic
     upload_text(vm, "/etc/unbound/unbound.conf.d/gamenet.conf", _gateway_unbound_config(gateway, sites),
                 host=management_host)
     command = (
-        "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard iptables unbound && "
+        "cloud-init status --wait && "
+        "if ! command -v wg >/dev/null 2>&1 || "
+        "! command -v iptables >/dev/null 2>&1 || "
+        "! command -v unbound >/dev/null 2>&1; then "
+        "apt-get -o DPkg::Lock::Timeout=300 update -qq && "
+        "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y wireguard iptables unbound; fi && "
+        f"if command -v ufw >/dev/null 2>&1; then ufw allow {gateway.listen_port}/udp; fi && "
         "systemctl enable wg-quick@gamenet && "
         "if wg show gamenet >/dev/null 2>&1; then wg-quick strip gamenet >/tmp/gamenet.stripped && wg syncconf gamenet /tmp/gamenet.stripped; "
-        "else systemctl start wg-quick@gamenet; fi && systemctl enable --now unbound && systemctl restart unbound"
+        "else systemctl start wg-quick@gamenet; fi && "
+        # Installing Unbound starts it before the WireGuard address exists. On
+        # a fresh gateway that can exhaust systemd's start limit, so clear the
+        # expected transient failure only after the interface is configured.
+        "systemctl reset-failed unbound && systemctl enable unbound && systemctl restart unbound"
     )
     code, _, error = ssh_command(vm, command, host=management_host, timeout=300)
     if code:
@@ -721,7 +932,6 @@ def configure_gateway(gateway: TeamVPNGateway, vm: VM, sites: list[Site], partic
 
 def configure_site_wireguard(site: Site, firewall: VM, gateway: TeamVPNGateway, gateway_vm: VM,
                               all_team_sites: list[Site]) -> None:
-    blocked = [other.allocated_cidr for other in all_team_sites if other.id != site.id]
     config = "\n".join([
         "[Interface]", f"PrivateKey = {decrypt_secret(site.tunnel_private_key_encrypted)}", "",
         "[Peer]", f"PublicKey = {gateway.public_key}",
@@ -729,14 +939,28 @@ def configure_site_wireguard(site: Site, firewall: VM, gateway: TeamVPNGateway, 
         f"AllowedIPs = 10.64.0.0/10", "PersistentKeepalive = 25", "",
     ])
     upload_text(firewall, "/usr/local/etc/wireguard/wg0.conf", config)
-    block_rules = "\n".join(f"block quick from {site.allocated_cidr} to {cidr}" for cidr in blocked)
-    pf_rules = "\n".join([
-        block_rules,
-        f"pass quick on wg0 proto {{ udp tcp }} from 10.64.0.0/10 to {site.tunnel_address} port 53 keep state",
-        f"pass quick on wg0 from 10.64.0.0/10 to {site.allocated_cidr} keep state",
-        f"pass quick from {site.allocated_cidr} to any keep state",
-    ])
-    upload_text(firewall, "/usr/local/etc/gamenet.pf", pf_rules)
+    firewall_plugin = f"""<?php
+function gamenet_firewall(\\OPNsense\\Firewall\\Plugin $fw)
+{{
+    $base = [
+        'type' => 'pass', 'interface' => 'gamenet', 'direction' => 'in',
+        'ipprotocol' => 'inet', 'statetype' => 'keep', 'quick' => true,
+        'log' => true, 'disablereplyto' => 1, 'descr' => 'GameNet VPN ingress'
+    ];
+    $fw->registerFilterRule(
+        1,
+        ['from' => '10.64.0.0/10', 'to' => {json.dumps(site.allocated_cidr)}],
+        $base
+    );
+    $fw->registerFilterRule(
+        1,
+        ['protocol' => 'tcp/udp', 'from' => '10.64.0.0/10',
+         'to' => {json.dumps(site.tunnel_address)}, 'to_port' => 53],
+        $base
+    );
+}}
+"""
+    upload_text(firewall, "/usr/local/etc/inc/plugins.inc.d/gamenet.inc", firewall_plugin)
     upload_text(firewall, "/usr/local/etc/unbound.opnsense.d/gamenet.conf", _site_unbound_config(site))
     startup = """#!/bin/sh
 # PROVIDE: gamenet
@@ -751,7 +975,6 @@ gamenet_start() {
     /sbin/ifconfig wg0 inet GAMENET_TUNNEL_ADDRESS/32 alias
     /sbin/ifconfig wg0 up
     /sbin/route add -net 10.64.0.0/10 -interface wg0 >/dev/null 2>&1 || true
-    /sbin/pfctl -a gamenet -f /usr/local/etc/gamenet.pf
 }
 gamenet_stop() {
     /sbin/route delete -net 10.64.0.0/10 >/dev/null 2>&1 || true
@@ -763,9 +986,17 @@ run_rc_command "$1"
     upload_text(firewall, "/usr/local/etc/rc.d/gamenet", startup, mode=0o755)
     # OPNsense root uses csh; run shell redirection and boolean operators under
     # POSIX sh to avoid csh's "Ambiguous output redirect" parsing.
+    interface_php = (
+        'require_once("config.inc"); require_once("util.inc"); global $config; '
+        f'$config["interfaces"]["gamenet"]=['
+        f'"if"=>"wg0","descr"=>"GameNet","enable"=>"1",'
+        f'"ipaddr"=>{json.dumps(site.tunnel_address)},"subnet"=>"32"]; '
+        'write_config("Configure GameNet tunnel interface");'
+    )
     site_command = (
-        "test -x /usr/bin/wg && "
-        "(service gamenet stop >/dev/null 2>&1 || true) && service gamenet start && configctl unbound restart"
+        f"test -x /usr/bin/wg && /usr/local/bin/php -r {shlex.quote(interface_php)} && "
+        "(service gamenet stop >/dev/null 2>&1 || true) && service gamenet start && "
+        "configctl filter reload && configctl unbound restart"
     )
     command = f"sh -c {shlex.quote(site_command)}"
     code, _, error = ssh_command(firewall, command, timeout=300)
@@ -773,17 +1004,138 @@ run_rc_command "$1"
         raise GameNetProviderError(f"site WireGuard configuration failed: {error[:300]}")
 
 
-def configure_endpoint_network(vm: VM, site: Site, firewall: VM) -> None:
-    network = ip_network(site.allocated_cidr)
-    command = (
-        "iface=$(ip -o -4 addr show | awk '$4 ~ /^10\\./ {print $2; exit}'); "
-        "test -n \"$iface\" || iface=$(ip route show default | awk '{print $5; exit}'); "
-        f"printf 'network:\n  version: 2\n  ethernets:\n    %s:\n      addresses: [{vm.private_ip}/{network.prefixlen}]\n      routes: [{{to: default, via: {str(network.network_address + 1)}}}]\n      nameservers: {{addresses: [{str(network.network_address + 1)}]}}\n' \"$iface\" > /etc/netplan/90-gamenet.yaml; "
-        "nohup sh -c 'sleep 2; netplan apply' >/var/log/gamenet-netplan.log 2>&1 &"
+def validate_site_tunnel(site: Site, firewall: VM, gateway: TeamVPNGateway, gateway_vm: VM,
+                         *, timeout: int = 180) -> None:
+    """Require recent handshakes at both peers and gateway-to-LAN SSH reachability."""
+    gateway_handshake = (
+        "wg show gamenet latest-handshakes | "
+        f"awk -v key={shlex.quote(site.tunnel_public_key)} '$1 == key {{print $2}}'"
     )
-    code, _, error = ssh_command(vm, command, host=vm.private_ip, jump=firewall)
+    firewall_handshake = (
+        "wg show wg0 latest-handshakes | "
+        f"awk -v key={shlex.quote(gateway.public_key)} '$1 == key {{print $2}}'"
+    )
+    private_ssh = (
+        "python3 -c " + shlex.quote(
+            "import socket; s=socket.create_connection((%r, 22), 5); s.close()" % firewall.private_ip
+        )
+    )
+    deadline = time.monotonic() + timeout
+    detail = "WireGuard handshake not observed"
+    while time.monotonic() < deadline:
+        gateway_code, gateway_output, gateway_error = ssh_command(
+            gateway_vm, gateway_handshake, timeout=30,
+        )
+        firewall_code, firewall_output, firewall_error = ssh_command(
+            firewall, firewall_handshake, timeout=30,
+        )
+        try:
+            gateway_timestamp = int(gateway_output.strip()) if gateway_code == 0 else 0
+            firewall_timestamp = int(firewall_output.strip()) if firewall_code == 0 else 0
+        except ValueError:
+            gateway_timestamp = firewall_timestamp = 0
+        oldest_allowed = int(time.time()) - 180
+        if gateway_timestamp >= oldest_allowed and firewall_timestamp >= oldest_allowed:
+            code, _, error = ssh_command(gateway_vm, private_ssh, timeout=30)
+            if code == 0:
+                return
+            detail = f"gateway could not reach firewall LAN SSH at {firewall.private_ip}: {error[:300]}"
+        else:
+            detail = (
+                "WireGuard handshake not observed at both peers "
+                f"(gateway={gateway_output.strip() or gateway_error[:80]!r}, "
+                f"firewall={firewall_output.strip() or firewall_error[:80]!r})"
+            )
+        time.sleep(POLL_SECONDS)
+    raise GameNetProviderError(detail)
+
+
+def add_deterministic_endpoint_address(vm: VM, site: Site, gateway_vm: VM) -> None:
+    """Stage one: add the zone address while retaining Vultr's boot address."""
+    if not vm.vpc_ip or not vm.vpc_mac:
+        raise GameNetProviderError("missing VPC attachment metadata for endpoint network conversion")
+    network = ip_network(site.allocated_cidr)
+    router = str(network.network_address + 1)
+    mac = vm.vpc_mac.lower()
+    command = (
+        "set -eu; iface=''; "
+        "for path in /sys/class/net/*/address; do "
+        f"if [ \"$(tr A-F a-f < \"$path\")\" = {shlex.quote(mac)} ]; then iface=$(basename \"$(dirname \"$path\")\"); break; fi; done; "
+        "test -n \"$iface\"; "
+        f"ip address replace {vm.private_ip}/{network.prefixlen} dev \"$iface\"; "
+        f"ip route replace default via {router} dev \"$iface\"; "
+        f"printf 'nameserver {router}\\n' > /etc/resolv.conf; "
+        f"ip -4 address show dev \"$iface\" | grep -F {shlex.quote(vm.private_ip + '/')}"
+    )
+    code, _, error = ssh_command(
+        vm, command, host=vm.vpc_ip, jump=gateway_vm, connect_timeout=CREATE_TIMEOUT,
+    )
     if code:
-        raise GameNetProviderError(f"endpoint private network configuration failed: {error[:300]}")
-    code, _, error = ssh_command(vm, "true", host=vm.private_ip, jump=firewall, timeout=CREATE_TIMEOUT)
+        raise GameNetProviderError(f"deterministic-address transition failed while adding address: {error[:300]}")
+    code, output, error = ssh_command(
+        vm, "cat /proc/sys/kernel/random/boot_id", host=vm.private_ip,
+        jump=gateway_vm, connect_timeout=CREATE_TIMEOUT,
+    )
     if code:
-        raise GameNetProviderError(f"endpoint did not return on its assigned private address: {error[:300]}")
+        raise GameNetProviderError(f"deterministic-address transition failed to reach new address: {error[:300]}")
+    vm.network_boot_id = output.strip()
+
+
+def finalize_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:
+    """Stage two: persist MAC-matched netplan, remove the boot address, and reboot."""
+    network = ip_network(site.allocated_cidr)
+    router = str(network.network_address + 1)
+    mac = vm.vpc_mac.lower()
+    netplan = f"""network:
+  version: 2
+  ethernets:
+    gamenet:
+      match:
+        macaddress: {mac}
+      set-name: gamenet0
+      addresses: [{vm.private_ip}/{network.prefixlen}]
+      routes:
+        - to: default
+          via: {router}
+      nameservers:
+        addresses: [{router}]
+"""
+    encoded = base64.b64encode(netplan.encode()).decode()
+    command = (
+        "set -eu; mkdir -p /etc/cloud/cloud.cfg.d; "
+        "printf 'network: {config: disabled}\\n' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg; "
+        "rm -f /etc/netplan/50-cloud-init.yaml; "
+        f"echo {shlex.quote(encoded)} | base64 -d > /etc/netplan/90-gamenet.yaml; "
+        "chmod 600 /etc/netplan/90-gamenet.yaml; netplan generate; sync; "
+        "nohup sh -c 'sleep 2; reboot' >/dev/null 2>&1 &"
+    )
+    code, _, error = ssh_command(vm, command, host=vm.private_ip, jump=gateway_vm)
+    if code:
+        raise GameNetProviderError(f"deterministic-address transition failed to persist network: {error[:300]}")
+    verification = (
+        "set -eu; "
+        f"test \"$(cat /sys/class/net/gamenet0/address | tr A-F a-f)\" = {shlex.quote(mac)}; "
+        f"ip -4 address show dev gamenet0 | grep -F {shlex.quote(vm.private_ip + '/')}; "
+        f"ip route show default | grep -F {shlex.quote('via ' + router)}; "
+        "getent hosts example.com >/dev/null; "
+        "curl -4fsS --max-time 20 https://example.com/ >/dev/null; "
+        "test -z \"$(ip -o -4 addr show scope global | awk '$4 !~ /^10\\./ {print $4}')\"; "
+        "test -z \"$(ip -o -6 addr show scope global)\"; "
+        "cat /proc/sys/kernel/random/boot_id"
+    )
+    code, output, error = ssh_command(
+        vm, verification, host=vm.private_ip, jump=gateway_vm,
+        timeout=120, connect_timeout=CREATE_TIMEOUT,
+    )
+    if code:
+        raise GameNetProviderError(f"deterministic-address transition failed post-reboot checks: {error[:300]}")
+    boot_id = output.strip().splitlines()[-1] if output.strip() else ""
+    if not boot_id or boot_id == vm.network_boot_id:
+        raise GameNetProviderError("deterministic-address transition failed: endpoint did not reboot")
+    vm.network_boot_id = boot_id
+
+
+def configure_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:
+    """Compatibility wrapper for the persisted two-stage conversion."""
+    add_deterministic_endpoint_address(vm, site, gateway_vm)
+    finalize_endpoint_network(vm, site, gateway_vm)

@@ -222,6 +222,14 @@
             <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">SSH Command</div>
             <div class="copy-box" id="ssh-command" onclick="copySSH()" title="Click to copy">—</div>
         </div>
+        <div style="margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem;">
+            <label for="as-ust-prompt" style="display:block;font-size:0.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.35rem;">UST prompt</label>
+            <textarea id="as-ust-prompt" rows="6" maxlength="8000" placeholder="Describe the simulated user, expected symptoms, and response boundaries for this system."></textarea>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.35rem;">
+                <small style="color:var(--text-secondary);">Optional. Used when Expo-IT generates tickets for this system.</small>
+                <button class="btn btn-sm" onclick="saveUstPrompt()">Save UST prompt</button>
+            </div>
+        </div>
         <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
             <button class="btn btn-sm" id="btn-test-conn" onclick="testConnection()">Test Connection</button>
             <span id="conn-result" style="font-size: 0.8rem;"></span>
@@ -509,6 +517,7 @@ function renderVM(data) {
     document.getElementById('as-team').textContent = data.team_name || '—';
     document.getElementById('as-status-select').value = data.status || 'registered';
     document.getElementById('as-notes').value = data.notes || '';
+    document.getElementById('as-ust-prompt').value = data.ust_prompt || '';
 
     // Button states
     document.getElementById('btn-provision').disabled = (data.status === 'provisioning' || data.status === 'creating');
@@ -601,6 +610,17 @@ function saveNotes() {
         body: JSON.stringify({notes: notes})
     }).then(function(r) {
         if (r.ok) { showToast('Notes saved'); }
+        else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
+    });
+}
+
+function saveUstPrompt() {
+    var prompt = document.getElementById('as-ust-prompt').value.trim() || null;
+    fetch('/admin/api/vms/' + VM_ID, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ust_prompt: prompt})
+    }).then(function(r) {
+        if (r.ok) { showToast('UST prompt saved'); }
         else { r.json().then(function(d) { showToast('Error: ' + d.error); }); }
     });
 }

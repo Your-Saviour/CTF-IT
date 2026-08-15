@@ -659,6 +659,10 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "infrastructure": json.loads(e.infrastructure) if e.infrastructure else None,
             "user_count": user_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
+            "expo_sync_status": e.expo_sync_status,
+            "expo_sync_last_error": e.expo_sync_last_error,
+            "expo_sync_attempts": e.expo_sync_attempts,
+            "expo_sync_completed_at": e.expo_sync_completed_at.isoformat() if e.expo_sync_completed_at else None,
         })
     return result
 
@@ -686,6 +690,10 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "infrastructure": json.loads(event.infrastructure) if event.infrastructure else None,
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
+        "expo_sync_status": event.expo_sync_status,
+        "expo_sync_last_error": event.expo_sync_last_error,
+        "expo_sync_attempts": event.expo_sync_attempts,
+        "expo_sync_completed_at": event.expo_sync_completed_at.isoformat() if event.expo_sync_completed_at else None,
     }
 
 
@@ -886,7 +894,27 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     event.status = "open"
     event.open = True
     db.commit()
-    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None}
+    from api.services.expo_ust import schedule
+    scheduled = schedule(event.id)
+    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None,
+            "warning": None if scheduled else "Expo-IT integration is not configured"}
+
+
+@router.post("/events/{event_id}/expo-sync/retry")
+async def retry_expo_sync(event_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter_by(id=event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "open":
+        return JSONResponse({"error": "Only an open event can be synchronized"}, status_code=409)
+    from api.services.expo_ust import configured, schedule
+    if not configured():
+        return JSONResponse({"error": "Expo-IT integration is not configured"}, status_code=503)
+    schedule(event_id)
+    return JSONResponse({"status": "syncing"}, status_code=202)
 
 
 @router.get("/events/{event_id}/provision-status")
@@ -898,7 +926,7 @@ async def event_provision_status(
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
-    from api.models import Team, VM
+    from api.models import PrivateBootCertification, Site, Team, VM
 
     vms = db.query(VM).filter(VM.event_id == event_id).all()
 
@@ -923,9 +951,37 @@ async def event_provision_status(
             "ip_address": vm.ip_address,
         })
 
+    certifications = (
+        db.query(PrivateBootCertification)
+        .join(Site, PrivateBootCertification.site_id == Site.id)
+        .filter(Site.event_id == event_id)
+        .order_by(PrivateBootCertification.site_id, PrivateBootCertification.base_type)
+        .all()
+    )
+    current_phase = next(
+        (vm.provision_step for vm in vms if vm.status not in {"active", "stopped"} and vm.provision_step),
+        None,
+    )
+
     return {
         "total": len(vms),
         **counts,
+        "phase": current_phase,
+        "private_boot_certifications": [{
+            "site_id": cert.site_id,
+            "base_type": cert.base_type,
+            "os_id": cert.os_id,
+            "region": cert.region,
+            "firewall_instance_id": cert.firewall_instance_id,
+            "status": cert.status,
+            "phase": cert.phase,
+            "instance_id": cert.instance_id,
+            "provider_ip": cert.provider_ip,
+            "started_at": cert.started_at,
+            "completed_at": cert.completed_at,
+            "cleanup_completed_at": cert.cleanup_completed_at,
+            "diagnostic_detail": cert.diagnostic_detail,
+        } for cert in certifications],
         "vms": vm_list,
     }
 

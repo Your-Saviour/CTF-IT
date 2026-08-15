@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from api.models import PlatformSettings, VM
 from api.services.secrets import decrypt_secret, encrypt_secret
-from api.services.ssh_connection import _PinnedHostKeyPolicy, read_remote_host_key
+from api.services.ssh_connection import _PinnedHostKeyPolicy, _gateway_channel, read_remote_host_key
 
 PRIVATE_SETTING = "verifier_private_key"
 PUBLIC_SETTING = "verifier_public_key"
@@ -61,7 +61,7 @@ def get_or_create_verifier_keypair(db: Session) -> tuple[str, str]:
 
 
 def connect_verifier(vm: VM, db: Session) -> paramiko.SSHClient:
-    observed = read_remote_host_key(vm)
+    observed = read_remote_host_key(vm, db)
     if vm.ssh_host_key and vm.ssh_host_key != observed:
         raise paramiko.SSHException("SSH host key mismatch")
     if not vm.ssh_host_key:
@@ -71,9 +71,11 @@ def connect_verifier(vm: VM, db: Session) -> paramiko.SSHClient:
     key = paramiko.Ed25519Key.from_private_key(io.StringIO(private))
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(_PinnedHostKeyPolicy(vm.ssh_host_key))
+    proxy_sock, jump_client = _gateway_channel(vm, db)
     client.connect(hostname=vm.ip_address, port=vm.ssh_port or 22, username=VERIFIER_USERNAME,
                    pkey=key, timeout=10, banner_timeout=10, auth_timeout=10,
-                   allow_agent=False, look_for_keys=False)
+                   allow_agent=False, look_for_keys=False, sock=proxy_sock)
+    client._gamenet_jump_client = jump_client
     return client
 
 

@@ -83,6 +83,10 @@ class Event(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expo_sync_status: Mapped[str] = mapped_column(String(24), nullable=True)
+    expo_sync_last_error: Mapped[str] = mapped_column(Text, nullable=True)
+    expo_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    expo_sync_completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     # Semaphore project created once per event, reused for all VM provisions
     semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
@@ -177,11 +181,49 @@ class Site(Base):
     tunnel_private_key_encrypted: Mapped[str] = mapped_column(Text, nullable=True)
     tunnel_address: Mapped[str] = mapped_column(String(45), nullable=True, unique=True)
     tunnel_status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    control_plane_status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     event: Mapped["Event"] = relationship(back_populates="sites")
     team: Mapped["Team"] = relationship(back_populates="sites")
     zones: Mapped[list["Zone"]] = relationship(back_populates="site", cascade="all, delete-orphan")
+    private_boot_certifications: Mapped[list["PrivateBootCertification"]] = relationship(
+        back_populates="site", cascade="all, delete-orphan"
+    )
+
+
+class PrivateBootCertification(Base):
+    """Event-local proof that a stock Vultr image boots with only a VPC NIC."""
+
+    __tablename__ = "private_boot_certifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "site_id", "os_id", "region", "vpc_id", "firewall_instance_id",
+            name="uq_private_boot_site_image_vpc",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), nullable=False)
+    base_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    os_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    region: Mapped[str] = mapped_column(String(16), nullable=False)
+    vpc_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    firewall_instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    plan: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    phase: Mapped[str] = mapped_column(String(48), nullable=False, default="pending")
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    provider_ip: Mapped[str] = mapped_column(String(45), nullable=True)
+    mac_address: Mapped[str] = mapped_column(String(32), nullable=True)
+    diagnostic_detail: Mapped[str] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    cleanup_completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    site: Mapped["Site"] = relationship(back_populates="private_boot_certifications")
 
 
 class Zone(Base):
@@ -232,6 +274,7 @@ class VM(Base):
     ssh_user: Mapped[str] = mapped_column(String(64), nullable=True, default="root")
     ssh_host_key: Mapped[str] = mapped_column(String(512), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
+    ust_prompt: Mapped[str] = mapped_column(Text, nullable=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -261,11 +304,19 @@ class VM(Base):
 
     # VPC networking
     vpc_ip: Mapped[str] = mapped_column(String(45), nullable=True)
+    vpc_mac: Mapped[str] = mapped_column(String(32), nullable=True)
+    network_boot_id: Mapped[str] = mapped_column(String(128), nullable=True)
+    network_phase: Mapped[str] = mapped_column(String(32), nullable=True)
     # OPNsense admin password (firewall VMs only)
     admin_password: Mapped[str] = mapped_column(String(128), nullable=True)
     opnsense_image_id: Mapped[int] = mapped_column(ForeignKey("opnsense_images.id"), nullable=True)
     opnsense_release: Mapped[str] = mapped_column(String(16), nullable=True)
     opnsense_snapshot_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    opnsense_config_token: Mapped[str] = mapped_column(String(64), nullable=True)
+    opnsense_config_fingerprint: Mapped[str] = mapped_column(String(64), nullable=True)
+    opnsense_config_status: Mapped[str] = mapped_column(String(24), nullable=True)
+    opnsense_config_started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    opnsense_config_completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     team: Mapped["Team"] = relationship(back_populates="vms")
     event: Mapped["Event"] = relationship(back_populates="vms")
