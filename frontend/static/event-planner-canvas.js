@@ -68,6 +68,14 @@ export function arrangedZoneLayout(graph, layout, zoneId) {
   return {version: 1, nodes};
 }
 
+export function constrainMachinePosition(position, zoneBounds) {
+  const geometry = ZONE_CONTAINER_GEOMETRY;
+  return {
+    x: Math.max(position.x, zoneBounds.x + geometry.padding + geometry.machineWidth / 2),
+    y: Math.max(position.y, zoneBounds.y + geometry.headerHeight + geometry.padding + geometry.machineHeight / 2),
+  };
+}
+
 export function translateZoneLayout(layout, zoneId, childIds, dx, dy) {
   const nodes = structuredClone(layout?.nodes || {});
   for (const id of [zoneId, ...childIds]) {
@@ -329,6 +337,10 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         }
       });
 
+    function updateMachineTransforms() {
+      machineGroups.attr('transform', d => `translate(${d.x},${d.y})`);
+    }
+
     if (!callbacks.readOnly) {
       groups = groups.call(d3.drag()
         .on('drag', function(event, d) {
@@ -343,14 +355,47 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         }));
       machineGroups = machineGroups.call(d3.drag()
         .on('drag', function(event, d) {
-          d.x = event.x;
-          d.y = event.y;
+          const parent = byId.get(d.parent);
+          const bounds = parent && isZoneContainer(parent) ? containerBounds().get(parent.id) : null;
+          const position = bounds ? constrainMachinePosition({x: event.x, y: event.y}, bounds) : {x: event.x, y: event.y};
+          d.x = position.x;
+          d.y = position.y;
           d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
           updateContainers();
           updateLinks();
         })
         .on('end', (_, d) => {
           currentLayout.nodes[d.id] = {x: d.x, y: d.y};
+          callbacks.onLayoutChange?.(structuredClone(currentLayout));
+        }));
+
+      let dragStartLayout;
+      let dragStartPosition;
+      let dragChildIds = [];
+      containers.select('.zone-container-header').call(d3.drag()
+        .on('start', function(event, d) {
+          dragStartLayout = structuredClone(currentLayout);
+          dragStartPosition = {...dragStartLayout.nodes[d.id]};
+          dragChildIds = zoneChildren(nodes, d.id).map(child => child.id);
+        })
+        .on('drag', function(event, d) {
+          const nextLayout = translateZoneLayout(
+            dragStartLayout,
+            d.id,
+            dragChildIds,
+            event.x - dragStartPosition.x,
+            event.y - dragStartPosition.y,
+          );
+          currentLayout = nextLayout;
+          for (const id of [d.id, ...dragChildIds]) {
+            const node = byId.get(id);
+            if (node && nextLayout.nodes[id]) Object.assign(node, nextLayout.nodes[id]);
+          }
+          updateMachineTransforms();
+          updateContainers();
+          updateLinks();
+        })
+        .on('end', function(event, d) {
           callbacks.onLayoutChange?.(structuredClone(currentLayout));
         }));
     }

@@ -186,3 +186,9 @@ test('arranged zone layout changes only direct machine children', () => {
   assert.deepEqual(firewall.nodes['firewall:a/primary'], {x: 560, y: 292});
   assert.deepEqual(canvas.arrangedZoneLayout(graph, layout, 'vm:a/blue/web'), layout);
 });
+
+test('machine movement keeps fixed zone edges and permits right-bottom expansion', () => {
+  const bounds = {x: 100, y: 200, width: 280, height: 190};
+  assert.deepEqual(canvas.constrainMachinePosition({x: 80, y: 210}, bounds), {x: 160, y: 292});
+  assert.deepEqual(canvas.constrainMachinePosition({x: 500, y: 500}, bounds), {x: 500, y: 500});
+});

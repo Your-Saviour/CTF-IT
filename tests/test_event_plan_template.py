@@ -198,3 +198,15 @@ def test_planner_renders_framed_zone_container_layers_and_states():
     assert ".zone-container.system-managed" in css
     assert ".zone-container.selected" in css
     assert ".zone-container.invalid" in css
+
+
+def test_zone_drag_translates_children_and_persists_once_on_release():
+    canvas = CANVAS.read_text()
+    compact = "".join(canvas.split())
+
+    assert "zone-container-header" in canvas
+    assert "translateZoneLayout" in canvas
+    assert "dragStartLayout" in canvas
+    assert "updateMachineTransforms" in canvas
+    assert "event.stopPropagation()" in canvas
+    assert ".on('end',function(event,d)" in compact
