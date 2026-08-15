@@ -77,6 +77,7 @@ export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
   headerControlGap: 8,
   arrangeControlWidth: 32,
   headerRightInset: 8,
+  addressCharacterWidth: 4.8,
 });
 
 export function machineBounds(node) {
@@ -134,7 +135,11 @@ export function calculateZoneBounds(zone, children) {
   const metrics = zoneGridMetrics(children);
   const headerWidth = geometry.titleInset + geometry.headerTextWidth + geometry.headerControlGap
     + geometry.arrangeControlWidth + geometry.headerRightInset;
-  const minimumWidth = Math.max(headerWidth, metrics.width);
+  const address = topologyAnnotationPresentation(zone);
+  const addressWidth = address
+    ? Math.ceil((address.prefix + address.value).length * geometry.addressCharacterWidth + geometry.titleInset * 2)
+    : 0;
+  const minimumWidth = Math.max(headerWidth, addressWidth, metrics.width);
   const minimumHeight = headerHeight + metrics.contentHeight;
   const requiredWidth = children.reduce((width, child) => Math.max(
     width,

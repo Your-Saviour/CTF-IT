@@ -236,6 +236,18 @@ test('compact zone bounds include address rails, VM labels, and manual expansion
   });
 });
 
+test('zone bounds reserve equal rail padding for longer address templates', () => {
+  const firewall = {
+    id: 'firewall-zone:a', type: 'firewall-zone', annotation: '10.99.{{team_id}}.0/24', x: 100, y: 200,
+  };
+  const workload = {
+    id: 'zone:a/red', type: 'zone', annotation: '10.1.{{team_id}}.0/24', x: 100, y: 200,
+  };
+
+  assert.equal(canvas.calculateZoneBounds(firewall, []).width, 168);
+  assert.equal(canvas.calculateZoneBounds(workload, []).width, 164);
+});
+
 test('zone arrangement packs children deterministically and translation is atomic', () => {
   const zone = {id: 'zone:a/blue', x: 100, y: 200};
   const children = ['one', 'two', 'three', 'four', 'five'].map(id => ({id, type: 'vm'}));
