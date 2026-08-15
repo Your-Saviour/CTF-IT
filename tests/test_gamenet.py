@@ -272,6 +272,16 @@ def test_layout_accepts_known_stable_node_ids():
     assert validate_infrastructure_layout(layout, infrastructure) == []
 
 
+def test_layout_ids_model_firewall_as_vm_inside_automatic_zone():
+    from builder.infrastructure_planner import infrastructure_node_ids, normalize_infrastructure
+
+    ids = infrastructure_node_ids(normalize_infrastructure(INFRASTRUCTURE))
+
+    assert "firewall-zone:head_office" in ids
+    assert "firewall:head_office/primary" in ids
+    assert "firewall:head_office" not in ids
+
+
 def test_layout_rejects_unknown_ids_and_non_finite_coordinates():
     from builder.infrastructure_planner import normalize_infrastructure, validate_infrastructure_layout
 

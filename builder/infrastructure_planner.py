@@ -79,7 +79,11 @@ def infrastructure_node_ids(infrastructure: dict) -> set[str]:
         site_key = site.get("key")
         if not isinstance(site_key, str):
             continue
-        result.update({f"site:{site_key}", f"firewall:{site_key}"})
+        result.update({
+            f"site:{site_key}",
+            f"firewall-zone:{site_key}",
+            f"firewall:{site_key}/primary",
+        })
         for zone in site.get("zones", []):
             zone_key = zone.get("key")
             if not isinstance(zone_key, str):
