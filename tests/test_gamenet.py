@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.database import Base
-from api.models import Event, Site, Team, User, VM, VPNCredential
+from api.models import Event, OpnsenseImage, PlatformSettings, Site, Team, User, VM, VPNCredential, utcnow
 from api.routes.admin import PlanPreviewRequest, overview, plan_preview
 from api.services.gamenet import (
     allocate_event_networks, ensure_user_vpn_credential, render_user_config,
@@ -376,6 +376,44 @@ def test_snapshot_instance_boots_without_vpc_then_attaches_explicitly(monkeypatc
     assert attach_call[2]["json"] == {"vpc_id": "vpc-id"}
     assert attachment["mac_address"] == "5a:00:00:00:00:02"
     provider.close()
+
+
+def test_site_firewall_persists_wan_gate_before_vpc_attachment(monkeypatch, db_session):
+    from api.services import gamenet_provisioning
+
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    image = OpnsenseImage(
+        version="26.7", status="active", phase="active", snapshot_id="snapshot-id",
+        validated_at=utcnow(), build_method="freebsd-bootstrap", base_os="FreeBSD 15 x64",
+    )
+    db_session.add(image); db_session.flush()
+    db_session.add(PlatformSettings(key="active_opnsense_image_id", value=str(image.id)))
+    db_session.commit()
+    calls = []
+
+    monkeypatch.setattr(gamenet_provisioning, "_require_provider", lambda: None)
+    monkeypatch.setattr(gamenet_provisioning, "_create_provider_vpc", lambda _site: "vpc-id")
+    def create_instance(vm, **_kwargs):
+        vm.vultr_id, vm.public_ip = "instance-id", "198.51.100.10"
+    monkeypatch.setattr(gamenet_provisioning, "_create_provider_instance", create_instance)
+    monkeypatch.setattr(gamenet_provisioning, "validate_snapshot_wan",
+                        lambda vm, _release: calls.append(("wan", vm.vpc_ip)))
+    def attach(vm, _vpc_id):
+        assert vm.provision_step == "snapshot_wan_validated"
+        calls.append(("attach", vm.provision_step))
+        return {"ip_address": "10.128.0.2", "mac_address": "5a:00:00:00:00:02"}
+    monkeypatch.setattr(gamenet_provisioning, "_attach_provider_vpc", attach)
+    monkeypatch.setattr(gamenet_provisioning, "configure_snapshot_opnsense", lambda *_args, **_kwargs: None)
+
+    gamenet_provisioning.create_site_firewalls(db_session, event, INFRASTRUCTURE)
+    firewall = db_session.query(VM).filter_by(role="site_firewall").one()
+    assert calls[0] == ("wan", None)
+    assert firewall.provision_step == "snapshot_wan_validated"
+    assert firewall.vpc_ip == "10.128.0.2" and firewall.status == "active"
 
 
 def test_vultr_ssh_key_collision_uses_material_specific_name(monkeypatch):

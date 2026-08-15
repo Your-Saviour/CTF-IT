@@ -203,11 +203,15 @@ def create_site_firewalls(db, event, infrastructure):
             vm.opnsense_image_id, vm.opnsense_release, vm.opnsense_snapshot_id = image.id, image.version, image.snapshot_id
             _create_provider_instance(vm, public=True,
                                       image_source={"snapshot_id": image.snapshot_id})
+        if vm.opnsense_snapshot_id and vm.provision_step != "snapshot_wan_validated":
             validate_snapshot_wan(vm, vm.opnsense_release)
+            vm.provision_step = "snapshot_wan_validated"
+            db.commit()
         if vm.opnsense_snapshot_id and not vm.vpc_ip:
             attachment = _attach_provider_vpc(vm, site.vpc_id)
             vm.vpc_ip = attachment["ip_address"]
             vm.private_ip = str(ip_network(site.allocated_cidr).network_address + 1)
+            db.commit()
         if not vm.public_ip or not vm.private_ip:
             raise RuntimeError("site firewall requires both public WAN and private VPC addresses")
         vm.ip_address = vm.private_ip
