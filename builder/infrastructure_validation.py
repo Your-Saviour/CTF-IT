@@ -104,7 +104,11 @@ def validate_infrastructure(
                 _key(endpoint.get("key"), f"{epath}.key", endpoint_keys, errors)
                 _validate_machine(endpoint, epath, valid_base_ids, errors)
                 count = endpoint.get("count")
-                if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+                if count is None:
+                    if not isinstance(endpoint.get("name"), str) or not endpoint["name"].strip():
+                        errors.append(f"{epath}.name is required")
+                    addresses += 1
+                elif not isinstance(count, int) or isinstance(count, bool) or count < 1:
                     errors.append(f"{epath}.count must be a positive integer")
                 else:
                     addresses += count
@@ -124,7 +128,7 @@ def validate_infrastructure(
 def infrastructure_summary(infrastructure: dict, team_count: int = 1) -> dict:
     sites = infrastructure.get("sites", [])
     endpoint_count = sum(
-        endpoint.get("count", 0)
+        endpoint.get("count", 1)
         for site in sites for zone in site.get("zones", []) for endpoint in zone.get("endpoints", [])
     )
     per_region = Counter(site.get("region") for site in sites if site.get("region"))

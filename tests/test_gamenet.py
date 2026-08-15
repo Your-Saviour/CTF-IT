@@ -1,5 +1,6 @@
 import json
 import asyncio
+from copy import deepcopy
 from ipaddress import ip_network
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -217,6 +218,45 @@ def test_infrastructure_validation_accepts_empty_zone_and_summarises():
         "teams": 3, "sites": 3, "gateways": 3, "firewalls": 3,
         "endpoints": 6, "vms": 12, "vpcs_by_region": {"ewr": 3},
     }
+
+
+def test_infrastructure_validation_accepts_individual_endpoint_with_name():
+    value = deepcopy(INFRASTRUCTURE)
+    endpoint = value["sites"][0]["zones"][0]["endpoints"][0]
+    endpoint.pop("count")
+    endpoint["name"] = "Workstation 1"
+
+    assert validate_infrastructure(value, BASES) == []
+    assert infrastructure_summary(value)["endpoints"] == 1
+
+
+def test_legacy_endpoint_groups_expand_without_mutating_input():
+    from builder.infrastructure_planner import normalize_infrastructure
+
+    legacy = deepcopy(INFRASTRUCTURE)
+    expanded = normalize_infrastructure(legacy)
+    endpoints = expanded["sites"][0]["zones"][0]["endpoints"]
+
+    assert [(row["key"], row["name"]) for row in endpoints] == [
+        ("workstation_1", "Workstation 1"),
+        ("workstation_2", "Workstation 2"),
+    ]
+    assert legacy["sites"][0]["zones"][0]["endpoints"][0]["count"] == 2
+    assert all("count" not in row for row in endpoints)
+
+
+def test_legacy_expansion_avoids_existing_endpoint_key_collisions():
+    from builder.infrastructure_planner import normalize_infrastructure
+
+    value = deepcopy(INFRASTRUCTURE)
+    endpoints = value["sites"][0]["zones"][0]["endpoints"]
+    endpoints.append({
+        "key": "workstation_1", "name": "Existing workstation",
+        "base_type": "ubuntu_24_server", "default_plan": "vc2-1c-1gb",
+    })
+
+    keys = [row["key"] for row in normalize_infrastructure(value)["sites"][0]["zones"][0]["endpoints"]]
+    assert keys == ["workstation_1", "workstation_2", "workstation_1_2"]
 
 
 def test_gamenet_hostname_is_provider_safe_stable_and_bounded():
