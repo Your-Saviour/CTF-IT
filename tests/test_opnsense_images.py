@@ -120,6 +120,15 @@ def test_host_key_discovery_normalizes_openssh_keyword_casing():
     assert 'tolower($1)==\\"hostkey\\"' in source
 
 
+def test_clean_halt_requests_delayed_acpi_poweroff(monkeypatch):
+    commands = []
+    monkeypatch.setattr("api.services.opnsense_images._ssh",
+                        lambda _db, _host, command, **_kwargs: commands.append(command) or (0, "", ""))
+    from api.services.opnsense_images import _halt
+    _halt(None, "198.51.100.9")
+    assert "nohup" in commands[0] and "/sbin/shutdown -p now" in commands[0]
+
+
 def test_running_jobs_interrupt_and_only_validated_active_image_is_selected():
     db = session(); image = image_row(db, status="bootstrapping", phase="bootstrapping")
     assert interrupt_running_jobs(db) == 1 and image.status == "interrupted"

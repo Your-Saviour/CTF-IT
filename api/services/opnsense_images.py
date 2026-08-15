@@ -471,9 +471,11 @@ def _fingerprint(db: Session, host: str) -> str:
 
 
 def _halt(db: Session, host: str) -> None:
-    code, _, error = _ssh(db, host, "configctl system halt", timeout=30)
+    delayed = "/bin/sh -c " + shlex.quote("sleep 1; /sbin/shutdown -p now")
+    command = f"nohup {delayed} >/dev/null 2>&1 </dev/null &"
+    code, _, error = _ssh(db, host, command, timeout=30)
     if code:
-        raise ImageWorkflowError(f"clean halt failed: {error[:300]}")
+        raise ImageWorkflowError(f"clean power-off request failed: {error[:300]}")
 
 
 def _sanitize_and_halt(db: Session, client: VultrImageClient, image: OpnsenseImage, host: str) -> None:
