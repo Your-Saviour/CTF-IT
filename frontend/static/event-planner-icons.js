@@ -67,6 +67,17 @@ export const PLANNER_ICON_GROUPS = Object.freeze(ICON_CATEGORY_ORDER.map(label =
     .map(([value, icon]) => Object.freeze({value, label: icon.label}))),
 })));
 
+export function filterPlannerIconGroups(query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return PLANNER_ICON_GROUPS;
+  return PLANNER_ICON_GROUPS.flatMap(group => {
+    const options = group.label.toLowerCase().includes(needle)
+      ? group.options
+      : group.options.filter(option => option.label.toLowerCase().includes(needle) || option.value.includes(needle));
+    return options.length ? [{label: group.label, options}] : [];
+  });
+}
+
 const VIEW_BOX = /^-?\d+(?:\.\d+)?(?:\s+-?\d+(?:\.\d+)?){3}$/;
 
 export function resolvePlannerIcon(value) {
@@ -91,6 +102,13 @@ export function machineIconPair(type, machine, baseTypes) {
     primary: resolvePlannerIcon(machine?.primary_icon || automaticPrimary),
     secondary: baseIconDefinition(machine, baseTypes),
   };
+}
+
+export function machineAutomaticIcon(type, machine, field, baseTypes) {
+  const automaticMachine = {...machine};
+  delete automaticMachine[field];
+  const pair = machineIconPair(type, automaticMachine, baseTypes);
+  return field === 'primary_icon' ? pair.primary : pair.secondary;
 }
 
 export function setMachineIconOverride(machine, field, value) {

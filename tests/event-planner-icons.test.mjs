@@ -93,3 +93,22 @@ test('unsupported fields and values are not persisted as icon overrides', async 
   assert.equal(machine.icon, 'server');
   assert.equal('unknown_icon' in machine, false);
 });
+
+test('Automatic preview resolves independently for primary and secondary fields', async () => {
+  const {PLANNER_ICONS, machineAutomaticIcon} = await import('../frontend/static/event-planner-icons.js');
+  const machine = {base_type: 'ubuntu', primary_icon: 'database', icon: 'windows'};
+  const bases = [{id: 'ubuntu', icon: 'ubuntu'}];
+
+  assert.equal(machineAutomaticIcon('vm', machine, 'primary_icon', bases).path, PLANNER_ICONS.server.path);
+  assert.equal(machineAutomaticIcon('vm', machine, 'icon', bases).path, PLANNER_ICONS.ubuntu.path);
+  assert.deepEqual(machine, {base_type: 'ubuntu', primary_icon: 'database', icon: 'windows'});
+});
+
+test('picker filtering matches icon labels and whole category names case-insensitively', async () => {
+  const {filterPlannerIconGroups} = await import('../frontend/static/event-planner-icons.js');
+
+  assert.deepEqual(filterPlannerIconGroups('WINDOWS').flatMap(group => group.options).map(row => row.value), ['windows']);
+  assert.deepEqual(filterPlannerIconGroups('security').map(group => group.label), ['Security']);
+  assert.equal(filterPlannerIconGroups('security')[0].options.length, 10);
+  assert.deepEqual(filterPlannerIconGroups('no-such-icon'), []);
+});
