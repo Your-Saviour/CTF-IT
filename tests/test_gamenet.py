@@ -267,6 +267,21 @@ def test_machine_primary_icon_override_rejects_unknown_library_keyword():
     assert "sites[0].zones[0].endpoints[0].primary_icon must reference a supported planner icon" in errors
 
 
+def test_planner_icon_allowlist_covers_cyber_training_catalogue():
+    from builder.infrastructure_validation import PLANNER_ICONS
+
+    assert PLANNER_ICONS == {
+        "server", "desktop", "laptop", "mobile", "appliance",
+        "gateway", "router", "switch", "firewall", "vpn", "proxy", "load_balancer",
+        "web", "database", "dns", "mail", "directory", "file_share", "storage",
+        "certificate_authority", "identity", "attacker", "target", "siem", "ids",
+        "monitoring", "logging", "honeypot", "malware", "bastion", "vulnerable",
+        "cloud", "container", "kubernetes", "backup", "git", "cicd", "linux",
+        "ubuntu", "debian", "kali", "redhat", "windows", "macos", "freebsd",
+        "opnsense", "pfsense", "aws", "azure", "gcp",
+    }
+
+
 def test_legacy_expansion_avoids_existing_endpoint_key_collisions():
     from builder.infrastructure_planner import normalize_infrastructure
 

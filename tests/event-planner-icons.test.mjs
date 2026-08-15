@@ -6,7 +6,15 @@ test('icon library resolves every supported override and exposes labelled option
   try { icons = await import('../frontend/static/event-planner-icons.js'); } catch {}
   assert.equal(typeof icons.resolvePlannerIcon, 'function');
 
-  const names = ['server','desktop','laptop','ubuntu','linux','debian','kali','windows','router','firewall','opnsense','attacker','database','web','dns','mail','directory','cloud','container','kubernetes','storage','monitoring'];
+  const names = [
+    'server','desktop','laptop','mobile','appliance',
+    'gateway','router','switch','firewall','vpn','proxy','load_balancer',
+    'web','database','dns','mail','directory','file_share','storage','certificate_authority','identity',
+    'attacker','target','siem','ids','monitoring','logging','honeypot','malware','bastion','vulnerable',
+    'cloud','container','kubernetes','backup','git','cicd',
+    'linux','ubuntu','debian','kali','redhat','windows','macos','freebsd','opnsense','pfsense',
+    'aws','azure','gcp',
+  ];
   assert.deepEqual(Object.keys(icons.PLANNER_ICONS), names);
   assert.deepEqual(icons.PLANNER_ICON_OPTIONS.map(row => row.value), names);
   for (const name of names) {
@@ -14,6 +22,19 @@ test('icon library resolves every supported override and exposes labelled option
     assert.match(resolved.path, /^M/);
     assert.equal(resolved.viewBox, '0 0 24 24');
   }
+  assert.equal(new Set(names.map(name => icons.PLANNER_ICONS[name].path)).size, names.length);
+});
+
+test('icon options are grouped into the cyber training taxonomy', async () => {
+  const {PLANNER_ICON_GROUPS} = await import('../frontend/static/event-planner-icons.js');
+
+  assert.deepEqual(PLANNER_ICON_GROUPS.map(group => group.label), [
+    'Devices','Network','Services','Security','Workloads','Platforms','Cloud providers',
+  ]);
+  assert.equal(PLANNER_ICON_GROUPS.flatMap(group => group.options).length, 50);
+  assert.deepEqual(PLANNER_ICON_GROUPS.find(group => group.label === 'Security').options.map(row => row.value), [
+    'attacker','target','siem','ids','monitoring','logging','honeypot','malware','bastion','vulnerable',
+  ]);
 });
 
 test('icon resolver preserves safe custom paths and falls back for malformed values', async () => {

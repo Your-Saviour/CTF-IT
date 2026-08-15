@@ -10,9 +10,14 @@ from ipaddress import ip_network
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TEAM_ROLES = {"blue", "red"}
 PLANNER_ICONS = {
-    "server", "desktop", "laptop", "ubuntu", "linux", "debian", "kali", "windows",
-    "router", "firewall", "opnsense", "attacker", "database", "web", "dns", "mail", "directory",
-    "cloud", "container", "kubernetes", "storage", "monitoring",
+    "server", "desktop", "laptop", "mobile", "appliance",
+    "gateway", "router", "switch", "firewall", "vpn", "proxy", "load_balancer",
+    "web", "database", "dns", "mail", "directory", "file_share", "storage",
+    "certificate_authority", "identity", "attacker", "target", "siem", "ids",
+    "monitoring", "logging", "honeypot", "malware", "bastion", "vulnerable",
+    "cloud", "container", "kubernetes", "backup", "git", "cicd", "linux",
+    "ubuntu", "debian", "kali", "redhat", "windows", "macos", "freebsd",
+    "opnsense", "pfsense", "aws", "azure", "gcp",
 }
 VPC_LIMIT_PER_REGION = 5
 
