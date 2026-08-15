@@ -282,12 +282,12 @@ async def lifespan(app: FastAPI):
                     "description": "Traefik reverse proxy dashboard"
                 },
                 {
-                    "service_name": "Vultr API",
-                    "credential_type": "token",
-                    "username": None,
-                    "password": os.environ.get("VULTR_API_KEY", ""),
-                    "url": "https://my.vultr.com/settings/#settingsapi",
-                    "description": "Vultr cloud API token"
+                    "service_name": "AWS Provider",
+                    "credential_type": "identity",
+                    "username": os.environ.get("AWS_DEFAULT_REGION", "not configured"),
+                    "password": None,
+                    "url": "https://console.aws.amazon.com/",
+                    "description": "Uses the runtime IAM role or standard AWS credential chain"
                 },
                 {
                     "service_name": "Cloudflare",

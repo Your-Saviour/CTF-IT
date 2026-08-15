@@ -850,7 +850,7 @@
                 return;
             case 'destroy':
                 if (!confirm('Destroy this VM? This cannot be undone.')) return;
-                url = `/admin/api/vms/${id}/destroy-vultr`;
+                url = `/admin/api/vms/${id}/destroy-cloud`;
                 method = 'POST';
                 msg = 'Destroy initiated';
                 break;
