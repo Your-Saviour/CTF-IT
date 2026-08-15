@@ -15,7 +15,7 @@ from api.models import (
     Event, OpnsenseImage, PlatformSettings, PrivateBootCertification,
     Site, Team, User, VM, VPNCredential, utcnow,
 )
-from api.routes.admin import PlanPreviewRequest, overview, plan_preview
+from api.routes.admin import PlanPreviewRequest, get_event, overview, plan_preview
 from api.routes.vm import _gamenet_gateway_proxy
 from api.services.gamenet import (
     allocate_event_networks, ensure_user_vpn_credential, render_user_config,
@@ -257,6 +257,67 @@ def test_legacy_expansion_avoids_existing_endpoint_key_collisions():
 
     keys = [row["key"] for row in normalize_infrastructure(value)["sites"][0]["zones"][0]["endpoints"]]
     assert keys == ["workstation_1", "workstation_2", "workstation_1_2"]
+
+
+def test_layout_accepts_known_stable_node_ids():
+    from builder.infrastructure_planner import normalize_infrastructure, validate_infrastructure_layout
+
+    infrastructure = normalize_infrastructure(INFRASTRUCTURE)
+    layout = {"version": 1, "nodes": {
+        "gateway": {"x": 10, "y": 20},
+        "site:head_office": {"x": 100.5, "y": 80},
+        "vm:head_office/corporate/workstation_1": {"x": 220, "y": 300},
+    }}
+
+    assert validate_infrastructure_layout(layout, infrastructure) == []
+
+
+def test_layout_rejects_unknown_ids_and_non_finite_coordinates():
+    from builder.infrastructure_planner import normalize_infrastructure, validate_infrastructure_layout
+
+    errors = validate_infrastructure_layout(
+        {"version": 1, "nodes": {"vm:unknown": {"x": float("inf"), "y": 0}}},
+        normalize_infrastructure(INFRASTRUCTURE),
+    )
+
+    assert "infrastructure_layout.nodes.vm:unknown references an unknown node id" in errors
+    assert "infrastructure_layout.nodes.vm:unknown.x must be a finite number" in errors
+
+
+def test_layout_rejects_unsupported_version_and_oversize_payload():
+    from builder.infrastructure_planner import normalize_infrastructure, validate_infrastructure_layout
+
+    infrastructure = normalize_infrastructure(INFRASTRUCTURE)
+    errors = validate_infrastructure_layout({"version": 2, "nodes": {}}, infrastructure)
+    assert errors == ["infrastructure_layout.version must be 1"]
+
+    huge = {"version": 1, "nodes": {"gateway": {"x": 1, "y": 2, "padding": "x" * 300_000}}}
+    assert "infrastructure_layout exceeds 262144 bytes" in validate_infrastructure_layout(huge, infrastructure)
+
+
+def test_event_persists_network_planner_layout_and_revision(db_session):
+    layout = {"version": 1, "nodes": {"gateway": {"x": 10, "y": 20}}}
+    event = Event(name="Planner", quota="{}", infrastructure_layout=json.dumps(layout))
+    db_session.add(event)
+    db_session.commit()
+    db_session.expire_all()
+
+    saved = db_session.get(Event, event.id)
+    assert json.loads(saved.infrastructure_layout) == layout
+    assert saved.updated_at is not None
+
+
+def test_event_detail_exposes_planner_layout_and_revision(monkeypatch, db_session):
+    layout = {"version": 1, "nodes": {"gateway": {"x": 10, "y": 20}}}
+    event = Event(name="Planner", quota="{}", infrastructure_layout=json.dumps(layout))
+    db_session.add(event)
+    db_session.commit()
+    monkeypatch.setattr("api.routes.admin.require_admin", lambda *_args, **_kwargs: User(is_admin=True))
+
+    payload = asyncio.run(get_event(event.id, MagicMock(), db_session))
+
+    assert payload["infrastructure_layout"] == layout
+    assert payload["updated_at"] == event.updated_at.isoformat()
 
 
 def test_gamenet_hostname_is_provider_safe_stable_and_bounded():

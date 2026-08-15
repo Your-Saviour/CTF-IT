@@ -75,6 +75,7 @@ class Event(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     quota: Mapped[str] = mapped_column(Text, nullable=False)
     infrastructure: Mapped[str] = mapped_column(Text, nullable=True)
+    infrastructure_layout: Mapped[str] = mapped_column(Text, nullable=True)
     open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
     status: Mapped[str] = mapped_column(String(16), default="draft")
     description: Mapped[str] = mapped_column(Text, nullable=True)
@@ -83,6 +84,7 @@ class Event(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     expo_sync_status: Mapped[str] = mapped_column(String(24), nullable=True)
     expo_sync_last_error: Mapped[str] = mapped_column(Text, nullable=True)
     expo_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)

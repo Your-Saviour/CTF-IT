@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import math
 
 
 _DEFAULT_INFRASTRUCTURE = {
@@ -76,6 +78,69 @@ def normalize_infrastructure(value: dict) -> dict:
                     normalized.append(instance)
             zone["endpoints"] = normalized
     return result
+
+
+def infrastructure_node_ids(infrastructure: dict) -> set[str]:
+    """Return every stable node identifier addressable by the planner."""
+    result = {"gateway"}
+    for site in infrastructure.get("sites", []):
+        site_key = site.get("key")
+        if not isinstance(site_key, str):
+            continue
+        result.update({f"site:{site_key}", f"firewall:{site_key}"})
+        for zone in site.get("zones", []):
+            zone_key = zone.get("key")
+            if not isinstance(zone_key, str):
+                continue
+            result.add(f"zone:{site_key}/{zone_key}")
+            for endpoint in endpoint_instances_for_layout(zone.get("endpoints", [])):
+                endpoint_key = endpoint.get("key")
+                if isinstance(endpoint_key, str):
+                    result.add(f"vm:{site_key}/{zone_key}/{endpoint_key}")
+    return result
+
+
+def endpoint_instances_for_layout(endpoints: list[dict]) -> list[dict]:
+    """Expand a zone endpoint list with the same collision rules as normalization."""
+    used: set[str] = set()
+    result: list[dict] = []
+    for endpoint in endpoints:
+        for instance in endpoint_instances(endpoint):
+            instance["key"] = _next_free_key(instance.get("key", "endpoint"), used)
+            used.add(instance["key"])
+            result.append(instance)
+    return result
+
+
+def validate_infrastructure_layout(layout: dict | None, infrastructure: dict) -> list[str]:
+    """Validate presentation-only layout data against a topology document."""
+    if layout is None:
+        return []
+    if not isinstance(layout, dict):
+        return ["infrastructure_layout must be a JSON object"]
+    if len(json.dumps(layout, separators=(",", ":"), allow_nan=True).encode()) > 262_144:
+        return ["infrastructure_layout exceeds 262144 bytes"]
+    errors: list[str] = []
+    if layout.get("version") != 1:
+        errors.append("infrastructure_layout.version must be 1")
+    nodes = layout.get("nodes")
+    if not isinstance(nodes, dict):
+        errors.append("infrastructure_layout.nodes must be an object")
+        return errors
+    valid_ids = infrastructure_node_ids(infrastructure)
+    for node_id, position in nodes.items():
+        path = f"infrastructure_layout.nodes.{node_id}"
+        if node_id not in valid_ids:
+            errors.append(f"{path} references an unknown node id")
+        if not isinstance(position, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        for axis in ("x", "y"):
+            value = position.get(axis)
+            if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(value)):
+                errors.append(f"{path}.{axis} must be a finite number")
+    return errors
 
 
 def _humanize(value: str) -> str:
