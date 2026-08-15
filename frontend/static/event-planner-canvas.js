@@ -10,6 +10,14 @@ export function topologyNodePresentation(node) {
   return ['gateway', 'firewall', 'vm'].includes(node.type) ? 'machine' : 'structural';
 }
 
+export function topologyThemeStyle(node) {
+  return node?.color ? {'--node-theme-color': node.color} : {};
+}
+
+export function mergeLayoutNodes(layout, nodes) {
+  return {version: 1, nodes: structuredClone(nodes), themes: structuredClone(layout?.themes || {})};
+}
+
 export const MACHINE_ICON_GEOMETRY = Object.freeze({
   secondarySize: 24,
   secondaryX: -2,
@@ -65,7 +73,7 @@ export function arrangedZoneLayout(graph, layout, zoneId) {
   const arranged = arrangeZoneChildren(positionedZone, children);
   const nodes = structuredClone(layout.nodes || {});
   for (const [id, position] of Object.entries(arranged)) nodes[id] = position;
-  return {version: 1, nodes};
+  return mergeLayoutNodes(layout, nodes);
 }
 
 export function constrainMachinePosition(position, zoneBounds) {
@@ -84,7 +92,7 @@ export function translateZoneLayout(layout, zoneId, childIds, dx, dy) {
       nodes[id] = {x: position.x + dx, y: position.y + dy};
     }
   }
-  return {version: 1, nodes};
+  return mergeLayoutNodes(layout, nodes);
 }
 
 export function topologyLinks(nodes) {
@@ -215,11 +223,11 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
   function render(nextGraph, layout = {version: 1, nodes: {}}) {
     pendingLayoutKey = null;
     graph = nextGraph;
-    currentLayout = {version: 1, nodes: {...layout.nodes}};
+    currentLayout = mergeLayoutNodes(layout, layout.nodes || {});
     scene.selectAll('*').remove();
 
     const completed = calculateHierarchicalLayout(graph, currentLayout);
-    currentLayout = {version: 1, nodes: completed.nodes};
+    currentLayout = mergeLayoutNodes(currentLayout, completed.nodes);
     const nodes = graph.map(row => ({
       ...row,
       ...currentLayout.nodes[row.id],
@@ -266,6 +274,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('role', 'group')
       .attr('tabindex', 0)
       .attr('aria-label', d => `${d.systemManaged ? 'System-managed zone' : 'Zone'}: ${d.label}`)
+      .attr('data-colour-inherited', d => d.colorInherited ? 'true' : null)
+      .style('--node-theme-color', d => d.color || null)
       .attr('transform', d => `translate(${d.x},${d.y})`)
       .on('click', (_, d) => callbacks.onSelect?.(d.id))
       .on('keydown', (event, d) => {
@@ -325,6 +335,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('role', 'button')
       .attr('tabindex', 0)
       .attr('aria-label', d => `${d.type}: ${d.label}`)
+      .attr('data-colour-inherited', d => d.colorInherited ? 'true' : null)
+      .style('--node-theme-color', d => d.color || null)
       .attr('transform', d => `translate(${d.x},${d.y})`)
       .on('click', (_, d) => callbacks.onSelect?.(d.id))
       .on('keydown', (event, d) => {
@@ -341,6 +353,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('role', 'button')
       .attr('tabindex', 0)
       .attr('aria-label', d => `${d.type}: ${d.label}`)
+      .attr('data-colour-inherited', d => d.colorInherited ? 'true' : null)
+      .style('--node-theme-color', d => d.color || null)
       .attr('transform', d => `translate(${d.x},${d.y})`)
       .on('click', (_, d) => callbacks.onSelect?.(d.id))
       .on('keydown', (event, d) => {
@@ -463,7 +477,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         queueMicrotask(() => {
           if (pendingLayoutKey !== key) return;
           pendingLayoutKey = null;
-          callbacks.onLayoutChange?.({version: 1, nodes: structuredClone(completed.nodes)});
+          callbacks.onLayoutChange?.(mergeLayoutNodes(currentLayout, completed.nodes));
         });
       }
     }
@@ -483,7 +497,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
 
   function resetLayout() {
     const completed = calculateHierarchicalLayout(graph, {version: 1, nodes: {}});
-    currentLayout = {version: 1, nodes: completed.nodes};
+    currentLayout = mergeLayoutNodes(currentLayout, completed.nodes);
     render(graph, currentLayout);
     callbacks.onLayoutChange?.(structuredClone(currentLayout));
     fit();

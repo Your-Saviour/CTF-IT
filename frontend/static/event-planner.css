@@ -84,6 +84,20 @@
 .system-zone-details strong { color: var(--cyan); text-transform: uppercase; }
 .system-zone-details dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; }
 .system-zone-details dt { color: var(--text-muted); }
+.theme-control { margin: 16px 0; padding: 12px; border: 1px solid var(--border); border-radius: 0; }
+.theme-control legend { padding: 0 6px; color: var(--text-muted); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+.theme-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.theme-swatch { position: relative; min-height: 32px; border: 1px solid color-mix(in srgb, var(--swatch) 70%, #fff); border-radius: 0; background: var(--swatch); cursor: pointer; }
+.theme-swatch::after { content: ''; position: absolute; inset: 4px; border: 1px solid transparent; }
+.theme-swatch[aria-pressed="true"]::after { border-color: #fff; box-shadow: 0 0 0 1px #000; }
+.theme-swatch:focus-visible, .theme-reset:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.theme-swatch:disabled, .theme-reset:disabled { cursor: default; opacity: .48; }
+.planner-inspector .theme-custom { display: grid; grid-template-columns: 1fr 44px; align-items: center; gap: 10px; margin: 12px 0; }
+.planner-inspector .theme-custom input[type="color"] { width: 44px; height: 32px; margin: 0; padding: 2px; border-radius: 0; cursor: pointer; }
+.theme-control-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.theme-status { color: var(--text-secondary); font-size: 10px; }
+.theme-reset { min-height: 32px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 0; background: var(--bg-deep); color: var(--text-secondary); font: 10px 'JetBrains Mono', monospace; cursor: pointer; }
+.theme-reset:hover { border-color: var(--cyan-dim); color: var(--cyan); }
 .field-error { color: var(--red); font-size: 10px; }
 .danger { color: var(--red) !important; border-color: rgba(255, 23, 68, .5) !important; }
 
@@ -104,6 +118,9 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .zone-container.team-red .zone-container-header { fill: #351827; stroke: rgba(255, 23, 68, .72); }
 .zone-container.system-managed .zone-container-body { fill: rgba(58, 42, 12, .38); stroke: rgba(255, 184, 0, .58); }
 .zone-container.system-managed .zone-container-header { fill: #302817; stroke: rgba(255, 184, 0, .72); }
+.zone-container[style*="--node-theme-color"] .zone-container-body { fill: color-mix(in srgb, var(--node-theme-color) 18%, #0e1d2d); stroke: var(--node-theme-color); }
+.zone-container[style*="--node-theme-color"] .zone-container-header { fill: color-mix(in srgb, var(--node-theme-color) 26%, #101b2a); stroke: var(--node-theme-color); }
+.zone-container[style*="--node-theme-color"] .zone-container-divider { stroke: var(--node-theme-color); }
 .zone-container.selected .zone-container-body, .zone-container.selected .zone-container-header { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }
 .zone-container.invalid .zone-container-body, .zone-container.invalid .zone-container-header { stroke: var(--red); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--red-glow)); }
 .zone-container text { fill: var(--text-primary); font-family: 'JetBrains Mono', monospace; pointer-events: none; }
@@ -125,6 +142,8 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-node .node-primary-icon path, .topo-node .node-secondary-icon path { fill: var(--cyan-dim); }
 .topo-node .node-secondary-icon path { paint-order: stroke; stroke: var(--bg-deep); stroke-width: 2.5; stroke-linejoin: round; }
 .topo-node.firewall .node-primary-icon path, .topo-node.firewall .node-secondary-icon path { fill: var(--amber); }
+.topo-node[style*="--node-theme-color"] .node-primary-icon path, .topo-node[style*="--node-theme-color"] .node-secondary-icon path { fill: var(--node-theme-color); }
+.topo-node[style*="--node-theme-color"] .node-state-ring { stroke: var(--node-theme-color); }
 .topo-node.selected .node-primary-icon path, .topo-node.selected .node-secondary-icon path { fill: var(--cyan); }
 .topo-node.invalid .node-primary-icon path, .topo-node.invalid .node-secondary-icon path { fill: var(--red); }
 .topo-node.selected .node-body { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }

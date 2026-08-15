@@ -45,6 +45,22 @@ def test_layout_theme_validation_rejects_unknown_malformed_and_extra_values():
     assert any("themes.firewall-zone:head_office must be an object" in error for error in errors)
 
 
+def test_planner_colour_controls_feed_inherited_themes_to_the_canvas():
+    controller = CONTROLLER.read_text()
+    canvas = CANVAS.read_text()
+    css = CSS.read_text()
+
+    assert "renderColourControl" in controller
+    assert "setNodeThemeColor" in controller
+    assert "effectiveNodeColor" in controller
+    assert "data-theme-swatch" in controller
+    assert "data-theme-reset" in controller
+    assert "colorInherited" in controller
+    assert "--node-theme-color" in canvas
+    assert "--node-theme-color" in css
+    assert ".theme-swatch" in css
+
+
 def test_plan_page_loads_full_page_planner_assets():
     source = TEMPLATE.read_text()
 
@@ -144,7 +160,7 @@ def test_planner_state_remaps_structural_layout_ids_and_mirrors_server_paths():
     source = STATE.read_text()
 
     assert "renameStructuralKey" in source
-    assert "state.layout = {version: 1, nodes: remapped}" in source
+    assert "themes: remapEntries(state.layout?.themes)" in source
     assert "export function pruneLayout" in source
     assert "sites[${si}].zones[${zi}].endpoints[${vi}]" in source
     assert "A zone supports at most 245 VMs" in source

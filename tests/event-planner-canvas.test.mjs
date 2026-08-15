@@ -210,3 +210,21 @@ test('hierarchical layout migrates legacy machine centres inside zone frames', (
   assert.deepEqual(result.nodes['vm:a/blue/web'], {x: 180, y: 400});
   assert.equal(result.added, true);
 });
+
+test('canvas theme styles are scoped and coordinate updates preserve themes', () => {
+  assert.deepEqual(canvas.topologyThemeStyle({color: '#2563eb'}), {
+    '--node-theme-color': '#2563eb',
+  });
+  assert.deepEqual(canvas.topologyThemeStyle({color: null}), {});
+
+  const layout = {
+    version: 1,
+    nodes: {gateway: {x: 1, y: 2}},
+    themes: {'zone:a/blue': {color: '#2563eb'}},
+  };
+  assert.deepEqual(canvas.mergeLayoutNodes(layout, {gateway: {x: 3, y: 4}}), {
+    version: 1,
+    nodes: {gateway: {x: 3, y: 4}},
+    themes: {'zone:a/blue': {color: '#2563eb'}},
+  });
+});
