@@ -161,4 +161,4 @@ def test_machine_nodes_render_as_standalone_icons_with_labels_below():
     assert "node-state-ring" in canvas
     assert "machine-label" in canvas
     assert "topologyNodePresentation" in canvas
-    assert "machine-badge" in canvas
+    assert "machine-badge" not in canvas

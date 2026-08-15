@@ -22,8 +22,8 @@ test('machine nodes use icon-first presentation while structural nodes retain ca
   assert.equal(canvas.topologyNodePresentation({type: 'site'}), 'structural');
 });
 
-test('secondary machine icon uses a prominent badge and glyph', () => {
-  assert.equal(canvas.MACHINE_ICON_GEOMETRY.secondaryBadgeRadius, 14);
+test('secondary machine icon uses a prominent glyph without a surrounding badge', () => {
+  assert.equal('secondaryBadgeRadius' in canvas.MACHINE_ICON_GEOMETRY, false);
   assert.equal(canvas.MACHINE_ICON_GEOMETRY.secondarySize, 18);
 });
 

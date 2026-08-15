@@ -11,7 +11,6 @@ export function topologyNodePresentation(node) {
 }
 
 export const MACHINE_ICON_GEOMETRY = Object.freeze({
-  secondaryBadgeRadius: 14,
   secondarySize: 18,
 });
 
@@ -186,11 +185,6 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('viewBox', d => d.icons?.primary?.viewBox || '0 0 24 24')
       .attr('aria-hidden', 'true');
     primaryIcons.append('path').attr('d', d => d.icons?.primary?.path || '');
-    machineGroups.append('circle')
-      .attr('class', 'machine-badge')
-      .attr('cx', 15)
-      .attr('cy', 8)
-      .attr('r', MACHINE_ICON_GEOMETRY.secondaryBadgeRadius);
     const secondaryIcons = machineGroups
       .append('svg')
       .attr('class', 'node-secondary-icon')
