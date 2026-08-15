@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, inspect, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, func, inspect, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database import Base
@@ -84,7 +84,9 @@ class Event(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
     expo_sync_status: Mapped[str] = mapped_column(String(24), nullable=True)
     expo_sync_last_error: Mapped[str] = mapped_column(Text, nullable=True)
     expo_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)

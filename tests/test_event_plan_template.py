@@ -3,6 +3,7 @@ from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "frontend" / "templates" / "event_plan.html"
 ROOT = TEMPLATE.parents[2]
+EVENT_EDITOR = ROOT / "frontend" / "templates" / "admin_resource.html"
 
 
 def test_inline_plan_actions_are_exported_to_window():
@@ -21,3 +22,10 @@ def test_admin_drawers_restore_focus_and_red_team_tables_are_responsive():
     assert "form input:not([disabled])" in script
     assert caldera.count('class="table-wrap"') >= 4
     assert 'class="card-body table-wrap"' in agent
+
+
+def test_event_drawer_delegates_network_authoring_to_full_page_plan():
+    source = EVENT_EDITOR.read_text()
+
+    assert 'id="infrastructure-json"' not in source
+    assert 'href="/admin/events/${x.id}/plan"' in source

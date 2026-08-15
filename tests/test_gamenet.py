@@ -3,7 +3,7 @@ import asyncio
 from copy import deepcopy
 from ipaddress import ip_network
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import create_engine
@@ -15,7 +15,7 @@ from api.models import (
     Event, OpnsenseImage, PlatformSettings, PrivateBootCertification,
     Site, Team, User, VM, VPNCredential, utcnow,
 )
-from api.routes.admin import PlanPreviewRequest, get_event, overview, plan_preview
+from api.routes.admin import PlanPreviewRequest, get_event, overview, plan_preview, update_event
 from api.routes.vm import _gamenet_gateway_proxy
 from api.services.gamenet import (
     allocate_event_networks, ensure_user_vpn_credential, render_user_config,
@@ -318,6 +318,46 @@ def test_event_detail_exposes_planner_layout_and_revision(monkeypatch, db_sessio
 
     assert payload["infrastructure_layout"] == layout
     assert payload["updated_at"] == event.updated_at.isoformat()
+
+
+def test_planner_save_updates_infrastructure_and_layout_atomically(monkeypatch, db_session):
+    from builder.infrastructure_planner import normalize_infrastructure
+
+    event = Event(name="Planner", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.commit()
+    layout = {"version": 1, "nodes": {"gateway": {"x": 10, "y": 20}}}
+    request = MagicMock()
+    request.json = AsyncMock(return_value={
+        "infrastructure": normalize_infrastructure(INFRASTRUCTURE),
+        "infrastructure_layout": layout,
+        "expected_updated_at": event.updated_at.isoformat(),
+    })
+    monkeypatch.setattr("api.routes.admin.require_admin", lambda *_args, **_kwargs: User(is_admin=True))
+
+    response = asyncio.run(update_event(event.id, request, db_session))
+
+    assert response["status"] == "updated"
+    assert response["updated_at"]
+    assert json.loads(event.infrastructure_layout) == layout
+
+
+def test_planner_save_rejects_stale_revision_without_partial_update(monkeypatch, db_session):
+    event = Event(name="Planner", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.commit()
+    original = event.infrastructure
+    request = MagicMock()
+    request.json = AsyncMock(return_value={
+        "infrastructure": {"broken": True},
+        "infrastructure_layout": {"version": 1, "nodes": {}},
+        "expected_updated_at": "2000-01-01T00:00:00+00:00",
+    })
+    monkeypatch.setattr("api.routes.admin.require_admin", lambda *_args, **_kwargs: User(is_admin=True))
+
+    response = asyncio.run(update_event(event.id, request, db_session))
+
+    assert response.status_code == 409
+    assert event.infrastructure == original
+    assert event.infrastructure_layout is None
 
 
 def test_gamenet_hostname_is_provider_safe_stable_and_bounded():

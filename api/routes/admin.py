@@ -738,10 +738,12 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
                 status_code=422,
             )
 
+    from builder.infrastructure_planner import default_infrastructure
+    infrastructure = body.get("infrastructure", default_infrastructure())
     event = Event(
         name=body.get("name", "CTF Event"),
         quota=json.dumps(body.get("quota", {})),
-        infrastructure=json.dumps(body["infrastructure"]) if "infrastructure" in body else None,
+        infrastructure=json.dumps(infrastructure),
         status="draft",
         description=body.get("description"),
         welcome_message=body.get("welcome_message"),
@@ -766,11 +768,18 @@ async def update_event(
         return JSONResponse({"error": "Event not found"}, status_code=404)
 
     body = await request.json()
-    if event.status != "draft" and "infrastructure" in body:
+    planner_fields = {"infrastructure", "infrastructure_layout"} & set(body)
+    if event.status != "draft" and planner_fields:
         return JSONResponse(
             {"error": "infrastructure cannot be edited after provisioning begins; destroy and reprovision the GameNet"},
             status_code=409,
         )
+    expected_updated_at = body.get("expected_updated_at")
+    if expected_updated_at is not None and expected_updated_at != event.updated_at.isoformat():
+        return JSONResponse({
+            "error": "event draft has changed",
+            "current_updated_at": event.updated_at.isoformat(),
+        }, status_code=409)
 
     time_limit = body.get("time_limit_minutes")
     if "time_limit_minutes" in body and time_limit is not None and (
@@ -806,6 +815,22 @@ async def update_event(
                 )
             event.infrastructure = json.dumps(body["infrastructure"])
 
+    if "infrastructure_layout" in body:
+        from builder.infrastructure_planner import normalize_infrastructure, validate_infrastructure_layout
+        infrastructure = body.get("infrastructure")
+        if infrastructure is None:
+            infrastructure = json.loads(event.infrastructure) if event.infrastructure else None
+        if infrastructure is None:
+            return JSONResponse({"error": "layout requires infrastructure"}, status_code=422)
+        layout_errors = validate_infrastructure_layout(
+            body["infrastructure_layout"], normalize_infrastructure(infrastructure)
+        )
+        if layout_errors:
+            return JSONResponse(
+                {"error": "Invalid infrastructure layout", "details": layout_errors}, status_code=422
+            )
+        event.infrastructure_layout = json.dumps(body["infrastructure_layout"])
+
     if "name" in body:
         event.name = body["name"]
     if "description" in body:
@@ -815,8 +840,9 @@ async def update_event(
     if "time_limit_minutes" in body:
         event.time_limit_minutes = body["time_limit_minutes"]
 
+    event.updated_at = utcnow()
     db.commit()
-    return {"status": "updated"}
+    return {"status": "updated", "updated_at": event.updated_at.isoformat()}
 
 
 @router.post("/events/{event_id}/start")

@@ -19,7 +19,8 @@ def upgrade():
         if "infrastructure_layout" not in columns:
             batch.add_column(sa.Column("infrastructure_layout", sa.Text(), nullable=True))
         if "updated_at" not in columns:
-            batch.add_column(sa.Column("updated_at", sa.DateTime(), nullable=True))
+            batch.add_column(sa.Column("updated_at", sa.DateTime(), nullable=True,
+                                       server_default=sa.func.current_timestamp()))
     op.execute(sa.text(
         "UPDATE events SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)"
     ))
