@@ -146,6 +146,8 @@ def test_vpc_connectivity_probe_originates_from_wan_only_peer(monkeypatch):
     )
     assert key == "clone-key-2"
     assert calls[0][0] == "198.51.100.12"
+    assert "pass in quick on $lan_if inet from ($lan_if:network) to any" in calls[0][1]
+    assert "Allow LAN traffic" not in calls[0][1]
     assert calls[1][0] == "198.51.100.11"
     assert "inet 172.31.254.2" in calls[1][1] and "ping -c 1 -t 3 172.31.254.1" in calls[1][1]
 

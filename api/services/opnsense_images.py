@@ -551,9 +551,15 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment
         "set -eu; wan_if=$(route -n get default | awk '/interface:/{print $2}'); "
         "lan_if=$(ifconfig -l | tr ' ' '\\n' | while read i; do "
         f"if ifconfig \"$i\" | grep -qiF {shlex.quote('ether ' + attachment['mac_address'].lower())}; then echo \"$i\"; fi; done); "
-        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + host)} >/dev/null; "
-        "test -n \"$lan_if\"; ifconfig \"$lan_if\" | grep -F 'inet 172.31.254.1' >/dev/null; "
-        "pfctl -sr | grep -F 'Allow LAN traffic' >/dev/null; pfctl -sn | grep -E 'nat on' >/dev/null"
+        "test -n \"$wan_if\" || { echo 'default WAN interface missing' >&2; exit 1; }; "
+        "test -n \"$lan_if\" || { echo 'VPC MAC did not map to a LAN interface' >&2; exit 1; }; "
+        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + host)} >/dev/null || "
+        "{ echo 'public WAN address missing' >&2; exit 1; }; "
+        "ifconfig \"$lan_if\" | grep -F 'inet 172.31.254.1' >/dev/null || "
+        "{ echo 'private LAN address missing' >&2; exit 1; }; "
+        "pfctl -sr | grep -F \"pass in quick on $lan_if inet from ($lan_if:network) to any\" >/dev/null || "
+        "{ echo 'effective LAN pass rule missing' >&2; exit 1; }; "
+        "pfctl -sn | grep -E 'nat on' >/dev/null || { echo 'effective outbound NAT missing' >&2; exit 1; }"
     )
     code, output, error = _ssh(db, host, command)
     if code:
