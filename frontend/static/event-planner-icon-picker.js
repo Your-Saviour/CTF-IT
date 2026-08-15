@@ -11,14 +11,21 @@ function iconSvg(icon, className = '') {
 function optionMarkup(option, category, selected) {
   const icon = resolvePlannerIcon(option.value);
   const search = `${category} ${option.label} ${option.value}`.toLowerCase();
-  return `<button type="button" class="icon-picker-option" role="option" data-icon-value="${escapeHtml(option.value)}" data-icon-search="${escapeHtml(search)}" aria-selected="${option.value === selected}">${iconSvg(icon)}<span>${escapeHtml(option.label)}</span></button>`;
+  return `<button type="button" class="icon-picker-option" role="option" tabindex="-1" data-icon-value="${escapeHtml(option.value)}" data-icon-search="${escapeHtml(search)}" aria-selected="${option.value === selected}">${iconSvg(icon)}<span>${escapeHtml(option.label)}</span></button>`;
 }
 
 export function renderIconPicker({name, label, value, selectedLabel, selectedIcon, automaticLabel, automaticIcon, groups, disabled}) {
   const automaticSelected = !value;
-  const automatic = `<button type="button" class="icon-picker-option automatic" role="option" data-icon-value="" data-icon-search="automatic default" aria-selected="${automaticSelected}">${iconSvg(automaticIcon)}<span>${escapeHtml(automaticLabel)}</span></button>`;
+  const automatic = `<button type="button" class="icon-picker-option automatic" role="option" tabindex="-1" data-icon-value="" data-icon-search="automatic default" aria-selected="${automaticSelected}">${iconSvg(automaticIcon)}<span>${escapeHtml(automaticLabel)}</span></button>`;
   const categorized = groups.map(group => `<section class="icon-picker-group" data-icon-group><div class="icon-picker-group-label">${escapeHtml(group.label)}</div>${group.options.map(option => optionMarkup(option, group.label, value)).join('')}</section>`).join('');
   return `<label class="icon-picker-field"><span>${escapeHtml(label)}</span><div class="icon-picker" data-icon-picker="${escapeHtml(name)}"><button type="button" class="icon-picker-trigger" aria-haspopup="listbox" aria-expanded="false" ${disabled ? 'disabled' : ''}>${iconSvg(selectedIcon, 'selected')}<span>${escapeHtml(selectedLabel)}</span><span class="icon-picker-chevron" aria-hidden="true"></span></button><div class="icon-picker-menu" hidden><input type="search" class="icon-picker-search" aria-label="Search ${escapeHtml(label)} icons" placeholder="Search icons"><div class="icon-picker-options" role="listbox" aria-label="${escapeHtml(label)} choices">${automatic}${categorized}</div></div></div></label>`;
+}
+
+export function nextPickerOptionIndex(current, length, key) {
+  if (!length) return -1;
+  if (current < 0) return key === 'ArrowUp' ? length - 1 : 0;
+  const offset = key === 'ArrowUp' ? -1 : 1;
+  return (current + offset + length) % length;
 }
 
 export function closeIconPickers(root, except = null) {
@@ -38,7 +45,16 @@ export function bindIconPickers(root, {onChange}) {
     const close = ({focus = false} = {}) => {
       menu.hidden = true;
       trigger.setAttribute('aria-expanded', 'false');
+      picker.querySelectorAll('.icon-picker-option').forEach(option => { option.tabIndex = -1; });
       if (focus) trigger.focus();
+    };
+    const focusOption = (options, index) => {
+      options.forEach(option => { option.tabIndex = -1; });
+      const option = options[index];
+      if (option) {
+        option.tabIndex = 0;
+        option.focus();
+      }
     };
     const filter = () => {
       const query = search.value.trim().toLowerCase();
@@ -68,11 +84,17 @@ export function bindIconPickers(root, {onChange}) {
         event.stopPropagation();
         open();
         const options = visibleOptions();
-        options[event.key === 'ArrowDown' ? 0 : options.length - 1]?.focus();
+        focusOption(options, nextPickerOptionIndex(-1, options.length, event.key));
       }
     });
     search.addEventListener('input', filter);
     picker.addEventListener('keydown', event => {
+      if (event.key === 'Tab') {
+        queueMicrotask(() => {
+          if (!picker.contains(document.activeElement)) close();
+        });
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         close({focus: true});
@@ -88,9 +110,11 @@ export function bindIconPickers(root, {onChange}) {
       const options = visibleOptions();
       if (!options.length) return;
       const current = options.indexOf(document.activeElement);
-      const offset = event.key === 'ArrowDown' ? 1 : -1;
-      options[(current + offset + options.length) % options.length].focus();
+      focusOption(options, nextPickerOptionIndex(current, options.length, event.key));
     });
+    picker.addEventListener('focusout', () => queueMicrotask(() => {
+      if (!picker.contains(document.activeElement)) close();
+    }));
     picker.querySelectorAll('.icon-picker-option').forEach(option => option.addEventListener('click', () => {
       onChange(picker.dataset.iconPicker, option.dataset.iconValue);
       close();

@@ -17,6 +17,7 @@ test('picker markup shows selected and Automatic SVG previews with accessible li
   assert.match(html, /data-icon-value=""/);
   assert.match(html, /Automatic \(Server\)/);
   assert.match(html, /data-icon-value="database"[^>]*aria-selected="true"/);
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 2);
   assert.equal((html.match(/M1 1h2v2z/g) || []).length, 2);
 });
 
@@ -33,4 +34,13 @@ test('picker markup escapes labels and SVG attributes', async () => {
   assert.equal(html.includes('<Platforms>'), false);
   assert.equal(html.includes('onload="bad'), false);
   assert.match(html, /disabled/);
+});
+
+test('picker navigation enters at the correct edge and wraps predictably', async () => {
+  const {nextPickerOptionIndex} = await import('../frontend/static/event-planner-icon-picker.js');
+
+  assert.equal(nextPickerOptionIndex(-1, 51, 'ArrowDown'), 0);
+  assert.equal(nextPickerOptionIndex(-1, 51, 'ArrowUp'), 50);
+  assert.equal(nextPickerOptionIndex(50, 51, 'ArrowDown'), 0);
+  assert.equal(nextPickerOptionIndex(0, 51, 'ArrowUp'), 50);
 });
