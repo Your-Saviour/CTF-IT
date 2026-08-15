@@ -82,19 +82,21 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-node .node-body { fill: #111d2d; stroke: #58728c; stroke-width: 1.5; transition: fill .15s ease, stroke .15s ease; }
 .topo-node.site .node-body { fill: #18283c; stroke: #7890a8; stroke-width: 2; }
 .topo-node.firewall-zone .node-body { fill: var(--cyan-subtle); stroke: var(--cyan-dim); stroke-dasharray: 5 4; }
-.topo-node.firewall .node-body { fill: rgba(255, 179, 0, .09); stroke: var(--amber-dim); stroke-width: 2; }
 .topo-node.zone .node-body { fill: #132238; stroke: #466887; }
-.topo-node.vm .node-body { fill: #0d1725; stroke: #405b73; }
-.topo-node .vm-edge { fill: var(--cyan); stroke: none; pointer-events: none; }
+.topo-node .node-hit-target { fill: transparent; stroke: none; pointer-events: all; }
+.topo-node .node-state-ring { fill: none; stroke: transparent; stroke-width: 2; pointer-events: none; }
 .topo-node .node-icon { overflow: hidden; pointer-events: none; }
 .topo-node .node-icon path { fill: var(--cyan-dim); }
 .topo-node.firewall .node-icon path { fill: var(--amber); }
 .topo-node.selected .node-icon path { fill: var(--cyan); }
 .topo-node.invalid .node-icon path { fill: var(--red); }
 .topo-node.selected .node-body { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }
+.topo-node.selected .node-state-ring { stroke: var(--cyan); filter: drop-shadow(0 0 5px var(--cyan-glow)); }
 .topo-node.invalid .node-body { stroke: var(--red); stroke-width: 2.5; stroke-dasharray: none; filter: drop-shadow(0 0 4px var(--red-glow)); }
+.topo-node.invalid .node-state-ring { stroke: var(--red); filter: drop-shadow(0 0 4px var(--red-glow)); }
 .topo-node.invalid text { fill: var(--red); }
 .topo-node text { fill: var(--text-primary); font: 11px 'JetBrains Mono', monospace; }
+.topo-node .machine-label { font-size: 10px; }
 .topo-node .sub { fill: var(--text-muted); font-size: 9px; }
 
 @media (max-width: 1100px) {

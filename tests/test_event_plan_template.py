@@ -149,3 +149,12 @@ def test_planner_projects_configurable_base_type_icons_into_machine_nodes():
     assert "setMachineIconOverride" in controller
     assert "node-icon" in canvas
     assert "viewBox" in canvas
+
+
+def test_machine_nodes_render_as_standalone_icons_with_labels_below():
+    canvas = CANVAS.read_text()
+
+    assert "node-hit-target" in canvas
+    assert "node-state-ring" in canvas
+    assert "machine-label" in canvas
+    assert "topologyNodePresentation" in canvas

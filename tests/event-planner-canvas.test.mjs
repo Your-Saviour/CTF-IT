@@ -12,6 +12,14 @@ test('canvas presentation marks node roles and links beside the selection', () =
   assert.equal(canvas.topologyLinkClass({source: {selected: false}, target: {selected: false}}), 'topo-link');
 });
 
+test('machine nodes use icon-first presentation while structural nodes retain cards', () => {
+  assert.equal(typeof canvas.topologyNodePresentation, 'function');
+  assert.equal(canvas.topologyNodePresentation({type: 'vm', icon: {path: 'M0 0'}}), 'machine');
+  assert.equal(canvas.topologyNodePresentation({type: 'firewall', icon: {path: 'M0 0'}}), 'machine');
+  assert.equal(canvas.topologyNodePresentation({type: 'zone', icon: null}), 'structural');
+  assert.equal(canvas.topologyNodePresentation({type: 'site'}), 'structural');
+});
+
 test('hierarchical layout balances siblings beneath their visual parent', () => {
   assert.equal(typeof canvas.calculateHierarchicalLayout, 'function');
   const graph = [

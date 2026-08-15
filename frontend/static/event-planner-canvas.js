@@ -6,6 +6,10 @@ export function topologyLinkClass(link) {
   return `topo-link${link.source.selected || link.target.selected ? ' selected-adjacent' : ''}`;
 }
 
+export function topologyNodePresentation(node) {
+  return node.icon ? 'machine' : 'structural';
+}
+
 const ROOT_X = 120;
 const ROOT_Y = 70;
 const HORIZONTAL_GAP = 190;
@@ -146,31 +150,39 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         }));
     }
 
-    groups.append('rect')
+    const structuralGroups = groups.filter(d => topologyNodePresentation(d) === 'structural');
+    const machineGroups = groups.filter(d => topologyNodePresentation(d) === 'machine');
+
+    structuralGroups.append('rect')
       .attr('class', 'node-body')
       .attr('x', -70)
       .attr('y', -24)
       .attr('width', 140)
       .attr('height', 48)
       .attr('rx', 7);
-    groups.filter(d => d.type === 'vm')
+    machineGroups
       .append('rect')
-      .attr('class', 'vm-edge')
-      .attr('x', -70)
-      .attr('y', -24)
-      .attr('width', 4)
-      .attr('height', 48);
-    const icons = groups.filter(d => d.icon)
+      .attr('class', 'node-hit-target')
+      .attr('x', -40)
+      .attr('y', -30)
+      .attr('width', 80)
+      .attr('height', 72);
+    machineGroups.append('circle')
+      .attr('class', 'node-state-ring')
+      .attr('cy', -4)
+      .attr('r', 25);
+    const icons = machineGroups
       .append('svg')
       .attr('class', 'node-icon')
-      .attr('x', -58)
-      .attr('y', -9)
-      .attr('width', 18)
-      .attr('height', 18)
+      .attr('x', -18)
+      .attr('y', -22)
+      .attr('width', 36)
+      .attr('height', 36)
       .attr('viewBox', d => d.icon.viewBox)
       .attr('aria-hidden', 'true');
     icons.append('path').attr('d', d => d.icon.path);
-    groups.append('text').attr('text-anchor', 'middle').attr('x', d => d.icon ? 8 : 0).attr('y', 4).text(d => d.label);
+    structuralGroups.append('text').attr('class', 'node-label').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
+    machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 32).text(d => d.label);
 
     if (completed.added && !callbacks.readOnly) {
       const key = JSON.stringify(completed.nodes);
