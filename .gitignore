@@ -4,6 +4,7 @@ ctf.db
 data/
 __pycache__/
 .env
+.superpowers/
 base/.env
 *.pyc
 build_contexts/

@@ -160,6 +160,10 @@ The Users panel is also where administrators assign events, promote or demote ac
 
 ## Events & Scoring
 
+Draft events include a full-page network planner at `/admin/events/{id}/plan`. The diagram defines one canonical GameNet topology repeated for every team: a team VPN gateway, multi-region sites with mandatory OPNsense firewalls, red/blue zones, and individual VM endpoints. The workspace combines the topology canvas, structure outline, inspector forms, live validation, Advanced JSON, cost/resource preview, and durable node positions. Infrastructure becomes read-only once provisioning starts.
+
+New endpoint entries represent one VM each and include `key`, `name`, `base_type`, and `default_plan`. Existing count-based endpoint groups remain supported and expand into individual nodes when opened in the planner.
+
 Events are the central organising unit. Each event has its own module quota, leaderboard, and settings. Invitation links assign new participants to an event; administrators can reassign them later.
 
 ### Event lifecycle
