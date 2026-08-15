@@ -13,6 +13,7 @@ from api.services.opnsense_images import (
     builder_validation_command, cleanup_validated_image, download_bootstrap,
     interrupt_running_jobs, new_image, render_golden_config, run_image_build,
     validate_bootstrap_url, validate_release, release_matches, _posix_command,
+    _validate_clone_two,
 )
 
 
@@ -127,6 +128,26 @@ def test_clean_halt_requests_delayed_acpi_poweroff(monkeypatch):
     from api.services.opnsense_images import _halt
     _halt(None, "198.51.100.9")
     assert "nohup" in commands[0] and "/sbin/shutdown -p now" in commands[0]
+
+
+def test_vpc_connectivity_probe_originates_from_wan_only_peer(monkeypatch):
+    db = session(); image = image_row(db); calls = []
+    monkeypatch.setattr(
+        "api.services.gamenet_provider.configure_snapshot_validation_site", lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "api.services.opnsense_images._ssh",
+        lambda _db, host, command, **_kwargs: calls.append((host, command)) or (0, "", ""),
+    )
+    monkeypatch.setattr("api.services.opnsense_images._fingerprint", lambda *_args: "clone-key-2")
+    key = _validate_clone_two(
+        db, image, "198.51.100.12", {"mac_address": "00:11:22:33:44:55"},
+        "192.0.2.8/32", "198.51.100.11", "172.31.254.2",
+    )
+    assert key == "clone-key-2"
+    assert calls[0][0] == "198.51.100.12"
+    assert calls[1][0] == "198.51.100.11"
+    assert "inet 172.31.254.2" in calls[1][1] and "ping -c 1 -t 3 172.31.254.1" in calls[1][1]
 
 
 def test_running_jobs_interrupt_and_only_validated_active_image_is_selected():

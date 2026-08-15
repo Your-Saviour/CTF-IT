@@ -540,7 +540,7 @@ def _validate_clone_one(db: Session, image: OpnsenseImage, host: str, cidr: str)
 
 
 def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment: dict,
-                        cidr: str, peer_ip: str) -> str:
+                        cidr: str, peer_host: str, peer_ip: str) -> str:
     """Use the production snapshot-site configurator, then validate LAN/NAT policy."""
     from api.services.gamenet_provider import configure_snapshot_validation_site
     configure_snapshot_validation_site(
@@ -553,12 +553,21 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment
         f"if ifconfig \"$i\" | grep -qiF {shlex.quote('ether ' + attachment['mac_address'].lower())}; then echo \"$i\"; fi; done); "
         f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + host)} >/dev/null; "
         "test -n \"$lan_if\"; ifconfig \"$lan_if\" | grep -F 'inet 172.31.254.1' >/dev/null; "
-        "pfctl -sr | grep -F 'Allow LAN traffic' >/dev/null; pfctl -sn | grep -E 'nat on' >/dev/null; "
-        f"ping -c 1 -t 3 {shlex.quote(peer_ip)} >/dev/null"
+        "pfctl -sr | grep -F 'Allow LAN traffic' >/dev/null; pfctl -sn | grep -E 'nat on' >/dev/null"
     )
     code, output, error = _ssh(db, host, command)
     if code:
         raise ImageWorkflowError(f"VPC clone validation failed: {(error or output)[:300]}")
+    # The WAN-only clone intentionally has no inbound VPC pass rule.  Initiate
+    # the connectivity probe from that peer toward clone two's configured LAN,
+    # where the production site policy permits private traffic.
+    peer_command = (
+        f"ifconfig -a | grep -F {shlex.quote('inet ' + peer_ip)} >/dev/null; "
+        "ping -c 1 -t 3 172.31.254.1"
+    )
+    code, output, error = _ssh(db, peer_host, peer_command)
+    if code:
+        raise ImageWorkflowError(f"VPC private connectivity failed: {(error or output)[:300]}")
     fingerprint = _fingerprint(db, host)
     _record_validation(image, "clone_vpc", public_ip=host, private_ip="172.31.254.1",
                        ssh_host_key=fingerprint)
@@ -702,7 +711,9 @@ def run_image_build(db: Session, image_id: int, *, vultr_factory=VultrImageClien
             db.commit()
         clone_two = client.wait_instance(image.second_test_instance_id)
         attachment = client.attach_vpc(image.second_test_instance_id, image.validation_vpc_id)
-        clone_two_key = _validate_clone_two(db, image, clone_two["main_ip"], attachment, cidr, peer_ip)
+        clone_two_key = _validate_clone_two(
+            db, image, clone_two["main_ip"], attachment, cidr, clone_one["main_ip"], peer_ip,
+        )
         if len({builder_key, clone_one_key, clone_two_key}) != 3:
             raise ImageWorkflowError("builder and clone SSH host keys are not unique")
 
