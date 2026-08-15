@@ -4,6 +4,7 @@ from pathlib import Path
 TEMPLATE = Path(__file__).resolve().parents[1] / "frontend" / "templates" / "event_plan.html"
 ROOT = TEMPLATE.parents[2]
 EVENT_EDITOR = ROOT / "frontend" / "templates" / "admin_resource.html"
+CANVAS = ROOT / "frontend" / "static" / "event-planner-canvas.js"
 
 
 def test_plan_page_loads_full_page_planner_assets():
@@ -34,3 +35,14 @@ def test_event_drawer_delegates_network_authoring_to_full_page_plan():
 
     assert 'id="infrastructure-json"' not in source
     assert 'href="/admin/events/${x.id}/plan"' in source
+
+
+def test_canvas_module_supports_durable_accessible_layout():
+    source = CANVAS.read_text()
+
+    assert "createPlannerCanvas" in source
+    assert "onLayoutChange" in source
+    assert "resetLayout" in source
+    assert "focusNode" in source
+    assert "d3.zoom" in source
+    assert "aria-label" in source
