@@ -100,6 +100,9 @@ def validate_infrastructure(
                 errors.append(f"{zpath}.name is required")
             if zone.get("team") not in TEAM_ROLES:
                 errors.append(f"{zpath}.team must be one of: blue, red")
+            address_range = zone.get("address_range")
+            if address_range is not None and not isinstance(address_range, str):
+                errors.append(f"{zpath}.address_range must be a string")
             endpoints = zone.get("endpoints")
             if not isinstance(endpoints, list):
                 errors.append(f"{zpath}.endpoints must be an array")
@@ -113,6 +116,9 @@ def validate_infrastructure(
                     continue
                 _key(endpoint.get("key"), f"{epath}.key", endpoint_keys, errors)
                 _validate_machine(endpoint, epath, valid_base_ids, errors)
+                address = endpoint.get("address")
+                if address is not None and not isinstance(address, str):
+                    errors.append(f"{epath}.address must be a string")
                 count = endpoint.get("count")
                 if count is None:
                     if not isinstance(endpoint.get("name"), str) or not endpoint["name"].strip():

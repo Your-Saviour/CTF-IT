@@ -32,6 +32,30 @@ test('null infrastructure opens as an editable empty network', () => {
   assert.equal(nodeIndex(infrastructure).has('gateway'), true);
 });
 
+test('free-form planner address annotations survive normalization and validation', () => {
+  const value = structuredClone(infrastructure);
+  value.sites[0].zones[0].address_range = 'x.x.{{team_id}}.0/24';
+  value.sites[0].zones[0].endpoints[0].address = 'x.x.{{team_id}}.10';
+
+  const normalized = normalizeClientInfrastructure(value);
+  const errors = validateClientInfrastructure(normalized, {bases: [{id: 'ubuntu'}, {id: 'opnsense'}]});
+
+  assert.equal(normalized.sites[0].zones[0].address_range, 'x.x.{{team_id}}.0/24');
+  assert.equal(normalized.sites[0].zones[0].endpoints[0].address, 'x.x.{{team_id}}.10');
+  assert.equal(errors.some(error => error.path.endsWith('address_range') || error.path.endsWith('address')), false);
+});
+
+test('planner address annotations must be text when present', () => {
+  const value = structuredClone(infrastructure);
+  value.sites[0].zones[0].address_range = {cidr: '10.0.0.0/24'};
+  value.sites[0].zones[0].endpoints[0].address = 10;
+
+  const errors = validateClientInfrastructure(value, {bases: [{id: 'ubuntu'}, {id: 'opnsense'}]});
+
+  assert.equal(errors.some(error => error.path === 'sites[0].zones[0].address_range'), true);
+  assert.equal(errors.some(error => error.path === 'sites[0].zones[0].endpoints[0].address'), true);
+});
+
 test('firewall zone owns firewall VM while the site owns workload zones', () => {
   const index = nodeIndex(infrastructure);
 

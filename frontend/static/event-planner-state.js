@@ -184,6 +184,7 @@ export function validateClientInfrastructure(value, catalogues = {}) {
       key(zone.key, `${zpath}.key`, zid, zoneKeys);
       if (!String(zone.name || '').trim()) add(`${zpath}.name`, zid, 'Zone name is required');
       if (!['blue', 'red'].includes(zone.team)) add(`${zpath}.team`, zid, 'Team role must be blue or red');
+      if (zone.address_range != null && typeof zone.address_range !== 'string') add(`${zpath}.address_range`, zid, 'Address range must be text');
       if ((zone.endpoints || []).length > 245) add(zpath, zid, 'A zone supports at most 245 VMs');
       const vmKeys = new Set();
       (zone.endpoints || []).forEach((vm, vi) => {
@@ -191,6 +192,7 @@ export function validateClientInfrastructure(value, catalogues = {}) {
         key(vm.key, `${vpath}.key`, vid, vmKeys);
         if (!String(vm.name || '').trim()) add(`${vpath}.name`, vid, 'VM name is required');
         machine(vm, vpath, vid);
+        if (vm.address != null && typeof vm.address !== 'string') add(`${vpath}.address`, vid, 'Address must be text');
       });
     });
   });
