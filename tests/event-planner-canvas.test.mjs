@@ -71,3 +71,28 @@ test('hierarchical layout reports a complete saved layout as unchanged', () => {
     nodes: {gateway: {x: 444, y: 222}},
   });
 });
+
+test('collision fallback chooses the free slot nearest the preferred sibling position', () => {
+  const graph = [
+    {id: 'gateway', parent: null},
+    {id: 'site:zero', parent: 'gateway'},
+    {id: 'site:one', parent: 'gateway'},
+    {id: 'site:two', parent: 'gateway'},
+    {id: 'site:new', parent: 'gateway'},
+    {id: 'site:blocker', parent: 'gateway'},
+  ];
+  const saved = {
+    version: 1,
+    nodes: {
+      gateway: {x: 120, y: 70},
+      'site:zero': {x: 900, y: 180},
+      'site:one': {x: 1100, y: 180},
+      'site:two': {x: 1300, y: 180},
+      'site:blocker': {x: 500, y: 180},
+    },
+  };
+
+  const result = canvas.calculateHierarchicalLayout(graph, saved);
+
+  assert.deepEqual(result.nodes['site:new'], {x: 310, y: 180});
+});

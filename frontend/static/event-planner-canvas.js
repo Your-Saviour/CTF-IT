@@ -48,10 +48,14 @@ export function calculateHierarchicalLayout(graph, savedLayout = {version: 1, no
     const parent = node.parent ? byId.get(node.parent) : null;
     const parentPosition = parent ? place(parent) : null;
     const preferred = siblingIndex.get(node.id) || 0;
-    const candidates = [preferred];
-    for (let index = 0; candidates.length < graph.length * 2 + 4; index++) {
-      if (!candidates.includes(index)) candidates.push(index);
-    }
+    const preferredSlot = balancedSlot(preferred);
+    const candidates = Array.from({length: graph.length * 2 + 4}, (_, index) => index)
+      .sort((left, right) => {
+        const leftSlot = balancedSlot(left), rightSlot = balancedSlot(right);
+        return Math.abs(leftSlot - preferredSlot) - Math.abs(rightSlot - preferredSlot)
+          || Math.abs(leftSlot) - Math.abs(rightSlot)
+          || left - right;
+      });
     let position;
     for (const index of candidates) {
       position = {
@@ -82,6 +86,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
   svg.call(zoom);
 
   function render(nextGraph, layout = {version: 1, nodes: {}}) {
+    pendingLayoutKey = null;
     graph = nextGraph;
     currentLayout = {version: 1, nodes: {...layout.nodes}};
     scene.selectAll('*').remove();
@@ -195,6 +200,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
   }
 
   function destroy() {
+    pendingLayoutKey = null;
     svg.on('.zoom', null);
     scene.remove();
   }
