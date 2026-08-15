@@ -10,11 +10,13 @@ The existing `/admin/api/base-types` catalogue already returns each base type's 
 
 This applies to the VPN gateway, primary firewall VM, and workload VMs. Site and zone nodes remain text-only. Changing a Base type rerenders the graph and updates the icon immediately.
 
+Each machine inspector also provides an Icon selector. `Automatic (Base type)` removes the override and follows catalogue metadata. Choosing a library icon stores its keyword in the machine's optional `icon` field. Provisioning ignores this presentation-only field.
+
 ## Icon Contract
 
 The canvas supports the original topology contract:
 
-- built-in keywords: `server`, `ubuntu`, `linux`, `debian`, `kali`, `windows`, `attacker`, and `router`;
+- built-in keywords: `server`, `desktop`, `laptop`, `ubuntu`, `linux`, `debian`, `kali`, `windows`, `router`, `firewall`, `attacker`, `database`, `web`, `dns`, `mail`, `directory`, `cloud`, `container`, `kubernetes`, `storage`, and `monitoring`;
 - custom objects containing `svg_path` and an optional `viewbox`;
 - unknown, absent, or malformed definitions fall back to `server`.
 
