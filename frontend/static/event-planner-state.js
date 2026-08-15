@@ -34,17 +34,44 @@ export function nodeIndex(infrastructure) {
   const map = new Map([['gateway', {type: 'gateway', value: infrastructure.vpn_gateway, parent: null, path: 'vpn_gateway'}]]);
   (infrastructure.sites || []).forEach((site, si) => {
     const sid = `site:${site.key}`;
+    const firewallZoneId = `firewall-zone:${site.key}`;
     map.set(sid, {type: 'site', value: site, parent: 'gateway', path: `sites[${si}]`});
-    map.set(`firewall:${site.key}`, {type: 'firewall', value: site.firewall, parent: sid, path: `sites[${si}].firewall`});
+    map.set(firewallZoneId, {
+      type: 'firewall-zone', value: site, parent: sid, visualParent: sid,
+      path: `sites[${si}]`, site,
+    });
+    map.set(`firewall:${site.key}/primary`, {
+      type: 'firewall', value: site.firewall, parent: firewallZoneId,
+      visualParent: firewallZoneId, path: `sites[${si}].firewall`, site,
+    });
     (site.zones || []).forEach((zone, zi) => {
       const zid = `zone:${site.key}/${zone.key}`;
-      map.set(zid, {type: 'zone', value: zone, parent: sid, path: `sites[${si}].zones[${zi}]`});
+      map.set(zid, {
+        type: 'zone', value: zone, parent: sid, visualParent: firewallZoneId,
+        path: `sites[${si}].zones[${zi}]`, site,
+      });
       (zone.endpoints || []).forEach((vm, vi) => map.set(`vm:${site.key}/${zone.key}/${vm.key}`, {
-        type: 'vm', value: vm, parent: zid, path: `sites[${si}].zones[${zi}].endpoints[${vi}]`,
+        type: 'vm', value: vm, parent: zid, visualParent: zid,
+        path: `sites[${si}].zones[${zi}].endpoints[${vi}]`, site,
       }));
     });
   });
   return map;
+}
+
+export function normalizeClientLayout(layout, infrastructure) {
+  const result = clone(layout || {version: 1, nodes: {}});
+  result.version = 1;
+  result.nodes = result.nodes && typeof result.nodes === 'object' ? result.nodes : {};
+  for (const site of infrastructure.sites || []) {
+    const legacyId = `firewall:${site.key}`;
+    const primaryId = `firewall:${site.key}/primary`;
+    if (result.nodes[legacyId] && !result.nodes[primaryId]) {
+      result.nodes[primaryId] = result.nodes[legacyId];
+    }
+    delete result.nodes[legacyId];
+  }
+  return result;
 }
 
 export function renameStructuralKey(state, nodeId, rawKey) {
@@ -57,7 +84,7 @@ export function renameStructuralKey(state, nodeId, rawKey) {
   const remapped = {};
   for (const [id, position] of Object.entries(state.layout?.nodes || {})) {
     let next = id;
-    for (const prefix of node.type === 'site' ? ['site:', 'firewall:', 'zone:', 'vm:'] : node.type === 'zone' ? ['zone:', 'vm:'] : ['vm:']) {
+    for (const prefix of node.type === 'site' ? ['site:', 'firewall-zone:', 'firewall:', 'zone:', 'vm:'] : node.type === 'zone' ? ['zone:', 'vm:'] : ['vm:']) {
       if (id === `${prefix}${oldToken}` || id.startsWith(`${prefix}${oldToken}/`)) next = `${prefix}${newToken}${id.slice(prefix.length + oldToken.length)}`;
     }
     remapped[next] = position;
@@ -102,7 +129,7 @@ export function validateClientInfrastructure(value, catalogues = {}) {
     key(site.key, `${path}.key`, sid, siteKeys);
     if (!String(site.name || '').trim()) add(`${path}.name`, sid, 'Site name is required');
     if (!String(site.region || '').trim()) add(`${path}.region`, sid, 'Region is required');
-    machine(site.firewall, `${path}.firewall`, `firewall:${site.key}`);
+    machine(site.firewall, `${path}.firewall`, `firewall:${site.key}/primary`);
     if (!(site.zones || []).length) add(`${path}.zones`, sid, 'Add at least one zone');
     if ((site.zones || []).length > 15) add(`${path}.zones`, sid, 'A site supports at most 15 zones');
     const zoneKeys = new Set();
