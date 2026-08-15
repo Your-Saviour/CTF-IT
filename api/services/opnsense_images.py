@@ -305,7 +305,7 @@ class VultrImageClient:
         raise ImageWorkflowError(f"timed out waiting for Vultr {label}")
 
 
-def new_image(db: Session, version: str, *, vultr_factory=VultrImageClient) -> OpnsenseImage:
+def _new_image_vultr(db: Session, version: str, *, vultr_factory=VultrImageClient) -> OpnsenseImage:
     """Validate every prerequisite before persisting a build or creating cloud resources."""
     release = validate_release(version)
     validate_control_plane_cidr()
@@ -604,7 +604,7 @@ def _configure_validation_peer(db: Session, host: str, attachment: dict) -> str:
     return peer_ip
 
 
-def run_image_build(db: Session, image_id: int, *, vultr_factory=VultrImageClient,
+def _run_image_build_vultr(db: Session, image_id: int, *, vultr_factory=VultrImageClient,
                     bootstrap_downloader=download_bootstrap) -> None:
     image = db.get(OpnsenseImage, image_id)
     if not image or image.status in TERMINAL_STATES:
@@ -782,6 +782,72 @@ def cleanup_validated_image(db: Session, image: OpnsenseImage, client: VultrImag
         image.error_detail = "Snapshot validated; cleanup incomplete: " + redact_error(exc)
         _audit(db, "opnsense_image_cleanup_failure", image, error=image.error_detail)
     db.commit()
+
+
+def _default_aws_workflow_factory():
+    from api.services.aws.opnsense_workflow import AwsOpnsenseWorkflow
+    return AwsOpnsenseWorkflow.from_env()
+
+
+def new_image(db: Session, version: str, *, provider_factory=None,
+              vultr_factory=None) -> OpnsenseImage:
+    """Create a resumable AWS AMI job; explicit legacy factories are test-only."""
+    if vultr_factory is not None:
+        return _new_image_vultr(db, version, vultr_factory=vultr_factory)
+    release = validate_release(version)
+    validate_control_plane_cidr()
+    if db.query(OpnsenseImage).filter(
+            OpnsenseImage.status.in_(RUNNING_STATES | {"interrupted"})).first():
+        raise ImageWorkflowError("another OPNsense image job is already running")
+    provider = (provider_factory or _default_aws_workflow_factory)()
+    placement = provider.preflight(SUPPORTED_RELEASES[release])
+    row = OpnsenseImage(
+        version=release, build_method=BUILD_METHOD, base_os=SUPPORTED_RELEASES[release],
+        bootstrap_source_url=BOOTSTRAP_SOURCE_URL, status="creating_builder",
+        phase="creating_builder", region=placement["region"],
+        availability_zone=placement["availability_zone"],
+    )
+    db.add(row); db.commit(); db.refresh(row)
+    return row
+
+
+def run_image_build(db: Session, image_id: int, *, provider_factory=None,
+                    vultr_factory=None, bootstrap_downloader=download_bootstrap) -> None:
+    if vultr_factory is not None:
+        return _run_image_build_vultr(
+            db, image_id, vultr_factory=vultr_factory,
+            bootstrap_downloader=bootstrap_downloader,
+        )
+    image = db.get(OpnsenseImage, image_id)
+    if not image or image.status in TERMINAL_STATES:
+        return
+    try:
+        provider = (provider_factory or _default_aws_workflow_factory)()
+        result = provider.build(db, image, bootstrap_downloader)
+        evidence = result["validation_results"]
+        if not evidence.get("public_clone", {}).get("passed") or not evidence.get("private_clone", {}).get("passed"):
+            raise ImageWorkflowError("public and private AMI validation must both pass")
+        for field in (
+            "builder_instance_id", "builder_vpc_id", "builder_subnet_id",
+            "validation_subnet_id", "ami_id",
+        ):
+            setattr(image, field, result.get(field))
+        image.backing_snapshot_ids_json = json.dumps(result["snapshot_ids"], sort_keys=True)
+        image.validation_results = json.dumps(evidence, sort_keys=True)
+        image.validated_at = image.completed_at = utcnow()
+        image.build_duration_seconds = elapsed_seconds(image)
+        image.status = image.phase = "ready"
+        image.error_detail = None
+        _audit(db, "opnsense_ami_validation", image, ami_id=image.ami_id)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        image = db.get(OpnsenseImage, image_id)
+        if image:
+            image.status = "failed"
+            image.error_detail = redact_error(exc)
+            _audit(db, "opnsense_ami_failure", image, phase=image.phase, error=image.error_detail)
+            db.commit()
 
 
 def cleanup_local(_image: OpnsenseImage, **_kwargs) -> None:

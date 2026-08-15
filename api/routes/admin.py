@@ -152,7 +152,7 @@ async def activate_opnsense_image(image_id: int, request: Request, db: Session =
     image = db.get(OpnsenseImage, image_id)
     if not image:
         return JSONResponse({"error": "image not found"}, status_code=404)
-    if image.status not in {"ready", "active"} or not image.validated_at or not image.snapshot_id:
+    if image.status not in {"ready", "active"} or not image.validated_at or not image.ami_id:
         return JSONResponse({"error": "only a validated ready image can be activated"}, status_code=409)
     for old in db.query(OpnsenseImage).filter(OpnsenseImage.status == "active", OpnsenseImage.id != image.id):
         old.status = old.phase = "ready"; old.activated_at = None
@@ -162,7 +162,7 @@ async def activate_opnsense_image(image_id: int, request: Request, db: Session =
     else:
         setting.value = str(image.id)
     image.status = image.phase = "active"; image.activated_at = utcnow()
-    _audit(db, admin, "opnsense_image_activate", image_id=image.id, snapshot_id=image.snapshot_id); db.commit()
+    _audit(db, admin, "opnsense_image_activate", image_id=image.id, ami_id=image.ami_id); db.commit()
     return {"id": image.id, "status": image.status}
 
 
@@ -185,13 +185,15 @@ async def retire_opnsense_image(image_id: int, body: OpnsenseRetireRequest, requ
     if setting and setting.value == str(image.id):
         db.delete(setting)
     if body.delete_artifacts:
-        from api.services.opnsense_images import VultrImageClient, cleanup_local, cleanup_remote
-        client = VultrImageClient()
-        try:
-            cleanup_remote(image, client, preserve_snapshot=False)
-        finally:
-            client.close()
-        cleanup_local(image)
+        from api.services.aws import AwsConfig, AwsImageProvider, AwsSessionFactory, ownership_tags
+        config = AwsConfig.from_env()
+        provider = AwsImageProvider(AwsSessionFactory(config).client("ec2", image.region))
+        provider.retire_owned(
+            image.ami_id, json.loads(image.backing_snapshot_ids_json or "[]"),
+            ownership_tags(config.environment),
+        )
+        image.ami_id = None
+        image.backing_snapshot_ids_json = None
     image.status = image.phase = "retired"; image.retired_at = utcnow(); image.builder_config_token = None
     _audit(db, admin, "opnsense_image_retire", image_id=image.id, artifacts_deleted=body.delete_artifacts); db.commit()
     return {"id": image.id, "status": image.status}

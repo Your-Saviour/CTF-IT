@@ -200,6 +200,12 @@ class AwsComputeProvider:
             InstanceIds=[instance_id], WaiterConfig={"Delay": delay, "MaxAttempts": max_attempts}
         )
 
+    def stop(self, instance_id: str) -> None:
+        self._call("stop_instances", InstanceIds=[instance_id])
+
+    def start(self, instance_id: str) -> None:
+        self._call("start_instances", InstanceIds=[instance_id])
+
     def wait_terminated(self, instance_id: str, *, delay: int = 5, max_attempts: int = 120) -> None:
         self.ec2.get_waiter("instance_terminated").wait(
             InstanceIds=[instance_id], WaiterConfig={"Delay": delay, "MaxAttempts": max_attempts}

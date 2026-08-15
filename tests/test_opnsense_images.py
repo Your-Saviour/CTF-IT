@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -168,6 +169,29 @@ def test_running_jobs_interrupt_and_only_validated_active_image_is_selected():
     image.status = image.phase = "active"; image.ami_id = "ami-opnsense"; image.validated_at = utcnow()
     db.add(PlatformSettings(key="active_opnsense_image_id", value=str(image.id))); db.commit()
     assert active_image(db).id == image.id
+
+
+def test_aws_image_workflow_persists_ami_snapshots_and_validation_evidence():
+    db = session()
+    class Provider:
+        def preflight(self, base_os):
+            assert base_os == "FreeBSD 15 x64"
+            return {"region": "ap-southeast-2", "availability_zone": "ap-southeast-2a"}
+        def build(self, db, image, bootstrap_downloader):
+            return {
+                "builder_instance_id": "i-builder", "builder_vpc_id": "vpc-builder",
+                "builder_subnet_id": "subnet-public", "validation_subnet_id": "subnet-private",
+                "ami_id": "ami-opnsense", "snapshot_ids": ["snap-root"],
+                "validation_results": {"public_clone": {"passed": True},
+                                       "private_clone": {"passed": True}},
+            }
+    image = new_image(db, "26.7", provider_factory=lambda: Provider())
+    run_image_build(db, image.id, provider_factory=lambda: Provider())
+    db.refresh(image)
+    assert image.status == image.phase == "ready"
+    assert image.ami_id == "ami-opnsense"
+    assert json.loads(image.backing_snapshot_ids_json) == ["snap-root"]
+    assert json.loads(image.validation_results)["private_clone"]["passed"] is True
 
 
 class WorkflowClient:
