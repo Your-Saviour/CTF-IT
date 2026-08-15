@@ -26,8 +26,8 @@ test('secondary machine icon uses a prominent glyph without a surrounding badge'
   assert.equal('secondaryBadgeRadius' in canvas.MACHINE_ICON_GEOMETRY, false);
   assert.deepEqual(canvas.MACHINE_ICON_GEOMETRY, {
     secondarySize: 24,
-    secondaryX: 7,
-    secondaryY: -1,
+    secondaryX: -2,
+    secondaryY: -7,
   });
 });
 

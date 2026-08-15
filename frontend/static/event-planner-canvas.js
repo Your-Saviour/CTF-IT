@@ -12,8 +12,8 @@ export function topologyNodePresentation(node) {
 
 export const MACHINE_ICON_GEOMETRY = Object.freeze({
   secondarySize: 24,
-  secondaryX: 7,
-  secondaryY: -1,
+  secondaryX: -2,
+  secondaryY: -7,
 });
 
 const ROOT_X = 120;

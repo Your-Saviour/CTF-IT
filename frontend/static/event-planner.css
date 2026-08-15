@@ -87,6 +87,7 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-node .node-state-ring { fill: none; stroke: transparent; stroke-width: 2; pointer-events: none; }
 .topo-node .node-primary-icon, .topo-node .node-secondary-icon { overflow: hidden; pointer-events: none; }
 .topo-node .node-primary-icon path, .topo-node .node-secondary-icon path { fill: var(--cyan-dim); }
+.topo-node .node-secondary-icon path { paint-order: stroke; stroke: var(--bg-deep); stroke-width: 2.5; stroke-linejoin: round; }
 .topo-node.firewall .node-primary-icon path, .topo-node.firewall .node-secondary-icon path { fill: var(--amber); }
 .topo-node.selected .node-primary-icon path, .topo-node.selected .node-secondary-icon path { fill: var(--cyan); }
 .topo-node.invalid .node-primary-icon path, .topo-node.invalid .node-secondary-icon path { fill: var(--red); }
