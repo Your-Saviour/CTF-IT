@@ -129,9 +129,20 @@ async def lifespan(app: FastAPI):
                 "infrastructure_subnet_id": "VARCHAR(64)",
                 "internet_gateway_id": "VARCHAR(64)",
                 "route_table_ids_json": "TEXT",
+                "wan_security_group_id": "VARCHAR(64)",
+                "lan_security_group_id": "VARCHAR(64)",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE sites ADD COLUMN {col} {typ}"))
+
+        if inspector.has_table("zones"):
+            existing = {col["name"] for col in inspector.get_columns("zones")}
+            for col, typ in {
+                "subnet_id": "VARCHAR(64)",
+                "security_group_id": "VARCHAR(64)",
+            }.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE zones ADD COLUMN {col} {typ}"))
 
         if inspector.has_table("opnsense_images"):
             existing = {col["name"] for col in inspector.get_columns("opnsense_images")}

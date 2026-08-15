@@ -26,6 +26,7 @@ class NetworkInterfaceSpec:
     eni_id: str | None = None
     associate_public_ip: bool = False
     delete_on_termination: bool = True
+    private_ip: str | None = None
 
     def request(self) -> dict:
         value = {
@@ -38,6 +39,8 @@ class NetworkInterfaceSpec:
             value["SubnetId"] = self.subnet_id
             value["Groups"] = list(self.security_group_ids)
             value["AssociatePublicIpAddress"] = self.associate_public_ip
+            if self.private_ip:
+                value["PrivateIpAddress"] = self.private_ip
         return value
 
 

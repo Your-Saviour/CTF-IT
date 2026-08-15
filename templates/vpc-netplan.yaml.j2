@@ -2,8 +2,11 @@
 network:
   version: 2
   ethernets:
-    {{ vpc_interface }}:
-      mtu: 1450
+    vpc:
+      match:
+        macaddress: {{ vpc_mac }}
+      set-name: ctf-lan
+      mtu: {{ vpc_mtu | default(1500) }}
       addresses:
         - {{ vpc_ip }}/{{ vpc_subnet_mask }}
       routes:

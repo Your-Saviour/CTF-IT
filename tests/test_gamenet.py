@@ -905,3 +905,71 @@ def test_gamenet_plan_preview_returns_counts_cost_shape_and_addresses(monkeypatc
     assert len(response["vm_types"]) == 3
     assert len(response["address_plan"]) == 1
     assert response["address_plan"][0]["zones"][0]["subnet"].endswith("/24")
+def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
+    from types import SimpleNamespace
+    from api.services.aws import ElasticIpResult, InstanceResult, NetworkInterfaceResult
+    from api.services.gamenet_provider import AwsGameNetProvider
+
+    class Network:
+        def __init__(self): self.enis = []
+        def create_eni(self, subnet, ip, groups, tags):
+            result = NetworkInterfaceResult(f"eni-{len(self.enis)}", subnet, ip, "02:00:00:00:00:01")
+            self.enis.append((subnet, ip, groups, result)); return result
+    class Compute:
+        def __init__(self): self.spec = None; self.source_checks = []
+        def launch_instance(self, spec):
+            self.spec = spec
+            return InstanceResult("i-fw", "pending", availability_zone="ap-southeast-2a")
+        def set_source_dest_check(self, instance_id, enabled): self.source_checks.append((instance_id, enabled))
+        def allocate_eip(self, tags): return ElasticIpResult("eipalloc-fw", "198.51.100.8")
+        def associate_eip(self, allocation_id, eni_id): return "eipassoc-fw"
+
+    network, compute = Network(), Compute()
+    provider = AwsGameNetProvider(compute, network, SimpleNamespace(environment="test"))
+    site = SimpleNamespace(
+        id=4, event_id=1, team_id=2, availability_zone="ap-southeast-2a",
+        public_subnet_id="subnet-wan", infrastructure_subnet_id="subnet-lan",
+        wan_security_group_id="sg-wan", lan_security_group_id="sg-lan",
+    )
+    vm = SimpleNamespace(id=9, private_ip="10.40.1.1", instance_type="t3.medium")
+
+    result = provider.create_firewall(site, vm, ami_id="ami-opnsense")
+
+    assert [eni[0] for eni in network.enis] == ["subnet-wan", "subnet-lan"]
+    assert compute.source_checks == [("i-fw", False)]
+    assert result.public_ip == "198.51.100.8"
+    assert result.wan_eni_id == "eni-0" and result.lan_eni_id == "eni-1"
+
+
+def test_aws_gamenet_private_endpoint_has_no_public_ip():
+    from types import SimpleNamespace
+    from api.services.aws import InstanceResult
+    from api.services.gamenet_provider import AwsGameNetProvider
+
+    class Compute:
+        def __init__(self): self.spec = None
+        def launch_instance(self, spec):
+            self.spec = spec
+            return InstanceResult("i-endpoint", "pending", "eni-endpoint", None, "10.40.10.8")
+    compute = Compute()
+    provider = AwsGameNetProvider(compute, SimpleNamespace(), SimpleNamespace(environment="test"))
+    site = SimpleNamespace(id=4, event_id=1, team_id=2)
+    zone = SimpleNamespace(subnet_id="subnet-blue", security_group_id="sg-private")
+    vm = SimpleNamespace(id=10, private_ip="10.40.10.8", instance_type="t3.small")
+
+    result = provider.create_endpoint(site, zone, vm, ami_id="ami-ubuntu")
+
+    assert result.public_ip is None
+    assert compute.spec.network_interfaces[0].associate_public_ip is False
+    assert compute.spec.network_interfaces[0].subnet_id == "subnet-blue"
+
+
+def test_aws_private_interface_netplan_matches_recorded_eni_mac():
+    from pathlib import Path
+    playbook = Path("playbooks/configure-vpc-interface.yml").read_text()
+    template = Path("templates/vpc-netplan.yaml.j2").read_text()
+    assert "vpc_mac" in playbook and "vpc_mac is match" in playbook
+    assert "macaddress: {{ vpc_mac }}" in template
+    assert "set-name: ctf-lan" in template
+    assert "ens7" not in playbook + template
+    assert "1450" not in playbook + template

@@ -179,6 +179,8 @@ class Site(Base):
     infrastructure_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
     internet_gateway_id: Mapped[str] = mapped_column(String(64), nullable=True)
     route_table_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    wan_security_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    lan_security_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
     firewall_vm_id: Mapped[int] = mapped_column(
         ForeignKey("vms.id", name="fk_sites_firewall_vm_id", use_alter=True), nullable=True
     )
@@ -242,6 +244,8 @@ class Zone(Base):
     team_role: Mapped[str] = mapped_column(String(8), nullable=False)
     subnet: Mapped[str] = mapped_column(String(43), nullable=False, unique=True)
     gateway_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    security_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     site: Mapped["Site"] = relationship(back_populates="zones")

@@ -13,8 +13,11 @@ def test_models_expose_neutral_aws_fields():
     } <= set(VM.__table__.columns.keys())
     assert {
         "availability_zone", "public_subnet_id", "infrastructure_subnet_id",
-        "internet_gateway_id", "route_table_ids_json",
+        "internet_gateway_id", "route_table_ids_json", "wan_security_group_id",
+        "lan_security_group_id",
     } <= set(Site.__table__.columns.keys())
+    from api.models import Zone
+    assert {"subnet_id", "security_group_id"} <= set(Zone.__table__.columns.keys())
     assert {
         "ami_id", "backing_snapshot_ids_json", "region", "availability_zone",
         "builder_subnet_id", "validation_subnet_id",

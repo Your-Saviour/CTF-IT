@@ -21,6 +21,71 @@ import string
 from ipaddress import ip_network
 
 import httpx
+
+from dataclasses import replace
+
+from api.services.aws import InstanceSpec, NetworkInterfaceSpec, ownership_tags
+
+
+class AwsGameNetProvider:
+    """Map the existing appliance-based GameNet to EC2 and VPC primitives."""
+
+    def __init__(self, compute, network, config):
+        self.compute = compute
+        self.network = network
+        self.config = config
+
+    def _tags(self, site, vm):
+        return ownership_tags(
+            self.config.environment,
+            event_id=site.event_id,
+            team_id=site.team_id,
+            site_id=site.id,
+            vm_id=vm.id,
+        )
+
+    def create_firewall(self, site, vm, *, ami_id: str):
+        tags = self._tags(site, vm)
+        wan = self.network.create_eni(
+            site.public_subnet_id, None, [site.wan_security_group_id], tags,
+        )
+        lan = self.network.create_eni(
+            site.infrastructure_subnet_id, vm.private_ip, [site.lan_security_group_id], tags,
+        )
+        result = self.compute.launch_instance(InstanceSpec(
+            ami_id=ami_id,
+            instance_type=vm.instance_type or "t3.medium",
+            client_token=f"ctf-it-vm-{vm.id}",
+            network_interfaces=(
+                NetworkInterfaceSpec(0, eni_id=wan.eni_id, delete_on_termination=False),
+                NetworkInterfaceSpec(1, eni_id=lan.eni_id, delete_on_termination=False),
+            ),
+            tags=tags,
+        ))
+        self.compute.set_source_dest_check(result.instance_id, enabled=False)
+        allocation = self.compute.allocate_eip(tags)
+        self.compute.associate_eip(allocation.allocation_id, wan.eni_id)
+        return replace(
+            result,
+            public_ip=allocation.public_ip,
+            wan_eni_id=wan.eni_id,
+            lan_eni_id=lan.eni_id,
+        )
+
+    def create_endpoint(self, site, zone, vm, *, ami_id: str):
+        return self.compute.launch_instance(InstanceSpec(
+            ami_id=ami_id,
+            instance_type=vm.instance_type or "t3.small",
+            client_token=f"ctf-it-vm-{vm.id}",
+            network_interfaces=(NetworkInterfaceSpec(
+                0,
+                subnet_id=zone.subnet_id,
+                security_group_ids=(zone.security_group_id,),
+                associate_public_ip=False,
+                private_ip=vm.private_ip,
+            ),),
+            tags=self._tags(site, vm),
+        ))
 import paramiko
 import bcrypt
 from jinja2 import Environment, FileSystemLoader

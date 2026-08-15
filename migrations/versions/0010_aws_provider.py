@@ -40,6 +40,12 @@ def upgrade():
         "infrastructure_subnet_id": sa.Column("infrastructure_subnet_id", sa.String(64), nullable=True),
         "internet_gateway_id": sa.Column("internet_gateway_id", sa.String(64), nullable=True),
         "route_table_ids_json": sa.Column("route_table_ids_json", sa.Text(), nullable=True),
+        "wan_security_group_id": sa.Column("wan_security_group_id", sa.String(64), nullable=True),
+        "lan_security_group_id": sa.Column("lan_security_group_id", sa.String(64), nullable=True),
+    })
+    _add_missing("zones", {
+        "subnet_id": sa.Column("subnet_id", sa.String(64), nullable=True),
+        "security_group_id": sa.Column("security_group_id", sa.String(64), nullable=True),
     })
     _add_missing("opnsense_images", {
         "ami_id": sa.Column("ami_id", sa.String(64), nullable=True),
