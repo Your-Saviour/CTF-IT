@@ -71,6 +71,7 @@ def test_event_drawer_delegates_network_authoring_to_full_page_plan():
 
 def test_canvas_module_supports_durable_accessible_layout():
     source = CANVAS.read_text()
+    compact = "".join(source.split())
 
     assert "createPlannerCanvas" in source
     assert "onLayoutChange" in source
@@ -78,8 +79,20 @@ def test_canvas_module_supports_durable_accessible_layout():
     assert "focusNode" in source
     assert "d3.zoom" in source
     assert "aria-label" in source
-    assert ".call(zoom.transform,transform)" in source
-    assert "if(!callbacks.readOnly)" in source
+    assert ".call(zoom.transform,transform)" in compact
+    assert "if(!callbacks.readOnly)" in compact
+
+
+def test_canvas_drag_updates_node_and_attached_links_before_release():
+    source = CANVAS.read_text()
+    compact = "".join(source.split())
+
+    assert "sourceEvent.currentTarget" not in source
+    assert ".on('drag',function(event,d)" in compact
+    assert "d3.select(this).attr('transform'" in compact
+    assert "updateLinks()" in source
+    drag_handler = compact[compact.index(".on('drag'"):compact.index(".on('end'")]
+    assert "updateLinks()" in drag_handler
 
 
 def test_planner_state_remaps_structural_layout_ids_and_mirrors_server_paths():
