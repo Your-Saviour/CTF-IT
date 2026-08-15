@@ -9,6 +9,7 @@ from .errors import (
 )
 from .session import AwsSessionFactory
 from .compute import AwsComputeProvider, InstanceSpec, NetworkInterfaceSpec
+from .network import AwsNetworkProvider, SiteNetworkSpec
 from .tags import assert_owned, aws_tag_dict, aws_tag_list, ownership_tags
 from .types import (
     AwsIdentity,
@@ -21,10 +22,10 @@ from .types import (
 )
 
 __all__ = [
-    "AwsComputeProvider", "AwsConfig", "AwsConfigurationError", "AwsIdentity", "AwsOwnershipError",
+    "AwsComputeProvider", "AwsConfig", "AwsConfigurationError", "AwsIdentity", "AwsNetworkProvider", "AwsOwnershipError",
     "AwsProviderError", "AwsQuotaError", "AwsRetryableError", "AwsSessionFactory",
     "AwsTerminalError", "CleanupResult", "ImageResult", "InstanceResult",
     "ElasticIpResult", "InstanceSpec", "NetworkInterfaceResult", "NetworkInterfaceSpec",
-    "SiteNetworkResult", "assert_owned", "aws_tag_dict",
+    "SiteNetworkResult", "SiteNetworkSpec", "assert_owned", "aws_tag_dict",
     "aws_tag_list", "ownership_tags",
 ]
