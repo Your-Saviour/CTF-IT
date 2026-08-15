@@ -53,6 +53,11 @@ def validate_release(version: str) -> str:
     return value
 
 
+def release_matches(actual: str, requested: str) -> bool:
+    """Accept the requested OPNsense train and its security/patch releases."""
+    return actual == requested or actual.startswith((requested + ".", requested + "_"))
+
+
 def validate_control_plane_cidr(value: str | None = None) -> str:
     raw = value if value is not None else os.environ.get("CTF_CONTROL_PLANE_CIDR", "")
     if not raw or "/" not in raw:
@@ -402,7 +407,7 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
             code, output, error = _ssh(
                 db, host, f"test -x /usr/local/sbin/configctl && opnsense-version -v", retry=False,
             )
-            if code == 0 and output.strip() == version:
+            if code == 0 and release_matches(output.strip(), version):
                 return
             last = (error or output or f"exit {code}")[:300]
         except Exception as exc:
@@ -422,7 +427,8 @@ def builder_validation_command(*, public_ip: str, version: str, cidr: str,
            '$p=$config["system"]["ctf_builder_provenance"]??""; echo "$wan $lan $p";')
     source = str(ip_network(cidr).network_address)
     return (
-        f"set -eu; test \"$(opnsense-version -v)\" = {shlex.quote(version)}; "
+        f"set -eu; actual_version=$(opnsense-version -v); case \"$actual_version\" in "
+        f"{shlex.quote(version)}|{shlex.quote(version)}.*|{shlex.quote(version)}_*) ;; *) exit 1;; esac; "
         "test -x /usr/local/sbin/configctl; test -w /conf/config.xml; "
         f"set -- $(/usr/local/bin/php -r {shlex.quote(php)}); wan_if=$1; test \"$2\" = no; "
         f"test \"$3\" = {shlex.quote(provenance)}; "

@@ -12,7 +12,7 @@ from api.services.opnsense_images import (
     BOOTSTRAP_SOURCE_URL, ImageWorkflowError, VultrImageClient, active_image,
     builder_validation_command, cleanup_validated_image, download_bootstrap,
     interrupt_running_jobs, new_image, render_golden_config, run_image_build,
-    validate_bootstrap_url, validate_release, _posix_command,
+    validate_bootstrap_url, validate_release, release_matches, _posix_command,
 )
 
 
@@ -36,6 +36,14 @@ def test_supported_release_mapping_is_exact():
     assert validate_release("26.7") == "26.7"
     for value in ("25.7", "26.1", "26.7/../../", ""):
         with pytest.raises(ValueError): validate_release(value)
+
+
+def test_requested_release_accepts_only_its_patch_train():
+    assert release_matches("26.7", "26.7")
+    assert release_matches("26.7.2_2", "26.7")
+    assert release_matches("26.7_1", "26.7")
+    assert not release_matches("26.1.9", "26.7")
+    assert not release_matches("27.7", "26.7")
 
 
 @pytest.mark.parametrize("value", ["", "not-a-cidr", "10.0.0.1", "2001:db8::/64", "10.0.0.0/99"])

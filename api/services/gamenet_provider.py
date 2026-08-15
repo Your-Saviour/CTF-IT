@@ -431,7 +431,7 @@ def validate_snapshot_wan(vm: VM, expected_version: str) -> None:
         "wan_if=$1; test \"$2\" = nolAN; test \"$3\" = disk; "
         "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
         "test \"$#\" -eq 1; test \"$1\" = \"$wan_if\"; "
-        f"test \"$(opnsense-version -v)\" = {shlex.quote(expected_version)}; "
+        + _opnsense_release_test(expected_version) + "; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
         "/usr/local/sbin/sshd -T | grep -q '^permitrootlogin yes$'; "
         "/usr/local/sbin/sshd -T | grep -q '^pubkeyauthentication yes$'; "
@@ -506,14 +506,16 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     output = error = ""
     while time.monotonic() < deadline:
         try:
-            code, output, error = ssh_command(
-                vm,
-                f"test -f /conf/ctf-site-ready && test \"$(opnsense-version -v)\" = {shlex.quote(expected_version)} && "
+            validation = (
+                f"test -f /conf/ctf-site-ready && {_opnsense_release_test(expected_version)} && "
                 f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {vm.public_ip}' >/dev/null && "
                 f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
                 f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {vm.private_ip}' >/dev/null && "
                 f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
-                "pfctl -sr | grep -F 'Allow management SSH' >/dev/null && opnsense-version -v",
+                "pfctl -sr | grep -F 'Allow management SSH' >/dev/null && opnsense-version -v"
+            )
+            code, output, error = ssh_command(
+                vm, "/bin/sh -c " + shlex.quote(validation),
                 timeout=60, connect_timeout=60,
             )
             if code == 0 and expected_version in output:
@@ -598,7 +600,7 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
         try:
             code, output, error = _ssh(
                 db, host,
-                f"test -f /conf/ctf-site-ready && test \"$(opnsense-version -v)\" = {shlex.quote(expected_version)} && "
+                f"test -f /conf/ctf-site-ready && {_opnsense_release_test(expected_version)} && "
                 f"ifconfig {shlex.quote(lan_interface)} | grep -F {shlex.quote('inet ' + private_ip)} >/dev/null",
                 retry=False,
             )
@@ -608,6 +610,15 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
             pass
         time.sleep(POLL_SECONDS)
     raise ImageWorkflowError("validation site configuration did not become ready")
+
+
+def _opnsense_release_test(requested: str) -> str:
+    """Shell predicate for a release train such as 26.7 and its patch builds."""
+    value = shlex.quote(requested)
+    dot = value + ".*"
+    underscore = value + "_*"
+    return (f"actual_version=$(opnsense-version -v); case \"$actual_version\" in "
+            f"{value}|{dot}|{underscore}) true;; *) false;; esac")
 
 
 def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
