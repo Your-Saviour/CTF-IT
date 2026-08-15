@@ -13,13 +13,13 @@ export function topologyAnnotationPresentation(node) {
   if (typeof node?.annotation !== 'string' || node.annotation === '') return null;
   if (node.type === 'zone') {
     return {
-      className: 'zone-address-rail', text: truncatedAnnotation(node.annotation, 38),
+      className: 'zone-address-rail', prefix: 'Range · ', value: truncatedAnnotation(node.annotation, 38),
       x: 0, y: ZONE_CONTAINER_GEOMETRY.baseHeaderHeight,
       height: ZONE_CONTAINER_GEOMETRY.addressRailHeight,
     };
   }
   if (node.type === 'vm') {
-    return {className: 'topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 46};
+    return {className: 'machine-label topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 46};
   }
   return null;
 }
@@ -347,12 +347,20 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     containers.append('text').attr('class', 'zone-container-title').attr('x', 12).attr('y', 16).text(d => d.label);
     containers.append('text').attr('class', 'zone-container-meta').attr('x', 12).attr('y', 29)
       .text(d => d.systemManaged ? `System managed · ${d.childCount ?? 0} VM` : `${d.team === 'red' ? 'Red' : 'Blue'} team · ${d.childCount ?? 0} VM${d.childCount === 1 ? '' : 's'}`);
-    containers.filter(d => topologyAnnotationPresentation(d))
-      .append('text')
+    const annotatedZones = containers.filter(d => topologyAnnotationPresentation(d));
+    annotatedZones.append('rect')
       .attr('class', d => topologyAnnotationPresentation(d).className)
       .attr('x', d => topologyAnnotationPresentation(d).x)
       .attr('y', d => topologyAnnotationPresentation(d).y)
-      .text(d => topologyAnnotationPresentation(d).text);
+      .attr('height', d => topologyAnnotationPresentation(d).height);
+    const addressLabels = annotatedZones.append('text')
+      .attr('class', 'zone-address-label')
+      .attr('x', 12)
+      .attr('y', d => topologyAnnotationPresentation(d).y + 16);
+    addressLabels.append('tspan').attr('class', 'zone-address-prefix')
+      .text(d => topologyAnnotationPresentation(d).prefix);
+    addressLabels.append('tspan').attr('class', 'zone-address-value')
+      .text(d => topologyAnnotationPresentation(d).value);
     const arrangeControls = containers.append('g')
       .attr('class', 'zone-arrange')
       .attr('role', 'button')
@@ -386,6 +394,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         .attr('x2', d => bounds.get(d.id).width)
         .attr('y1', d => bounds.get(d.id).headerHeight)
         .attr('y2', d => bounds.get(d.id).headerHeight);
+      containers.select('.zone-address-rail')
+        .attr('width', d => bounds.get(d.id).width);
       arrangeControls.attr('transform', d => `translate(${bounds.get(d.id).width - 104},4)`);
     }
     updateContainers();

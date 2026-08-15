@@ -29,10 +29,10 @@ test('visual address annotations are constrained while short values remain exact
 
 test('zones and VMs receive distinct address text presentation', () => {
   assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'zone', annotation: '10.0.0.0/24'}), {
-    className: 'zone-address-rail', text: '10.0.0.0/24', x: 0, y: 36, height: 24,
+    className: 'zone-address-rail', prefix: 'Range · ', value: '10.0.0.0/24', x: 0, y: 36, height: 24,
   });
   assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'vm', annotation: '10.0.0.10'}), {
-    className: 'topo-node-address', text: '10.0.0.10', x: 0, y: 46,
+    className: 'machine-label topo-node-address', text: '10.0.0.10', x: 0, y: 46,
   });
   assert.equal(canvas.topologyAnnotationPresentation({type: 'site', annotation: 'ignored'}), null);
   assert.equal(canvas.topologyAnnotationPresentation({type: 'vm', annotation: null}), null);
