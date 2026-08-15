@@ -11,7 +11,9 @@ export function topologyNodePresentation(node) {
 }
 
 export const MACHINE_ICON_GEOMETRY = Object.freeze({
-  secondarySize: 18,
+  secondarySize: 24,
+  secondaryX: 7,
+  secondaryY: -1,
 });
 
 const ROOT_X = 120;
@@ -188,8 +190,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     const secondaryIcons = machineGroups
       .append('svg')
       .attr('class', 'node-secondary-icon')
-      .attr('x', 15 - MACHINE_ICON_GEOMETRY.secondarySize / 2)
-      .attr('y', 8 - MACHINE_ICON_GEOMETRY.secondarySize / 2)
+      .attr('x', MACHINE_ICON_GEOMETRY.secondaryX)
+      .attr('y', MACHINE_ICON_GEOMETRY.secondaryY)
       .attr('width', MACHINE_ICON_GEOMETRY.secondarySize)
       .attr('height', MACHINE_ICON_GEOMETRY.secondarySize)
       .attr('viewBox', d => d.icons?.secondary?.viewBox || '0 0 24 24')
