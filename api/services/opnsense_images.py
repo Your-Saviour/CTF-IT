@@ -462,7 +462,7 @@ def _boot_id(db: Session, host: str) -> str:
 
 
 def _fingerprint(db: Session, host: str) -> str:
-    command = ("key=$(/usr/local/sbin/sshd -T | awk '$1==\"hostkey\" && $2 ~ /ed25519/ {print $2; exit}'); "
+    command = ("key=$(/usr/local/sbin/sshd -T | awk 'tolower($1)==\"hostkey\" && tolower($2) ~ /ed25519/ {print $2; exit}'); "
                "test -n \"$key\"; ssh-keygen -lf \"$key.pub\" | awk '{print $2}'")
     code, output, error = _ssh(db, host, command)
     if code or not output.strip():

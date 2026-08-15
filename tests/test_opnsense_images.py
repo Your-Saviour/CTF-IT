@@ -115,6 +115,11 @@ def test_remote_commands_explicitly_select_posix_shell_for_opnsense_root():
     assert "set -eu" in wrapped and "$(echo ok)" in wrapped
 
 
+def test_host_key_discovery_normalizes_openssh_keyword_casing():
+    source = Path("api/services/opnsense_images.py").read_text()
+    assert 'tolower($1)==\\"hostkey\\"' in source
+
+
 def test_running_jobs_interrupt_and_only_validated_active_image_is_selected():
     db = session(); image = image_row(db, status="bootstrapping", phase="bootstrapping")
     assert interrupt_running_jobs(db) == 1 and image.status == "interrupted"
