@@ -623,6 +623,7 @@ async def event_plan_page(event_id: int, request: Request, db: Session = Depends
         return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse(request, "event_plan.html", {
         "user": user, "event_id": event_id, "event_name": event.name,
+        "event_status": event.status, "read_only": event.status != "draft",
         "active_nav": "events",
         "breadcrumbs": [{"label": "Events", "href": "/admin/events"}, {"label": event.name}, {"label": "Plan"}],
     })

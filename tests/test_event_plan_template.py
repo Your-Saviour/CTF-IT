@@ -6,11 +6,16 @@ ROOT = TEMPLATE.parents[2]
 EVENT_EDITOR = ROOT / "frontend" / "templates" / "admin_resource.html"
 
 
-def test_inline_plan_actions_are_exported_to_window():
+def test_plan_page_loads_full_page_planner_assets():
     source = TEMPLATE.read_text()
 
-    assert 'onclick="startEventFromPlan()"' in source
-    assert "window.startEventFromPlan = async function()" in source
+    assert 'id="planner-outline"' in source
+    assert 'id="planner-canvas"' in source
+    assert 'id="planner-inspector"' in source
+    assert 'id="planner-validation"' in source
+    assert 'src="/static/event-planner.js' in source
+    assert 'href="/static/event-planner.css' in source
+    assert "onclick=" not in source
 
 
 def test_admin_drawers_restore_focus_and_red_team_tables_are_responsive():
