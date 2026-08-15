@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI):
                 "lan_eni_id": "VARCHAR(64)",
                 "subnet_id": "VARCHAR(64)",
                 "security_group_ids_json": "TEXT",
+                "eip_allocation_id": "VARCHAR(64)",
                 "cloudflare_record_id": "VARCHAR(64)",
                 "attack_tree_json": "TEXT",
                 "vm_type": "VARCHAR(64)",

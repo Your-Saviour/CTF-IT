@@ -9,7 +9,7 @@ def test_models_expose_neutral_aws_fields():
     assert {
         "cloud_instance_id", "instance_type", "cloud_region", "availability_zone",
         "primary_eni_id", "wan_eni_id", "lan_eni_id", "subnet_id",
-        "security_group_ids_json",
+        "security_group_ids_json", "eip_allocation_id",
     } <= set(VM.__table__.columns.keys())
     assert {
         "availability_zone", "public_subnet_id", "infrastructure_subnet_id",

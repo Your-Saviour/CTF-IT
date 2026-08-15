@@ -304,6 +304,7 @@ class VM(Base):
     lan_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
     subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
     security_group_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    eip_allocation_id: Mapped[str] = mapped_column(String(64), nullable=True)
     cloudflare_record_id: Mapped[str] = mapped_column(String(64), nullable=True)
     vm_type: Mapped[str] = mapped_column(String(64), nullable=True)
     # Caldera attack tree cache

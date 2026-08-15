@@ -1132,6 +1132,153 @@ async def agent_status(vm_id: int, request: Request, db: Session = Depends(get_d
 
 # ── Vultr Reference Data ───────────────────────────────────────────────────────
 
+def _cloud_providers():
+    """Build AWS lifecycle dependencies without accepting explicit credentials."""
+    from api.database import SessionLocal
+    from api.services.aws import AwsComputeProvider, AwsConfig, AwsSessionFactory
+    from api.services.cloud_provisioning import CloudProviders
+    from api.services.ssh_keys import get_or_create_platform_keypair
+
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    security_groups = tuple(
+        value.strip() for value in os.environ.get("AWS_STANDARD_SECURITY_GROUP_IDS", "").split(",")
+        if value.strip()
+    )
+    if not security_groups:
+        from api.services.aws import AwsConfigurationError
+        raise AwsConfigurationError("AWS_STANDARD_SECURITY_GROUP_IDS is required")
+    key_db = SessionLocal()
+    try:
+        _, public_key = get_or_create_platform_keypair(key_db)
+    finally:
+        key_db.close()
+    return CloudProviders(
+        config=config,
+        compute=AwsComputeProvider(sessions.client("ec2")),
+        session_factory=SessionLocal,
+        key_name=os.environ.get("AWS_KEY_PAIR_NAME", "ctf-it"),
+        public_key=public_key,
+        security_group_ids=security_groups,
+        configure_guest=_run_provision,
+        wait_for_ssh=lambda vm: _wait_for_tcp_port(vm.public_ip, vm.ssh_port or 22),
+        reconcile_dns=lambda vm: None,
+        delete_dns=lambda vm: None,
+    )
+
+
+def _run_cloud_create(vm_id: int) -> None:
+    from api.services.cloud_provisioning import create_cloud_vm
+    try:
+        create_cloud_vm(vm_id, providers=_cloud_providers())
+    except Exception:
+        _log.exception("AWS VM creation failed for VM %d", vm_id)
+
+
+def _run_cloud_destroy(vm_id: int) -> None:
+    from api.services.cloud_provisioning import destroy_cloud_vm
+    try:
+        destroy_cloud_vm(vm_id, providers=_cloud_providers())
+    except Exception:
+        _log.exception("AWS VM destruction failed for VM %d", vm_id)
+
+
+@router.get("/aws/instance-types")
+async def aws_instance_types(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        from api.services.aws import AwsConfig
+        config = AwsConfig.from_env()
+        return {"instance_types": [{"id": value, "label": value} for value in config.instance_types]}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
+@router.get("/aws/amis")
+async def aws_amis(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        from api.services.aws import AwsConfig
+        config = AwsConfig.from_env()
+        return {"amis": [
+            {"region": region, "ami_id": ami_id, "family": "ubuntu"}
+            for region, ami_id in sorted(config.ubuntu_amis.items())
+        ]}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
+@router.post("/vms/create-cloud")
+async def create_vm_on_cloud(request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        providers = _cloud_providers()
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+    body = await request.json()
+    team = db.get(Team, body.get("team_id")) if body.get("team_id") else None
+    if not team:
+        return JSONResponse({"error": "Team not found"}, status_code=404)
+    hostname = (body.get("hostname") or "").strip()
+    instance_type = (body.get("instance_type") or "").strip()
+    region = (body.get("region") or providers.config.default_region).strip()
+    if not hostname or instance_type not in providers.config.instance_types:
+        return JSONResponse({"error": "valid hostname and instance_type are required"}, status_code=422)
+    try:
+        providers.config.ubuntu_ami(region)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    vm = VM(
+        hostname=hostname, os="Ubuntu 24.04 LTS", status="creating",
+        ssh_user=body.get("ssh_user") or "ubuntu", ssh_port=22,
+        notes=body.get("notes") or None, team_id=team.id, event_id=team.event_id,
+        instance_type=instance_type, cloud_region=region,
+        subnet_id=providers.config.standard_subnet_id, provision_step="queued",
+    )
+    db.add(vm); db.commit(); db.refresh(vm)
+    asyncio.create_task(asyncio.to_thread(_run_cloud_create, vm.id))
+    return {"status": "creating", "id": vm.id}
+
+
+@router.post("/vms/{vm_id}/retry-cloud")
+async def retry_cloud_create(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    vm = db.get(VM, vm_id)
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+    if vm.status not in ("failed", "destroy_failed"):
+        return JSONResponse({"error": f"VM is {vm.status}; retry is not allowed"}, status_code=409)
+    vm.status, vm.provision_step, vm.provision_error = "creating", "queued", None
+    db.commit()
+    asyncio.create_task(asyncio.to_thread(_run_cloud_create, vm.id))
+    return {"status": "creating", "vm_id": vm.id}
+
+
+@router.post("/vms/{vm_id}/destroy-cloud")
+async def destroy_cloud_instance(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    vm = db.get(VM, vm_id)
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+    if not vm.cloud_instance_id:
+        return JSONResponse({"error": "VM has no AWS instance associated"}, status_code=422)
+    if vm.status in ("creating", "provisioning", "destroying"):
+        return JSONResponse({"error": f"VM is currently {vm.status}"}, status_code=409)
+    vm.status = "destroying"; db.commit()
+    asyncio.create_task(asyncio.to_thread(_run_cloud_destroy, vm.id))
+    return {"status": "destroying", "vm_id": vm.id}
+
+
 @router.get("/vultr/plans")
 async def vultr_plans(request: Request, db: Session = Depends(get_db)):
     """Return Vultr vc2 plans for the VM creation dropdown."""
@@ -2099,6 +2246,7 @@ async def create_status(vm_id: int, request: Request, db: Session = Depends(get_
         "provision_error": vm.provision_error,
         "ip_address": vm.ip_address,
         "vultr_id": vm.vultr_id,
+        "cloud_instance_id": vm.cloud_instance_id,
     }
 
 

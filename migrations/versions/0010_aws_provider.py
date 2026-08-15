@@ -32,6 +32,7 @@ def upgrade():
         "lan_eni_id": sa.Column("lan_eni_id", sa.String(64), nullable=True),
         "subnet_id": sa.Column("subnet_id", sa.String(64), nullable=True),
         "security_group_ids_json": sa.Column("security_group_ids_json", sa.Text(), nullable=True),
+        "eip_allocation_id": sa.Column("eip_allocation_id", sa.String(64), nullable=True),
     })
     _add_missing("sites", {
         "availability_zone": sa.Column("availability_zone", sa.String(32), nullable=True),

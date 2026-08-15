@@ -82,6 +82,16 @@ def test_base_playbook_waits_for_ubuntu_package_manager_lock():
     assert "lock_timeout: 600" in template
 
 
+def test_vm_routes_expose_provider_neutral_aws_lifecycle_contract():
+    source = Path("api/routes/vm.py").read_text()
+    for route in (
+        '"/aws/instance-types"', '"/aws/amis"', '"/vms/create-cloud"',
+        '"/vms/{vm_id}/retry-cloud"', '"/vms/{vm_id}/destroy-cloud"',
+    ):
+        assert route in source
+    assert '"cloud_instance_id": vm.cloud_instance_id' in source
+
+
 def test_guestbook_vhost_uses_consistent_apache_options_syntax():
     vhost = Path("modules/application_external/php_guestbook/guestbook.conf").read_text()
     assert "Options -Indexes +FollowSymLinks" in vhost
