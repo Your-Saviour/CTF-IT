@@ -38,11 +38,15 @@ The controls do not use browser IP-specific input types or patterns. In read-onl
 
 ## Canvas Rendering
 
-Each workload-zone container displays its address range in the header/meta area when a non-empty value exists. Each VM node displays its address as a secondary line beneath its name when a non-empty value exists. Missing values do not create placeholder text or consume unnecessary visual emphasis.
+Each workload-zone container displays its address range in a full-width subnet rail directly below the compact title header when a non-empty value exists. The rail reads `Range · <value>` and uses a darker zone-tinted surface with restrained cyan text. Zones without a range omit the rail and retain the compact header. Missing values do not create placeholder text or consume unnecessary visual emphasis.
+
+Each VM node displays its address as a secondary line beneath its name when a non-empty value exists. The address uses the same text colour as the VM name, including inherited selected and invalid states; it does not use the VM or zone accent colour. The machine node and interaction bounds grow enough to contain both lines without colliding with neighbouring content.
 
 Canvas rendering receives address annotations as explicit node presentation data from the planner controller. The canvas does not read or mutate the infrastructure document directly. Address text is rendered as text content, not injected markup, and is included in the accessible label for the corresponding zone or VM.
 
 Long values are visually constrained to the available node or container space using the existing typography and safe truncation where necessary. The full value remains available in the inspector.
+
+Zone geometry derives its content start from the actual header stack: the compact title header plus the subnet rail when present. Container bounds, automatic VM arrangement, drag constraints, link boundaries, and persisted layouts use that shared geometry rather than independent annotation coordinates. Annotation positions must remain inside their calculated zone or machine bounds.
 
 ## Persistence and Provisioning Isolation
 
@@ -79,8 +83,11 @@ Planner state and controller tests cover:
 
 Canvas tests cover:
 
-- zone range text in the container header/meta area;
+- zone range text in the full-width subnet rail;
 - VM address text beneath the VM name;
+- subnet rails that are included in zone layout, arrangement, and drag geometry only when present;
+- annotation coordinates contained by their calculated zone or machine bounds;
+- VM address colour matching the VM name across normal, selected, and invalid states;
 - accessible labels that include present annotations;
 - safe text rendering and constrained long-value presentation.
 
@@ -98,6 +105,8 @@ Planner-focused JavaScript tests, syntax checks, relevant backend tests, and the
 - A planner can enter a free-form address for each VM.
 - Values such as `x.x.{{team_id}}.x` save without IP or CIDR validation.
 - Saved annotations appear both on topology nodes and in their inspectors after reload.
+- Zone ranges appear in a full-width subnet rail below the title header without crossing a divider or overlapping controls.
+- VM addresses appear inside the VM node beneath the name and use the same text colour as the name.
 - Read-only plans show annotations but do not allow changes.
 - Empty annotations do not add placeholder text to the canvas.
 - Gateway, firewall, and site nodes do not gain address controls in this iteration.
