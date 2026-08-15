@@ -12,6 +12,32 @@ test('canvas presentation marks node roles and links beside the selection', () =
   assert.equal(canvas.topologyLinkClass({source: {selected: false}, target: {selected: false}}), 'topo-link');
 });
 
+test('canvas address annotations enrich accessible labels without inventing placeholders', () => {
+  assert.equal(
+    canvas.topologyAccessibleLabel({type: 'zone', label: 'Corporate', annotation: 'x.x.{{team_id}}.0/24'}),
+    'zone: Corporate, address x.x.{{team_id}}.0/24',
+  );
+  assert.equal(canvas.topologyAccessibleLabel({type: 'vm', label: 'Web', annotation: null}), 'vm: Web');
+  assert.equal(canvas.topologyAccessibleLabel({type: 'vm', label: 'Web', annotation: ''}), 'vm: Web');
+});
+
+test('visual address annotations are constrained while short values remain exact', () => {
+  assert.equal(canvas.truncatedAnnotation('1234567890', 8), '12345…');
+  assert.equal(canvas.truncatedAnnotation('short', 8), 'short');
+  assert.equal(canvas.truncatedAnnotation(null, 8), '');
+});
+
+test('zones and VMs receive distinct address text presentation', () => {
+  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'zone', annotation: '10.0.0.0/24'}), {
+    className: 'zone-container-address', text: '10.0.0.0/24', x: 12, y: 41,
+  });
+  assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'vm', annotation: '10.0.0.10'}), {
+    className: 'topo-node-address', text: '10.0.0.10', x: 0, y: 46,
+  });
+  assert.equal(canvas.topologyAnnotationPresentation({type: 'site', annotation: 'ignored'}), null);
+  assert.equal(canvas.topologyAnnotationPresentation({type: 'vm', annotation: null}), null);
+});
+
 test('machine nodes use icon-first presentation while structural nodes retain cards', () => {
   assert.equal(typeof canvas.topologyNodePresentation, 'function');
   assert.equal(canvas.topologyNodePresentation({type: 'vm', icon: {path: 'M0 0'}}), 'machine');

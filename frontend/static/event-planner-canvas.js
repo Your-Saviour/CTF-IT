@@ -2,6 +2,29 @@ export function topologyNodeClass(node) {
   return ['topo-node', node.type, node.selected && 'selected', node.invalid && 'invalid'].filter(Boolean).join(' ');
 }
 
+export function topologyAccessibleLabel(node) {
+  const base = `${node.systemManaged ? 'System-managed zone' : node.type}: ${node.label}`;
+  return typeof node.annotation === 'string' && node.annotation !== ''
+    ? `${base}, address ${node.annotation}`
+    : base;
+}
+
+export function topologyAnnotationPresentation(node) {
+  if (typeof node?.annotation !== 'string' || node.annotation === '') return null;
+  if (node.type === 'zone') {
+    return {className: 'zone-container-address', text: truncatedAnnotation(node.annotation, 38), x: 12, y: 41};
+  }
+  if (node.type === 'vm') {
+    return {className: 'topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 46};
+  }
+  return null;
+}
+
+export function truncatedAnnotation(value, maxLength) {
+  if (typeof value !== 'string') return '';
+  return value.length > maxLength ? `${value.slice(0, Math.max(0, maxLength - 3))}…` : value;
+}
+
 export function topologyLinkClass(link) {
   return `topo-link${link.source.selected || link.target.selected ? ' selected-adjacent' : ''}`;
 }
@@ -273,7 +296,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('data-node-id', d => d.id)
       .attr('role', 'group')
       .attr('tabindex', 0)
-      .attr('aria-label', d => `${d.systemManaged ? 'System-managed zone' : 'Zone'}: ${d.label}`)
+      .attr('aria-label', topologyAccessibleLabel)
       .attr('data-colour-inherited', d => d.colorInherited ? 'true' : null)
       .style('--node-theme-color', d => d.color || null)
       .attr('transform', d => `translate(${d.x},${d.y})`)
@@ -290,6 +313,12 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     containers.append('text').attr('class', 'zone-container-title').attr('x', 12).attr('y', 16).text(d => d.label);
     containers.append('text').attr('class', 'zone-container-meta').attr('x', 12).attr('y', 29)
       .text(d => d.systemManaged ? `System managed · ${d.childCount ?? 0} VM` : `${d.team === 'red' ? 'Red' : 'Blue'} team · ${d.childCount ?? 0} VM${d.childCount === 1 ? '' : 's'}`);
+    containers.filter(d => topologyAnnotationPresentation(d))
+      .append('text')
+      .attr('class', d => topologyAnnotationPresentation(d).className)
+      .attr('x', d => topologyAnnotationPresentation(d).x)
+      .attr('y', d => topologyAnnotationPresentation(d).y)
+      .text(d => topologyAnnotationPresentation(d).text);
     const arrangeControls = containers.append('g')
       .attr('class', 'zone-arrange')
       .attr('role', 'button')
@@ -334,7 +363,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('data-node-id', d => d.id)
       .attr('role', 'button')
       .attr('tabindex', 0)
-      .attr('aria-label', d => `${d.type}: ${d.label}`)
+      .attr('aria-label', topologyAccessibleLabel)
       .attr('data-colour-inherited', d => d.colorInherited ? 'true' : null)
       .style('--node-theme-color', d => d.color || null)
       .attr('transform', d => `translate(${d.x},${d.y})`)
@@ -352,7 +381,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('data-node-id', d => d.id)
       .attr('role', 'button')
       .attr('tabindex', 0)
-      .attr('aria-label', d => `${d.type}: ${d.label}`)
+      .attr('aria-label', topologyAccessibleLabel)
       .attr('data-colour-inherited', d => d.colorInherited ? 'true' : null)
       .style('--node-theme-color', d => d.color || null)
       .attr('transform', d => `translate(${d.x},${d.y})`)
@@ -469,6 +498,13 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     secondaryIcons.append('path').attr('d', d => d.icons?.secondary?.path || '');
     structuralGroups.append('text').attr('class', 'node-label').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
     machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 34).text(d => d.label);
+    machineGroups.filter(d => topologyAnnotationPresentation(d))
+      .append('text')
+      .attr('class', d => topologyAnnotationPresentation(d).className)
+      .attr('text-anchor', 'middle')
+      .attr('x', d => topologyAnnotationPresentation(d).x)
+      .attr('y', d => topologyAnnotationPresentation(d).y)
+      .text(d => topologyAnnotationPresentation(d).text);
 
     if (completed.added && !callbacks.readOnly) {
       const key = JSON.stringify(completed.nodes);

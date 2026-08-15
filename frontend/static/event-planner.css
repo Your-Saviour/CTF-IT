@@ -126,6 +126,7 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .zone-container text { fill: var(--text-primary); font-family: 'JetBrains Mono', monospace; pointer-events: none; }
 .zone-container-title { font-size: 11px; font-weight: 700; }
 .zone-container-meta { fill: var(--text-muted) !important; font-size: 8px; text-transform: uppercase; }
+.zone-container-address { fill: var(--cyan) !important; font-size: 8px; letter-spacing: .02em; }
 .zone-container-header { cursor: move; }
 .zone-arrange { cursor: pointer; }
 .zone-arrange rect { fill: var(--bg-deep); stroke: var(--border); stroke-width: 1; }
@@ -153,6 +154,7 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-node.invalid text { fill: var(--red); }
 .topo-node text { fill: var(--text-primary); font: 11px 'JetBrains Mono', monospace; }
 .topo-node .machine-label { font-size: 10px; }
+.topo-node .topo-node-address { fill: var(--text-muted); font-size: 8px; letter-spacing: .02em; pointer-events: none; }
 .topo-node .sub { fill: var(--text-muted); font-size: 9px; }
 
 @media (max-width: 1100px) {
