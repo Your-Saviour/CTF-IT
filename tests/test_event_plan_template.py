@@ -118,6 +118,7 @@ def test_planner_state_remaps_structural_layout_ids_and_mirrors_server_paths():
 
 def test_planner_recovers_catalogues_and_guards_read_only_mutations():
     source = CONTROLLER.read_text()
+    compact = "".join(source.split())
 
     assert "Promise.allSettled" in source
     assert "planner-retry-catalogues" in source
@@ -126,6 +127,8 @@ def test_planner_recovers_catalogues_and_guards_read_only_mutations():
     assert "document.querySelector('.planner-add-actions').hidden=READ_ONLY" in source
     assert "return pruneLayout(state)" in source
     assert "if(name==='listen_port')value=Number(value)" in source
+    assert "saveBlocked=catalogueFailures.includes('base types')" in source
+    assert "$('#planner-save').disabled=READ_ONLY||saveBlocked||errors.length>0||!dirty" in compact
 
 
 def test_planner_renders_system_firewall_zone_as_workload_route_parent():
