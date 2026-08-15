@@ -23,12 +23,10 @@ from api.models import (
     VPNCredential, Zone, utcnow,
 )
 from api.services.gamenet_provider import (
-    AwsGameNetProvider, GameNetProviderError, add_deterministic_endpoint_address,
-    bootstrap_opnsense, configure_snapshot_opnsense, configure_gateway,
-    configure_site_wireguard, finalize_endpoint_network, install_local_wireguard,
+    AwsGameNetProvider, GameNetProviderError, configure_snapshot_opnsense,
+    configure_gateway, configure_site_wireguard, install_local_wireguard,
     ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
-    update_vm_addresses, upload_text, validate_site_tunnel, validate_snapshot_wan,
-    validate_vpc_only_instance,
+    upload_text, validate_site_tunnel,
 )
 from api.services.secrets import decrypt_secret
 from api.services.ssh_keys import get_or_create_platform_keypair
@@ -89,6 +87,59 @@ def provision_event_gamenets(event_id: int) -> None:
             db.commit()
         log.exception("GameNet provisioning failed for event %s: %s", event_id, exc)
     finally:
+        db.close()
+
+
+def cleanup_event_gamenets(event_id: int, *, session_factory=SessionLocal,
+                           provider_factory=None):
+    """Delete owned event resources in dependency order without forgetting failures."""
+    from api.services.aws import CleanupResult
+    db = session_factory()
+    provider = None
+    removed, remaining = [], []
+    try:
+        event = db.get(Event, event_id)
+        if not event:
+            return CleanupResult()
+        if not any(vm.cloud_instance_id or vm.eip_allocation_id for vm in event.vms) and not any(
+                site.vpc_id for site in event.sites):
+            return CleanupResult()
+        provider = (provider_factory or _provider)()
+        role_order = {"blue_endpoint": 0, "red_endpoint": 0, "site_firewall": 1,
+                      "vpn_gateway": 2}
+        vms = sorted(event.vms, key=lambda vm: role_order.get(vm.role, 0))
+        for vm in vms:
+            if not vm.cloud_instance_id and not vm.eip_allocation_id:
+                continue
+            try:
+                provider.cleanup_vm(vm, db.get(Site, vm.site_id) if vm.site_id else None)
+                removed.append(f"instance/{vm.cloud_instance_id}")
+                vm.cloud_instance_id = vm.primary_eni_id = vm.wan_eni_id = vm.lan_eni_id = None
+                vm.eip_allocation_id = vm.public_ip = None
+                vm.status = "stopped"
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                remaining.append(f"vm/{vm.id}: {exc}")
+        for site in event.sites:
+            if not site.vpc_id:
+                continue
+            try:
+                provider.cleanup_site(site)
+                removed.append(f"vpc/{site.vpc_id}")
+                site.vpc_id = site.public_subnet_id = site.infrastructure_subnet_id = None
+                site.internet_gateway_id = site.route_table_ids_json = None
+                site.wan_security_group_id = site.lan_security_group_id = None
+                for zone in site.zones:
+                    zone.subnet_id = zone.security_group_id = None
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                remaining.append(f"site/{site.id}: {exc}")
+        return CleanupResult(tuple(removed), tuple(remaining))
+    finally:
+        if provider:
+            provider.close()
         db.close()
 
 
@@ -372,7 +423,7 @@ def _certify_site_image(db, event, site, base_type_id):
         )
     # AWS private-only boot is certified during the AMI workflow using an
     # isolated validation subnet. Record that immutable evidence against this
-    # event/site so retries retain the same gate without launching a Vultr-style
+    # event/site so retries retain the same gate without launching a per-site
     # per-site canary.
     os_id = int(hashlib.sha256(image.ami_id.encode()).hexdigest()[:7], 16)
     cert = db.query(PrivateBootCertification).filter_by(
@@ -391,209 +442,6 @@ def _certify_site_image(db, event, site, base_type_id):
         db.add(cert)
         db.commit()
     return
-    provider = _provider()
-    try:
-        os_id = provider._resolve_os_id(base.os)
-    finally:
-        provider.close()
-    cert = db.query(PrivateBootCertification).filter_by(
-        site_id=site.id, os_id=os_id,
-        region=site.region, vpc_id=site.vpc_id, firewall_instance_id=firewall.vultr_id,
-    ).first()
-    if cert and cert.status == "passed" and cert.cleanup_completed_at:
-        return
-    if not cert:
-        cert = PrivateBootCertification(
-            site_id=site.id, base_type=base_type_id, os_id=os_id,
-            region=site.region, vpc_id=site.vpc_id, firewall_instance_id=firewall.vultr_id,
-            plan=base.default_plan,
-            status="creating", phase="creating_instance", started_at=utcnow(),
-        )
-        db.add(cert)
-        db.commit()
-
-    if cert.status in {"creating", "testing"} and cert.instance_id:
-        cert.phase = "cleanup_after_failure"
-        cert.diagnostic_detail = "interrupted private-boot certification; recreating canary"
-        db.commit()
-        try:
-            _cleanup_canary(db, cert)
-        except Exception as exc:
-            cert.status = "cleanup_failed"
-            cert.diagnostic_detail = f"canary cleanup failure after interrupted certification: {exc}"[:4000]
-            db.commit()
-            raise GameNetProviderError(cert.diagnostic_detail) from exc
-        cert.instance_id = None
-        cert.provider_ip = None
-        cert.mac_address = None
-        db.commit()
-
-    # A worker may have stopped while deleting. Finish that exact cleanup
-    # before deciding whether a failed certification needs a new instance.
-    if cert.status == "cleanup_failed" and cert.instance_id:
-        cleanup_after_pass = cert.phase == "cleanup_after_pass"
-        _cleanup_canary(db, cert)
-        if cleanup_after_pass:
-            cert.status, cert.phase = "passed", "passed"
-            cert.completed_at = cert.completed_at or utcnow()
-            cert.diagnostic_detail = None
-            db.commit()
-            return
-        cert.instance_id = None
-        cert.provider_ip = None
-        cert.mac_address = None
-        db.commit()
-
-    if cert.status == "failed" and cert.cleanup_completed_at:
-        cert.instance_id = None
-        cert.provider_ip = None
-        cert.mac_address = None
-        db.commit()
-
-    cert.status, cert.phase = "creating", "creating_instance"
-    cert.started_at, cert.completed_at = utcnow(), None
-    cert.cleanup_completed_at = None
-    cert.diagnostic_detail = None
-    db.commit()
-    success = False
-    failure = None
-    try:
-        provider = _provider()
-        try:
-            instance = provider.create_private_boot_canary(
-                cert,
-                hostname=gamenet_hostname(
-                    event.id, site.team_id, site.key, base_type_id, "canary",
-                ),
-                db=db,
-            )
-        except Exception as exc:
-            if "missing VPC attachment metadata" in str(exc):
-                raise GameNetProviderError(str(exc)) from exc
-            raise GameNetProviderError(f"provider instance creation failure: {exc}") from exc
-        finally:
-            provider.close()
-        validate_vpc_only_instance(instance, label="private-boot canary")
-        cert.provider_ip = instance.get("internal_ip")
-        cert.mac_address = instance.get("vpc_mac")
-        if not cert.provider_ip or not cert.mac_address:
-            raise GameNetProviderError("missing VPC attachment metadata for private-boot canary")
-        cert.status, cert.phase, cert.updated_at = "testing", "testing_reachability", utcnow()
-        db.commit()
-        _validate_private_boot_canary(db, cert, site, base.os)
-        success = True
-        cert.phase = "cleanup_after_pass"
-        cert.completed_at = utcnow()
-        db.commit()
-    except Exception as exc:
-        failure = exc
-        cert.status = "failed"
-        cert.phase = "cleanup_after_failure"
-        cert.diagnostic_detail = str(exc)[:4000]
-        cert.completed_at = utcnow()
-        db.commit()
-    try:
-        _cleanup_canary(db, cert)
-    except Exception as cleanup_exc:
-        cert.status = "cleanup_failed"
-        cert.diagnostic_detail = (
-            f"{cert.diagnostic_detail + '; ' if cert.diagnostic_detail else ''}"
-            f"canary cleanup failure: {cleanup_exc}"
-        )[:4000]
-        db.commit()
-        raise GameNetProviderError(cert.diagnostic_detail) from cleanup_exc
-    if success:
-        cert.status, cert.phase = "passed", "passed"
-        cert.diagnostic_detail = None
-        db.commit()
-        return
-    cert.status, cert.phase = "failed", "failed"
-    db.commit()
-    raise GameNetProviderError(
-        f"Vultr region/OS private boot certification failed for {site.region}/{base.os}: {failure}"
-    ) from failure
-
-
-def _cleanup_canary(db, cert):
-    if cert.instance_id:
-        provider = _provider()
-        try:
-            provider.delete_instance(cert.instance_id)
-        finally:
-            provider.close()
-    cert.cleanup_completed_at = utcnow()
-    cert.updated_at = utcnow()
-    db.commit()
-
-
-def _validate_private_boot_canary(db, cert, site, expected_os):
-    firewall = db.get(VM, site.firewall_vm_id)
-    gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
-    target = shlex.quote(cert.provider_ip)
-    arp_target = shlex.quote("(" + cert.provider_ip + ")")
-    probe_body = (
-        f"target={target}; attempt=0; ping_status=1; tcp_status=1; arp_status=1; "
-        'while [ "$attempt" -lt 24 ]; do '
-        'if timeout 2 ping -c 1 "$target" >/dev/null 2>&1; then ping_status=0; else ping_status=$?; fi; '
-        f"if arp -an | grep -F {arp_target} | grep -Fv '(incomplete)' >/dev/null 2>&1; "
-        "then arp_status=0; else arp_status=$?; fi; "
-        'if nc -z -w 2 "$target" 22 >/dev/null 2>&1; then tcp_status=0; else tcp_status=$?; fi; '
-        'if [ "$ping_status" -eq 0 ] && [ "$tcp_status" -eq 0 ] && [ "$arp_status" -eq 0 ]; '
-        "then exit 0; fi; attempt=$((attempt + 1)); sleep 3; done; "
-        "printf 'ping=%s tcp=%s arp=%s attempts=%s\\n' "
-        '"$ping_status" "$tcp_status" "$arp_status" "$attempt" >&2; exit 1'
-    )
-    probe = "sh -c " + shlex.quote(probe_body)
-    try:
-        code, _, error = ssh_command(
-            firewall, probe, host=firewall.private_ip, jump=gateway_vm,
-            timeout=140, connect_timeout=120,
-        )
-    except Exception as exc:
-        raise GameNetProviderError(f"no ARP/TCP reachability to canary: {exc}") from exc
-    if code:
-        raise GameNetProviderError(f"no ARP/TCP reachability to canary: {error[:300]}")
-    cert.phase = "testing_ssh"
-    db.commit()
-    try:
-        code, _, error = ssh_host_command(
-            db, cert.provider_ip, "true", jump=gateway_vm,
-            connect_timeout=120, label="private-boot canary",
-        )
-    except Exception as exc:
-        raise GameNetProviderError(f"SSH-key injection failure: {exc}") from exc
-    if code:
-        raise GameNetProviderError(f"SSH-key injection failure: {error[:300]}")
-    cert.phase = "testing_cloud_init"
-    db.commit()
-    code, output, error = ssh_host_command(
-        db, cert.provider_ip, "cloud-init status --wait --long", jump=gateway_vm,
-        timeout=CREATE_TIMEOUT, connect_timeout=120, label="private-boot canary",
-    )
-    if code or "status: done" not in output.lower():
-        raise GameNetProviderError(f"cloud-init failure: {(error or output)[:500]}")
-    cert.phase = "testing_guest"
-    db.commit()
-    command = (
-        ". /etc/os-release; printf 'os=%s\\n' \"$ID\"; uname -m; "
-        f"iface=''; for p in /sys/class/net/*/address; do if [ \"$(tr A-F a-f < \"$p\")\" = {shlex.quote(cert.mac_address.lower())} ]; "
-        "then iface=$(basename \"$(dirname \"$p\")\"); break; fi; done; "
-        "test -n \"$iface\"; ip -4 address show dev \"$iface\"; "
-        f"ip route get {shlex.quote(str(ip_network(site.allocated_cidr).network_address + 1))}"
-    )
-    code, output, error = ssh_host_command(
-        db, cert.provider_ip, command, jump=gateway_vm,
-        timeout=120, connect_timeout=120, label="private-boot canary",
-    )
-    expected_id = expected_os.split()[0].lower()
-    expected_arch = (
-        "x86_64" if "x64" in expected_os.lower()
-        else "aarch64" if "arm64" in expected_os.lower() else ""
-    )
-    if code or f"os={expected_id}" not in output.lower() or (expected_arch and expected_arch not in output):
-        raise GameNetProviderError(f"stock guest OS, architecture, VPC interface, or route check failed: {(error or output)[:500]}")
-
-
 def lock_down_public_ingress(db, event, infrastructure):
     _apply_final_firewall_groups(event, infrastructure)
     # The provider firewall must be in place before temporary management rules
@@ -639,41 +487,6 @@ def _persist_instance_result(vm, result) -> None:
     vm.vpc_mac = result.lan_mac or result.primary_mac
     if result.public_ip:
         vm.ip_address = result.public_ip
-
-
-def _create_provider_instance(vm, *, public, vpc_ids=None, user_data=None,
-                              image_source=None, stock_image=False):
-    provider = _provider()
-    try:
-        instance = provider.create_instance(
-            vm, public=public, vpc_ids=vpc_ids,
-            user_data=(None if stock_image else (user_data if user_data is not None else ubuntu_cloud_init()))
-            if not image_source else None,
-            image_source=image_source,
-        )
-        if public:
-            update_vm_addresses(vm, instance, public=True)
-        else:
-            try:
-                validate_vpc_only_instance(instance, label=f"endpoint {vm.hostname}")
-            except Exception as exc:
-                try:
-                    provider.delete_instance(vm.vultr_id)
-                    vm.vultr_id = None
-                    object_session(vm).commit()
-                except Exception as cleanup_exc:
-                    raise GameNetProviderError(
-                        f"{exc}; rejected endpoint cleanup failure: {cleanup_exc}"
-                    ) from cleanup_exc
-                raise
-            vm.public_ip = None
-            vm.vpc_ip = instance.get("internal_ip") or instance.get("vpc_ip")
-            vm.vpc_mac = instance.get("vpc_mac")
-            if not vm.vpc_ip or not vm.vpc_mac:
-                raise GameNetProviderError(f"missing VPC attachment metadata for endpoint {vm.hostname}")
-            object_session(vm).commit()
-    finally:
-        provider.close()
 
 
 def _create_provider_vpc(site):
@@ -731,14 +544,6 @@ def _require_endpoint_prerequisites(db, event, infrastructure):
             raise GameNetProviderError(
                 "all endpoint stock images must pass private-boot certification before endpoint creation"
             )
-
-
-def _attach_provider_vpc(vm, vpc_id):
-    provider = _provider()
-    try:
-        return provider.attach_vpc(vm, vpc_id)
-    finally:
-        provider.close()
 
 
 def _configure_site_tunnel(site):

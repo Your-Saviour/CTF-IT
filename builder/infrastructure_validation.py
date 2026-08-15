@@ -13,7 +13,7 @@ VPC_LIMIT_PER_REGION = 5
 
 
 def gamenet_hostname(event_id: int, team_id: int, *parts: object) -> str:
-    """Return a stable Vultr-compatible hostname for a GameNet machine."""
+    """Return a stable provider-safe hostname for a GameNet machine."""
     raw = "-".join(["gamenet", f"e{event_id}", f"t{team_id}", *(str(part) for part in parts)])
     normalized = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
     normalized = re.sub(r"-+", "-", normalized)

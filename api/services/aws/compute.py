@@ -173,6 +173,8 @@ class AwsComputeProvider:
         response = self._call("describe_addresses", AllocationIds=[allocation_id])
         address = response["Addresses"][0]
         assert_owned(aws_tag_dict(address.get("Tags")), expected_tags)
+        if address.get("AssociationId"):
+            self._call("disassociate_address", AssociationId=address["AssociationId"])
         self._call("release_address", AllocationId=allocation_id)
 
     def ensure_key_pair(self, name: str, public_key: str, tags: Mapping[str, str]) -> str:

@@ -47,12 +47,16 @@ class FakeEc2:
         self.calls.append(("describe_addresses", kwargs))
         return {"Addresses": [{
             "AllocationId": "eipalloc-123", "PublicIp": "198.51.100.20",
+            "AssociationId": "eipassoc-123",
             "Tags": [{"Key": "ManagedBy", "Value": "ctf-it"}, {"Key": "VmId", "Value": "7"}],
         }]}
 
     def release_address(self, **kwargs):
         self.calls.append(("release_address", kwargs))
         return {}
+
+    def disassociate_address(self, **kwargs):
+        self.calls.append(("disassociate_address", kwargs)); return {}
 
 
 def spec():
@@ -130,7 +134,10 @@ def test_allocate_associate_and_release_owned_eip():
 
     assert allocation.public_ip == "198.51.100.20"
     assert association_id == "eipassoc-123"
-    assert ec2.calls[-1] == ("release_address", {"AllocationId": "eipalloc-123"})
+    assert ec2.calls[-2:] == [
+        ("disassociate_address", {"AssociationId": "eipassoc-123"}),
+        ("release_address", {"AllocationId": "eipalloc-123"}),
+    ]
 
 
 def test_throttling_is_translated_to_retryable_error():

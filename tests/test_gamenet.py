@@ -21,7 +21,7 @@ from api.services.gamenet import (
     site_dns_zone, vm_dns_name,
 )
 from api.services.gamenet_provider import (
-    GameNetProviderError, VultrGameNetProvider, add_deterministic_endpoint_address,
+    GameNetProviderError, add_deterministic_endpoint_address,
     endpoint_cloud_init, opnsense_config_fingerprint, render_opnsense_config,
     snapshot_site_validation_command, ubuntu_cloud_init, validate_site_tunnel,
     validate_vpc_only_instance,
@@ -63,7 +63,7 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
 
 def test_opnsense_config_fingerprint_is_stable_and_tracks_semantic_inputs():
     site = MagicMock(id=7, allocated_cidr="10.128.0.0/20")
-    vm = MagicMock(id=9, vultr_id="instance-1", public_ip="198.51.100.12",
+    vm = MagicMock(id=9, cloud_instance_id="i-instance-1", public_ip="198.51.100.12",
                    private_ip="10.128.0.1", hostname="firewall")
     gateway_vm = MagicMock(public_ip="198.51.100.20")
     values = dict(
@@ -527,39 +527,6 @@ def test_global_site_allocation_and_encrypted_user_key(db_session):
     assert sites[0].tunnel_address and teams[0].vpn_gateway.platform_address
 
 
-def test_vultr_private_instance_request_is_vpc_only(monkeypatch, db_session):
-    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
-    db_session.add(event); db_session.flush()
-    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
-    from api.models import VM
-    vm = VM(hostname="private-endpoint", team_id=team.id, event_id=event.id,
-            base_type="ubuntu_24_server", vultr_plan="vc2-1c-2gb", vultr_region="ewr")
-    db_session.add(vm); db_session.flush()
-    monkeypatch.setenv("VULTR_API_KEY", "test")
-    provider = VultrGameNetProvider()
-    calls = []
-    monkeypatch.setattr(provider, "_resolve_os_id", lambda _: 2284)
-    monkeypatch.setattr(provider, "_ensure_ssh_key", lambda *_: "key-id")
-    responses = iter([
-        {"instances": []},
-        {"instance": {"id": "instance-id"}},
-        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.16.10", "mac_address": "5a:00:00:00:00:10"}]},
-    ])
-    monkeypatch.setattr(provider, "_request", lambda method, path, **kwargs: calls.append((method, path, kwargs)) or next(responses))
-    monkeypatch.setattr(provider, "_wait_instance", lambda instance_id: {
-        "id": instance_id, "status": "active", "server_status": "ok", "vpc_only": True,
-        "internal_ip": "10.128.16.10", "main_ip": "0.0.0.0",
-    })
-    result = provider.create_instance(vm, public=False, vpc_ids=["vpc-id"], user_data=ubuntu_cloud_init())
-    body = next(call[2]["json"] for call in calls if call[0] == "POST" and call[1] == "/instances")
-    assert body["vpc_only"] is True
-    assert body["attach_vpc"] == ["vpc-id"]
-    assert "enable_vpc" not in body
-    assert body["enable_ipv6"] is False
-    assert result["main_ip"] == "0.0.0.0"
-    provider.close()
-
-
 def test_firewall_and_certification_phases_precede_endpoint_creation():
     assert PROVISIONING_STEPS.index("create_site_firewalls") < PROVISIONING_STEPS.index("establish_site_tunnels")
     assert PROVISIONING_STEPS.index("establish_site_tunnels") < PROVISIONING_STEPS.index("connecting_control_plane")
@@ -586,69 +553,6 @@ def test_vpc_only_validation_accepts_vpc_address_repeated_as_main_ip():
         "v6_main_ip": "",
         "ipv4": None,
     })
-
-
-def test_private_boot_canary_request_has_no_user_data_and_persists_before_poll(monkeypatch, db_session):
-    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
-    db_session.add(event); db_session.flush()
-    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
-    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
-    site = db_session.query(Site).one(); site.vpc_id = "vpc-id"
-    cert = PrivateBootCertification(
-        site_id=site.id, base_type="ubuntu_24_server", os_id=2284, region="ewr",
-        vpc_id="vpc-id", firewall_instance_id="firewall-id", plan="vc2-1c-2gb",
-    )
-    db_session.add(cert); db_session.commit()
-    monkeypatch.setenv("VULTR_API_KEY", "test")
-    provider = VultrGameNetProvider(); calls = []
-    monkeypatch.setattr("api.services.gamenet_provider.get_or_create_platform_keypair", lambda _db: ("private", "public"))
-    monkeypatch.setattr(provider, "_ensure_ssh_key", lambda *_args: "key-id")
-    responses = iter([
-        {"instances": []}, {"instance": {"id": "canary-id"}},
-        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.0.9", "mac_address": "5a:00:00:00:00:09"}]},
-    ])
-    monkeypatch.setattr(provider, "_request", lambda method, path, **kwargs: calls.append((method, path, kwargs)) or next(responses))
-    def wait(instance_id):
-        assert db_session.get(PrivateBootCertification, cert.id).instance_id == "canary-id"
-        return {"id": instance_id, "vpc_only": True, "main_ip": "0.0.0.0"}
-    monkeypatch.setattr(provider, "_wait_instance", wait)
-    result = provider.create_private_boot_canary(cert, hostname="canary", db=db_session)
-    body = next(call[2]["json"] for call in calls if call[0] == "POST")
-    assert body["vpc_only"] is True and body["attach_vpc"] == ["vpc-id"]
-    assert "user_data" not in body
-    assert result["vpc_mac"] == "5a:00:00:00:00:09"
-    provider.close()
-
-
-def test_private_boot_reachability_probe_uses_posix_shell_on_opnsense(monkeypatch):
-    from api.services import gamenet_provisioning
-
-    firewall = MagicMock(private_ip="10.128.0.1")
-    gateway = MagicMock()
-    site = MagicMock(firewall_vm_id=94, allocated_cidr="10.128.0.0/20")
-    site.team.vpn_gateway.vm_id = 93
-    cert = MagicMock(provider_ip="10.128.0.5", mac_address="5a:00:00:00:00:05")
-    db = MagicMock()
-    db.get.side_effect = lambda _model, vm_id: firewall if vm_id == 94 else gateway
-    commands = []
-    monkeypatch.setattr(
-        gamenet_provisioning,
-        "ssh_command",
-        lambda _vm, command, **_kwargs: commands.append(command) or (1, "", "probe failed"),
-    )
-
-    with pytest.raises(GameNetProviderError, match="no ARP/TCP reachability"):
-        gamenet_provisioning._validate_private_boot_canary(
-            db, cert, site, "Ubuntu 24.04 LTS x64",
-        )
-
-    assert len(commands) == 1
-    assert commands[0].startswith("sh -c ")
-    assert 'while [ "$attempt" -lt 24 ]' in commands[0]
-    assert 'timeout 2 ping -c 1 "$target"' in commands[0]
-    assert "grep -Fv" in commands[0]
-    assert "(incomplete)" in commands[0]
-    assert "ping=%s tcp=%s arp=%s attempts=%s" in commands[0]
 
 
 def test_endpoint_creation_uses_approved_ami_and_persists_eni_metadata(monkeypatch, db_session):
@@ -725,35 +629,6 @@ def test_private_boot_gate_rejects_missing_validated_aws_ami(db_session):
     assert all(vm.cloud_instance_id is None for vm in endpoints)
 
 
-def test_snapshot_instance_boots_without_vpc_then_attaches_explicitly(monkeypatch, db_session):
-    event = Event(name="GameNet", quota="{}"); db_session.add(event); db_session.flush()
-    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
-    vm = VM(hostname="firewall", team_id=team.id, event_id=event.id, base_type="opnsense",
-            vultr_plan="vc2-2c-4gb", vultr_region="ewr")
-    db_session.add(vm); db_session.flush()
-    monkeypatch.setenv("VULTR_API_KEY", "test")
-    provider = VultrGameNetProvider(); calls = []
-    responses = iter([
-        {"instances": []}, {"instance": {"id": "instance-id"}},
-        {"vpcs": []}, {},
-        {"vpcs": [{"id": "vpc-id", "ip_address": "10.128.0.2", "mac_address": "5a:00:00:00:00:02"}]},
-    ])
-    monkeypatch.setattr(provider, "_request",
-                        lambda method, path, **kwargs: calls.append((method, path, kwargs)) or next(responses))
-    monkeypatch.setattr(provider, "_wait_instance", lambda instance_id: {
-        "id": instance_id, "status": "active", "server_status": "ok", "main_ip": "198.51.100.10",
-    })
-    provider.create_instance(vm, public=True, image_source={"snapshot_id": "snapshot-id"})
-    create_body = next(call[2]["json"] for call in calls if call[0] == "POST" and call[1] == "/instances")
-    assert create_body["snapshot_id"] == "snapshot-id"
-    assert "attach_vpc" not in create_body
-    attachment = provider.attach_vpc(vm, "vpc-id")
-    attach_call = next(call for call in calls if call[1].endswith("/vpcs/attach"))
-    assert attach_call[2]["json"] == {"vpc_id": "vpc-id"}
-    assert attachment["mac_address"] == "5a:00:00:00:00:02"
-    provider.close()
-
-
 def test_site_firewall_persists_aws_dual_eni_result(monkeypatch, db_session):
     from api.services import gamenet_provisioning
     from api.services.aws import InstanceResult
@@ -790,30 +665,6 @@ def test_site_firewall_persists_aws_dual_eni_result(monkeypatch, db_session):
     assert firewall.cloud_instance_id == "i-firewall"
     assert firewall.wan_eni_id == "eni-wan" and firewall.lan_eni_id == "eni-lan"
     assert firewall.vpc_mac == "02:00:00:00:00:02" and firewall.status == "active"
-
-
-def test_vultr_ssh_key_collision_uses_material_specific_name(monkeypatch):
-    monkeypatch.setenv("VULTR_API_KEY", "test")
-    provider = VultrGameNetProvider()
-    calls = []
-    monkeypatch.setattr(provider, "_request", lambda method, path, **kwargs: (
-        {"ssh_keys": [{"id": "old", "name": "ctf-platform", "ssh_key": "ssh-ed25519 OLD"}]}
-        if method == "GET" else calls.append(kwargs["json"]) or {"ssh_key": {"id": "new"}}
-    ))
-    assert provider._ensure_ssh_key("ctf-platform", "ssh-ed25519 NEW comment") == "new"
-    assert calls[0]["name"].startswith("ctf-platform-")
-    assert calls[0]["ssh_key"] == "ssh-ed25519 NEW comment"
-    provider.close()
-
-
-def test_vultr_ssh_key_reuses_matching_material_under_any_name(monkeypatch):
-    monkeypatch.setenv("VULTR_API_KEY", "test")
-    provider = VultrGameNetProvider()
-    monkeypatch.setattr(provider, "_request", lambda method, path, **kwargs: {
-        "ssh_keys": [{"id": "existing", "name": "older-deployment", "ssh_key": "ssh-ed25519 SAME old-comment"}]
-    })
-    assert provider._ensure_ssh_key("ctf-platform", "ssh-ed25519 SAME new-comment") == "existing"
-    provider.close()
 
 
 def test_gamenet_materialises_complete_vm_plan_before_cloud_calls(db_session):

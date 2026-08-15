@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import yaml
 
@@ -66,3 +67,20 @@ def test_iso_nginx_configuration_is_removed() -> None:
 def test_caldera_ssh_host_key_is_mounted_read_only() -> None:
     caldera = _services()["caldera"]
     assert "./caldera/config/ssh_host_key:/usr/src/app/conf/ssh_host_key:ro" in caldera["volumes"]
+
+
+def test_compose_passes_aws_configuration_without_static_secret_values() -> None:
+    for path in (ROOT / "docker-compose.yml", COMPOSE_PATH):
+        services = yaml.safe_load(path.read_text())["services"]
+        environment = services["api"]["environment"]
+        assert any("AWS_DEFAULT_REGION" in value for value in environment)
+        assert not any("AWS_ACCESS_KEY_ID" in value or "AWS_SECRET_ACCESS_KEY" in value
+                       for value in environment)
+
+
+def test_iam_policy_uses_only_documented_aws_services_and_no_service_wildcards() -> None:
+    policy = json.loads((ROOT / "deploy" / "aws" / "iam-policy.json").read_text())
+    actions = {action for statement in policy["Statement"] for action in statement["Action"]}
+    assert all(action.split(":", 1)[0] in {"ec2", "sts", "servicequotas", "pricing"}
+               for action in actions)
+    assert "iam:*" not in actions and "ec2:*" not in actions

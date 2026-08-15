@@ -71,18 +71,6 @@ def _readiness_payload(report):
     }
 
 
-async def _live_vpc_counts() -> dict[str, int]:
-    """Return current Vultr VPC consumption by location for capacity gating."""
-    key = os.environ.get("VULTR_API_KEY")
-    if not key:
-        return {}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get("https://api.vultr.com/v2/vpcs", params={"per_page": 500},
-                                    headers={"Authorization": f"Bearer {key}"})
-    response.raise_for_status()
-    return dict(Counter(vpc.get("region") for vpc in response.json().get("vpcs", []) if vpc.get("region")))
-
-
 class PlanPreviewRequest(BaseModel):
     quota: Optional[dict] = None
     infrastructure: Optional[dict] = None
@@ -1117,35 +1105,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
 
-    # Fetch Vultr plans for sizing + cost estimates (optional)
+    # Sizing consumes the approved EC2 catalogue; pricing is optional.
     available_plans = []
     plan_costs = {}
-    vultr_key = os.environ.get("VULTR_API_KEY")
-    if vultr_key:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    "https://api.vultr.com/v2/plans?type=vc2&per_page=500",
-                    headers={"Authorization": f"Bearer {vultr_key}"},
-                )
-            try:
-                plans_data = resp.json()
-                for p in plans_data.get("plans", []):
-                    if p.get("id", "").startswith("vc2-"):
-                        available_plans.append({
-                            "id": p["id"],
-                            "ram": p["ram"],
-                            "vcpu_count": p["vcpu_count"],
-                            "monthly_cost": p["monthly_cost"],
-                        })
-                        plan_costs[p["id"]] = p["monthly_cost"]
-            except (json.JSONDecodeError, KeyError, TypeError):
-                available_plans = []
-                plan_costs = {}
-        except Exception:
-            # A preview remains useful without a live provider price response.
-            available_plans = []
-            plan_costs = {}
 
     team_count = len(teams)
     first_team = teams[0] if teams else None
@@ -1344,8 +1306,14 @@ async def stop_event(event_id: int, request: Request, db: Session = Depends(get_
     if not event:
         return JSONResponse({"error": "Event not found"}, status_code=404)
 
-    event.status = "stopped"
-    event.open = False
+    from api.services.gamenet_provisioning import cleanup_event_gamenets
+    cleanup = await asyncio.to_thread(cleanup_event_gamenets, event_id)
+    if cleanup.remaining:
+        event.status, event.open = "provision_failed", False
+        db.commit()
+        return JSONResponse({"error": "AWS cleanup incomplete",
+                             "remaining": list(cleanup.remaining)}, status_code=409)
+    event.status, event.open = "stopped", False
     db.commit()
 
     caldera_cleanup = await _cleanup_caldera_operations_for_event(event_id)
@@ -1353,6 +1321,7 @@ async def stop_event(event_id: int, request: Request, db: Session = Depends(get_
     return {
         "status": "stopped",
         "caldera_operations_cleaned": caldera_cleanup["deleted"],
+        "aws_resources_removed": list(cleanup.removed),
     }
 
 
@@ -1394,6 +1363,11 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
         )
 
     caldera_cleanup = await _cleanup_caldera_operations_for_event(event_id)
+    from api.services.gamenet_provisioning import cleanup_event_gamenets
+    cleanup = await asyncio.to_thread(cleanup_event_gamenets, event_id)
+    if cleanup.remaining:
+        return JSONResponse({"error": "AWS cleanup incomplete",
+                             "remaining": list(cleanup.remaining)}, status_code=409)
 
     db.delete(event)
     db.commit()
@@ -1401,6 +1375,7 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
     return {
         "status": "deleted",
         "caldera_operations_cleaned": caldera_cleanup["deleted"],
+        "aws_resources_removed": list(cleanup.removed),
     }
 
 

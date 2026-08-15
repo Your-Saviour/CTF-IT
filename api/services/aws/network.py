@@ -225,3 +225,51 @@ class AwsNetworkProvider:
         vpc = response["Vpcs"][0]
         assert_owned(aws_tag_dict(vpc.get("Tags")), expected_tags)
         self._call("delete_vpc", VpcId=vpc_id)
+
+    def delete_owned_eni(self, eni_id: str, expected_tags: Mapping[str, str]) -> None:
+        response = self._call("describe_network_interfaces", NetworkInterfaceIds=[eni_id])
+        eni = response["NetworkInterfaces"][0]
+        assert_owned(aws_tag_dict(eni.get("TagSet")), expected_tags)
+        self._call("delete_network_interface", NetworkInterfaceId=eni_id)
+
+    def delete_owned_site(self, site, expected_tags: Mapping[str, str]) -> None:
+        for group_id in [site.wan_security_group_id, site.lan_security_group_id,
+                         *[zone.security_group_id for zone in site.zones]]:
+            if not group_id:
+                continue
+            group = self._call("describe_security_groups", GroupIds=[group_id])["SecurityGroups"][0]
+            assert_owned(aws_tag_dict(group.get("Tags")), expected_tags)
+            self._call("delete_security_group", GroupId=group_id)
+        route_ids = list(__import__("json").loads(site.route_table_ids_json or "{}").values())
+        for route_id in route_ids:
+            table = self._call("describe_route_tables", RouteTableIds=[route_id])["RouteTables"][0]
+            assert_owned(aws_tag_dict(table.get("Tags")), expected_tags)
+            for association in table.get("Associations", []):
+                if not association.get("Main") and association.get("RouteTableAssociationId"):
+                    self._call("disassociate_route_table",
+                               AssociationId=association["RouteTableAssociationId"])
+            self._call("delete_route_table", RouteTableId=route_id)
+        for subnet_id in [site.public_subnet_id, site.infrastructure_subnet_id,
+                          *[zone.subnet_id for zone in site.zones]]:
+            if not subnet_id:
+                continue
+            subnet = self._call("describe_subnets", SubnetIds=[subnet_id])["Subnets"][0]
+            assert_owned(aws_tag_dict(subnet.get("Tags")), expected_tags)
+            self._call("delete_subnet", SubnetId=subnet_id)
+        if site.internet_gateway_id:
+            gateway = self._call(
+                "describe_internet_gateways", InternetGatewayIds=[site.internet_gateway_id],
+            )["InternetGateways"][0]
+            assert_owned(aws_tag_dict(gateway.get("Tags")), expected_tags)
+            self._call("detach_internet_gateway", InternetGatewayId=site.internet_gateway_id,
+                       VpcId=site.vpc_id)
+            self._call("delete_internet_gateway", InternetGatewayId=site.internet_gateway_id)
+        response = self._call("describe_vpcs", VpcIds=[site.vpc_id])
+        vpc = response["Vpcs"][0]
+        assert_owned(aws_tag_dict(vpc.get("Tags")), expected_tags)
+        for association in vpc.get("CidrBlockAssociationSet", []):
+            cidr = association.get("CidrBlock")
+            association_id = association.get("AssociationId")
+            if cidr != site.allocated_cidr and association_id:
+                self._call("disassociate_vpc_cidr_block", AssociationId=association_id)
+        self._call("delete_vpc", VpcId=site.vpc_id)

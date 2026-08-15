@@ -35,7 +35,6 @@ BOOTSTRAP_SOURCE_URL = (
     "src/bootstrap/opnsense-bootstrap.sh.in"
 )
 BUILD_METHOD = "freebsd-bootstrap"
-BUILDER_PLAN = "vc2-2c-4gb"
 RUNNING_STATES = {"creating_builder", "bootstrapping", "validating", "snapshotting"}
 RESUMABLE_STATES = RUNNING_STATES | {"interrupted", "failed"}
 TERMINAL_STATES = {"ready", "active", "retired"}
@@ -134,11 +133,7 @@ def elapsed_seconds(image: OpnsenseImage) -> int:
 
 
 def redact_error(exc: Exception) -> str:
-    detail = str(exc)
-    key = os.environ.get("VULTR_API_KEY")
-    if key:
-        detail = detail.replace(key, "[redacted]")
-    return detail[:1000]
+    return str(exc)[:1000]
 
 
 def _audit(db: Session, action: str, image: OpnsenseImage, **metadata) -> None:
@@ -151,179 +146,6 @@ def _set_phase(db: Session, image: OpnsenseImage, phase: str) -> None:
     image.phase = image.status = phase
     image.error_detail = None
     db.commit()
-
-
-class VultrImageClient:
-    """Minimal Vultr v2 adapter with independently mockable lifecycle calls."""
-
-    def __init__(self):
-        key = os.environ.get("VULTR_API_KEY")
-        if not key:
-            raise ImageWorkflowError("VULTR_API_KEY is required")
-        self.client = httpx.Client(
-            base_url="https://api.vultr.com/v2", timeout=30,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
-
-    def close(self):
-        self.client.close()
-
-    def request(self, method: str, path: str, **kwargs) -> dict:
-        response = None
-        for attempt in range(5):
-            response = self.client.request(method, path, **kwargs)
-            if method.upper() != "GET" or response.status_code < 500:
-                break
-            if attempt < 4:
-                time.sleep(2 ** attempt)
-        assert response is not None
-        if response.status_code not in {200, 201, 202, 204}:
-            raise ImageWorkflowError(f"Vultr {method} {path} failed ({response.status_code}): {response.text[:300]}")
-        return response.json() if response.content else {}
-
-    def preflight(self, base_os: str) -> int:
-        region = os.environ.get("VULTR_DEFAULT_REGION", "syd")
-        plans = self.request("GET", "/plans", params={"type": "vc2", "per_page": 500}).get("plans", [])
-        plan = next((row for row in plans if row.get("id") == BUILDER_PLAN), None)
-        if not plan or region not in plan.get("locations", []):
-            raise ImageWorkflowError(f"Vultr plan {BUILDER_PLAN} is unavailable in {region}")
-        rows = self.request("GET", "/os", params={"per_page": 500}).get("os", [])
-        match = next((row for row in rows if row.get("name", "").casefold() == base_os.casefold()), None)
-        if not match:
-            raise ImageWorkflowError(f"Vultr OS is unavailable: {base_os}")
-        # This authenticated read fails early for suspended or inaccessible accounts.
-        self.request("GET", "/account")
-        return int(match["id"])
-
-    def ensure_ssh_key(self, public_key: str) -> str:
-        material = " ".join(public_key.strip().split()[:2])
-        rows = self.request("GET", "/ssh-keys", params={"per_page": 500}).get("ssh_keys", [])
-        found = next((row for row in rows if " ".join(row.get("ssh_key", "").split()[:2]) == material), None)
-        if found:
-            return found["id"]
-        return self.request("POST", "/ssh-keys", json={"name": "ctf-platform", "ssh_key": public_key})["ssh_key"]["id"]
-
-    def create_firewall(self, version: str, cidr: str) -> str:
-        network = ip_network(cidr)
-        group = self.request("POST", "/firewalls", json={
-            "description": f"ctf-opnsense-builder-{version}",
-        })["firewall_group"]
-        self.request("POST", f"/firewalls/{group['id']}/rules", json={
-            "ip_type": "v4", "protocol": "tcp", "subnet": str(network.network_address),
-            "subnet_size": network.prefixlen, "port": "22",
-        })
-        return group["id"]
-
-    def create_builder(self, image: OpnsenseImage, *, os_id: int, ssh_key_id: str) -> str:
-        body = {
-            "region": os.environ.get("VULTR_DEFAULT_REGION", "syd"), "plan": BUILDER_PLAN,
-            "os_id": os_id, "sshkey_id": [ssh_key_id],
-            "label": f"ctf-opnsense-builder-{image.version}-{image.id}",
-            "hostname": "opnsense-golden", "firewall_group_id": image.builder_firewall_group_id,
-            "enable_ipv6": False, "backups": "disabled",
-        }
-        return self.request("POST", "/instances", json=body)["instance"]["id"]
-
-    def instance(self, identifier: str) -> dict:
-        return self.request("GET", f"/instances/{identifier}")["instance"]
-
-    def wait_instance(self, identifier: str) -> dict:
-        return self._wait(lambda: self.instance(identifier), {"active"}, label="instance")
-
-    def start(self, identifier: str):
-        self.request("POST", f"/instances/{identifier}/start")
-
-    def halt(self, identifier: str):
-        self.request("POST", f"/instances/{identifier}/halt")
-
-    def wait_stopped(self, identifier: str) -> dict:
-        deadline = time.monotonic() + POLL_TIMEOUT
-        while time.monotonic() < deadline:
-            row = self.instance(identifier)
-            if row.get("power_status") == "stopped":
-                return row
-            time.sleep(POLL_SECONDS)
-        raise ImageWorkflowError("timed out waiting for instance to stop")
-
-    def create_snapshot(self, image: OpnsenseImage) -> str:
-        return self.request("POST", "/snapshots", json={
-            "instance_id": image.builder_instance_id,
-            "description": f"CTF OPNsense {image.version} FreeBSD bootstrap",
-        })["snapshot"]["id"]
-
-    def wait_snapshot(self, identifier: str):
-        return self._wait(
-            lambda: self.request("GET", f"/snapshots/{identifier}")["snapshot"],
-            {"complete"}, label="snapshot",
-        )
-
-    def create_clone(self, image: OpnsenseImage, number: int) -> str:
-        return self.request("POST", "/instances", json={
-            "region": os.environ.get("VULTR_DEFAULT_REGION", "syd"), "plan": BUILDER_PLAN,
-            "snapshot_id": image.snapshot_id, "label": f"ctf-opnsense-validation-{image.id}-{number}",
-            "hostname": f"opnsense-validation-{number}", "enable_ipv6": False,
-            "backups": "disabled", "firewall_group_id": image.builder_firewall_group_id,
-        })["instance"]["id"]
-
-    def create_validation_vpc(self, image: OpnsenseImage) -> str:
-        return self.request("POST", "/vpcs", json={
-            "region": os.environ.get("VULTR_DEFAULT_REGION", "syd"),
-            "description": f"ctf-opnsense-validation-{image.id}",
-            "v4_subnet": "172.31.254.0", "v4_subnet_mask": 28,
-        })["vpc"]["id"]
-
-    def attach_vpc(self, instance_id: str, vpc_id: str) -> dict:
-        path = f"/instances/{instance_id}/vpcs"
-        rows = self.request("GET", path, params={"per_page": 100}).get("vpcs", [])
-        match = next((row for row in rows if row.get("id") == vpc_id), None)
-        if not match:
-            self.request("POST", f"{path}/attach", json={"vpc_id": vpc_id})
-        deadline = time.monotonic() + POLL_TIMEOUT
-        while time.monotonic() < deadline:
-            rows = self.request("GET", path, params={"per_page": 100}).get("vpcs", [])
-            match = next((row for row in rows if row.get("id") == vpc_id), None)
-            if match and match.get("mac_address") and match.get("ip_address"):
-                return match
-            time.sleep(POLL_SECONDS)
-        raise ImageWorkflowError("validation VPC attachment did not become ready")
-
-    def delete(self, kind: str, identifier: str | None):
-        if identifier:
-            self.request("DELETE", f"/{kind}/{identifier}")
-
-    def _wait(self, getter, success: set[str], *, label: str):
-        deadline = time.monotonic() + POLL_TIMEOUT
-        while time.monotonic() < deadline:
-            row = getter()
-            status = row.get("status", "")
-            server = row.get("server_status", "")
-            if status in success and (label != "instance" or server in {"ok", "none"}):
-                return row
-            if status in {"failed", "error"}:
-                raise ImageWorkflowError(f"Vultr {label} entered {status} state")
-            time.sleep(POLL_SECONDS)
-        raise ImageWorkflowError(f"timed out waiting for Vultr {label}")
-
-
-def _new_image_vultr(db: Session, version: str, *, vultr_factory=VultrImageClient) -> OpnsenseImage:
-    """Validate every prerequisite before persisting a build or creating cloud resources."""
-    release = validate_release(version)
-    validate_control_plane_cidr()
-    if db.query(OpnsenseImage).filter(OpnsenseImage.status.in_(RUNNING_STATES | {"interrupted"})).first():
-        raise ImageWorkflowError("another OPNsense image job is already running")
-    client = vultr_factory()
-    try:
-        client.preflight(SUPPORTED_RELEASES[release])
-    finally:
-        client.close()
-    row = OpnsenseImage(
-        version=release, build_method=BUILD_METHOD, base_os=SUPPORTED_RELEASES[release],
-        bootstrap_source_url=BOOTSTRAP_SOURCE_URL, status="creating_builder", phase="creating_builder",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
 
 
 def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
@@ -505,17 +327,16 @@ def _guest_ssh_online(host: str) -> bool:
         return False
 
 
-def _power_off_builder(db: Session, client: VultrImageClient,
+def _power_off_builder(db: Session, client,
                        image: OpnsenseImage, host: str) -> None:
     _halt(db, host)
     _wait_for_guest_shutdown(host)
-    # Vultr can leave a cleanly halted custom guest marked running.  Once the
-    # guest is offline, synchronize the hypervisor state before the hard gate.
+    # Once the guest is offline, synchronize the EC2 state before imaging.
     client.halt(image.builder_instance_id)
     client.wait_stopped(image.builder_instance_id)
 
 
-def _sanitize_and_halt(db: Session, client: VultrImageClient, image: OpnsenseImage, host: str) -> None:
+def _sanitize_and_halt(db: Session, client, image: OpnsenseImage, host: str) -> None:
     sanitize = (
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
         "/var/db/dhclient.leases.* /var/db/dhclient.leases /root/.*history /root/.sh_history "
@@ -604,196 +425,13 @@ def _configure_validation_peer(db: Session, host: str, attachment: dict) -> str:
     return peer_ip
 
 
-def _run_image_build_vultr(db: Session, image_id: int, *, vultr_factory=VultrImageClient,
-                    bootstrap_downloader=download_bootstrap) -> None:
-    image = db.get(OpnsenseImage, image_id)
-    if not image or image.status in TERMINAL_STATES:
-        return
-    client = None
-    try:
-        cidr = validate_control_plane_cidr()
-        validate_release(image.version)
-        validate_bootstrap_url(image.bootstrap_source_url or "")
-        client = vultr_factory()
-        os_id = client.preflight(image.base_os)
-        _, public_key = get_or_create_platform_keypair(db)
-        ssh_key_id = client.ensure_ssh_key(public_key)
-        validations = json.loads(image.validation_results or "{}")
-        snapshot_resume = (
-            not image.snapshot_id and image.phase == "snapshotting"
-            and validations.get("builder_boot_2", {}).get("passed")
-        )
-        builder_key = validations.get("builder_boot_2", {}).get("ssh_host_key")
-
-        if snapshot_resume:
-            builder = client.instance(image.builder_instance_id)
-            if builder.get("power_status") != "stopped":
-                host = builder.get("main_ip")
-                if not host:
-                    raise ImageWorkflowError("snapshot resume cannot resolve the builder address")
-                if _guest_ssh_online(host):
-                    _sanitize_and_halt(db, client, image, host)
-                else:
-                    # A prior run can be interrupted after the clean guest halt
-                    # but before Vultr records the corresponding power state.
-                    client.halt(image.builder_instance_id)
-                    client.wait_stopped(image.builder_instance_id)
-
-        if not image.snapshot_id and not snapshot_resume:
-            if not image.builder_firewall_group_id:
-                _set_phase(db, image, "creating_builder")
-                image.builder_firewall_group_id = client.create_firewall(image.version, cidr)
-                db.commit()
-            if not image.builder_instance_id:
-                image.builder_instance_id = client.create_builder(image, os_id=os_id, ssh_key_id=ssh_key_id)
-                db.commit()
-            builder = client.wait_instance(image.builder_instance_id)
-            host = builder.get("main_ip")
-            if not host:
-                raise ImageWorkflowError("builder did not receive a public IPv4 address")
-
-            state = _guest_state(db, host)
-            if state == "freebsd":
-                _set_phase(db, image, "bootstrapping")
-                _verify_freebsd_base(db, host)
-                script, digest = bootstrap_downloader(image.bootstrap_source_url)
-                image.bootstrap_sha256 = digest
-                db.commit()
-                config = render_golden_config(db, image, cidr).encode()
-                _upload_atomic(db, host, "/conf/config.xml", config)
-                _upload_atomic(db, host, "/root/opnsense-bootstrap.sh", script, 0o700)
-                command = (f"nohup sh /root/opnsense-bootstrap.sh -r {shlex.quote(image.version)} -y "
-                           ">/var/log/opnsense-bootstrap.log 2>&1 </dev/null &")
-                code, _, error = _ssh(db, host, command, timeout=30)
-                if code:
-                    raise ImageWorkflowError(f"could not launch OPNsense bootstrap: {error[:300]}")
-            elif state not in {"converting", "opnsense"}:
-                raise ImageWorkflowError(f"unrecognized builder state: {state}")
-
-            _wait_for_opnsense(db, host, image.version)
-            _set_phase(db, image, "validating")
-            _validate_builder(db, image, host, cidr, "first disk-boot validation")
-            builder_key = _fingerprint(db, host)
-            first_boot = _boot_id(db, host)
-            _record_validation(image, "builder_boot_1", public_ip=host, boot_id=first_boot,
-                               ssh_host_key=builder_key)
-            db.commit()
-
-            _power_off_builder(db, client, image, host)
-            client.start(image.builder_instance_id)
-            client.wait_instance(image.builder_instance_id)
-            _validate_builder(db, image, host, cidr, "second disk-boot validation")
-            second_boot = _boot_id(db, host)
-            if second_boot == first_boot:
-                raise ImageWorkflowError("second validation did not prove a changed boot identity")
-            _record_validation(image, "builder_boot_2", public_ip=host, boot_id=second_boot,
-                               ssh_host_key=builder_key)
-            db.commit()
-            _set_phase(db, image, "snapshotting")
-            _sanitize_and_halt(db, client, image, host)
-
-        if not image.snapshot_id:
-            image.snapshot_id = client.create_snapshot(image)
-            db.commit()
-        _set_phase(db, image, "snapshotting")
-        client.wait_snapshot(image.snapshot_id)
-        if not builder_key:
-            validations = json.loads(image.validation_results or "{}")
-            builder_key = validations.get("builder_boot_2", {}).get("ssh_host_key")
-        if not builder_key:
-            raise ImageWorkflowError("snapshot resume is missing the builder SSH host-key result")
-
-        if not image.test_instance_id:
-            image.test_instance_id = client.create_clone(image, 1)
-            db.commit()
-        clone_one = client.wait_instance(image.test_instance_id)
-        validations = json.loads(image.validation_results or "{}")
-        clone_one_key = validations.get("clone_wan", {}).get("ssh_host_key")
-        if not clone_one_key:
-            clone_one_key = _validate_clone_one(db, image, clone_one["main_ip"], cidr)
-        if clone_one_key == builder_key:
-            raise ImageWorkflowError("clone one reused the builder SSH host key")
-
-        if not image.validation_vpc_id:
-            image.validation_vpc_id = client.create_validation_vpc(image)
-            db.commit()
-        peer_attachment = client.attach_vpc(image.test_instance_id, image.validation_vpc_id)
-        peer_ip = _configure_validation_peer(db, clone_one["main_ip"], peer_attachment)
-        if not image.second_test_instance_id:
-            image.second_test_instance_id = client.create_clone(image, 2)
-            db.commit()
-        clone_two = client.wait_instance(image.second_test_instance_id)
-        attachment = client.attach_vpc(image.second_test_instance_id, image.validation_vpc_id)
-        clone_two_key = _validate_clone_two(
-            db, image, clone_two["main_ip"], attachment, cidr, clone_one["main_ip"], peer_ip,
-        )
-        if len({builder_key, clone_one_key, clone_two_key}) != 3:
-            raise ImageWorkflowError("builder and clone SSH host keys are not unique")
-
-        image.validated_at = image.completed_at = utcnow()
-        image.build_duration_seconds = elapsed_seconds(image)
-        image.status = image.phase = "ready"
-        image.error_detail = None
-        _audit(db, "opnsense_image_validation", image, snapshot_id=image.snapshot_id)
-        db.commit()
-        cleanup_validated_image(db, image, client)
-    except Exception as exc:
-        db.rollback()
-        image = db.get(OpnsenseImage, image_id)
-        if image:
-            image.status = "failed"
-            image.error_detail = redact_error(exc)
-            _audit(db, "opnsense_image_failure", image, phase=image.phase, error=image.error_detail)
-            db.commit()
-    finally:
-        if client:
-            client.close()
-
-
-def cleanup_remote(image: OpnsenseImage, client: VultrImageClient, *, preserve_snapshot: bool) -> None:
-    errors = []
-    resources = [
-        ("instances", "test_instance_id"), ("instances", "second_test_instance_id"),
-        ("instances", "builder_instance_id"), ("vpcs", "validation_vpc_id"),
-        ("firewalls", "builder_firewall_group_id"),
-    ]
-    # Legacy IDs are cleanup-only and are never created by this workflow.
-    resources.extend([("iso", "vultr_iso_id"), ("vpcs", "builder_vpc_id")])
-    if not preserve_snapshot:
-        resources.append(("snapshots", "snapshot_id"))
-    for kind, attribute in resources:
-        identifier = getattr(image, attribute)
-        if not identifier:
-            continue
-        try:
-            client.delete(kind, identifier)
-            setattr(image, attribute, None)
-        except Exception as exc:
-            errors.append(f"{kind}/{identifier}: {redact_error(exc)}")
-    if errors:
-        raise ImageWorkflowError("; ".join(errors))
-
-
-def cleanup_validated_image(db: Session, image: OpnsenseImage, client: VultrImageClient) -> None:
-    try:
-        cleanup_remote(image, client, preserve_snapshot=True)
-        image.error_detail = None
-    except Exception as exc:
-        image.error_detail = "Snapshot validated; cleanup incomplete: " + redact_error(exc)
-        _audit(db, "opnsense_image_cleanup_failure", image, error=image.error_detail)
-    db.commit()
-
-
 def _default_aws_workflow_factory():
     from api.services.aws.opnsense_workflow import AwsOpnsenseWorkflow
     return AwsOpnsenseWorkflow.from_env()
 
 
-def new_image(db: Session, version: str, *, provider_factory=None,
-              vultr_factory=None) -> OpnsenseImage:
-    """Create a resumable AWS AMI job; explicit legacy factories are test-only."""
-    if vultr_factory is not None:
-        return _new_image_vultr(db, version, vultr_factory=vultr_factory)
+def new_image(db: Session, version: str, *, provider_factory=None) -> OpnsenseImage:
+    """Create a resumable AWS AMI job."""
     release = validate_release(version)
     validate_control_plane_cidr()
     if db.query(OpnsenseImage).filter(
@@ -812,12 +450,7 @@ def new_image(db: Session, version: str, *, provider_factory=None,
 
 
 def run_image_build(db: Session, image_id: int, *, provider_factory=None,
-                    vultr_factory=None, bootstrap_downloader=download_bootstrap) -> None:
-    if vultr_factory is not None:
-        return _run_image_build_vultr(
-            db, image_id, vultr_factory=vultr_factory,
-            bootstrap_downloader=bootstrap_downloader,
-        )
+                    bootstrap_downloader=download_bootstrap) -> None:
     image = db.get(OpnsenseImage, image_id)
     if not image or image.status in TERMINAL_STATES:
         return

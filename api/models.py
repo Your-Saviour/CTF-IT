@@ -200,7 +200,7 @@ class Site(Base):
 
 
 class PrivateBootCertification(Base):
-    """Event-local proof that a stock Vultr image boots with only a VPC NIC."""
+    """Event-local record of the active AMI private-network validation gate."""
 
     __tablename__ = "private_boot_certifications"
     __table_args__ = (
