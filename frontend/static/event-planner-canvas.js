@@ -10,6 +10,11 @@ export function topologyNodePresentation(node) {
   return ['gateway', 'firewall', 'vm'].includes(node.type) ? 'machine' : 'structural';
 }
 
+export const MACHINE_ICON_GEOMETRY = Object.freeze({
+  secondaryBadgeRadius: 11,
+  secondarySize: 14,
+});
+
 const ROOT_X = 120;
 const ROOT_Y = 70;
 const HORIZONTAL_GAP = 190;
@@ -185,14 +190,14 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('class', 'machine-badge')
       .attr('cx', 15)
       .attr('cy', 8)
-      .attr('r', 8);
+      .attr('r', MACHINE_ICON_GEOMETRY.secondaryBadgeRadius);
     const secondaryIcons = machineGroups
       .append('svg')
       .attr('class', 'node-secondary-icon')
-      .attr('x', 10)
-      .attr('y', 3)
-      .attr('width', 10)
-      .attr('height', 10)
+      .attr('x', 15 - MACHINE_ICON_GEOMETRY.secondarySize / 2)
+      .attr('y', 8 - MACHINE_ICON_GEOMETRY.secondarySize / 2)
+      .attr('width', MACHINE_ICON_GEOMETRY.secondarySize)
+      .attr('height', MACHINE_ICON_GEOMETRY.secondarySize)
       .attr('viewBox', d => d.icons?.secondary?.viewBox || '0 0 24 24')
       .attr('aria-hidden', 'true');
     secondaryIcons.append('path').attr('d', d => d.icons?.secondary?.path || '');
