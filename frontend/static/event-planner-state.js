@@ -3,6 +3,11 @@ import {PLANNER_ICONS} from './event-planner-icons.js';
 export const clone = value => structuredClone(value);
 export const slugify = value => String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'item';
 const SLUG = /^[a-z][a-z0-9_]{0,63}$/;
+const THEME_COLOR = /^#[0-9a-f]{6}$/i;
+
+export function normalizeThemeColor(value) {
+  return typeof value === 'string' && THEME_COLOR.test(value) ? value.toLowerCase() : null;
+}
 
 export function normalizeClientInfrastructure(value) {
   const result = clone(value || {
@@ -65,15 +70,45 @@ export function normalizeClientLayout(layout, infrastructure) {
   const result = clone(layout || {version: 1, nodes: {}});
   result.version = 1;
   result.nodes = result.nodes && typeof result.nodes === 'object' ? result.nodes : {};
+  const themes = result.themes && typeof result.themes === 'object' ? result.themes : {};
+  result.themes = {};
+  for (const [nodeId, theme] of Object.entries(themes)) {
+    const color = normalizeThemeColor(theme?.color);
+    if (color) result.themes[nodeId] = {color};
+  }
   for (const site of infrastructure.sites || []) {
     const legacyId = `firewall:${site.key}`;
     const primaryId = `firewall:${site.key}/primary`;
     if (result.nodes[legacyId] && !result.nodes[primaryId]) {
       result.nodes[primaryId] = result.nodes[legacyId];
     }
+    if (result.themes[legacyId] && !result.themes[primaryId]) {
+      result.themes[primaryId] = result.themes[legacyId];
+    }
     delete result.nodes[legacyId];
+    delete result.themes[legacyId];
   }
   return result;
+}
+
+export function setNodeThemeColor(layout, nodeId, value) {
+  const next = clone(layout || {version: 1, nodes: {}});
+  next.themes = next.themes && typeof next.themes === 'object' ? next.themes : {};
+  const color = normalizeThemeColor(value);
+  if (color) next.themes[nodeId] = {color};
+  else delete next.themes[nodeId];
+  return next;
+}
+
+export function effectiveNodeColor(index, layout, nodeId) {
+  const explicit = normalizeThemeColor(layout?.themes?.[nodeId]?.color);
+  if (explicit) return {color: explicit, inherited: false};
+  const node = index.get(nodeId);
+  if (['vm', 'firewall'].includes(node?.type)) {
+    const inherited = normalizeThemeColor(layout?.themes?.[node.parent]?.color);
+    if (inherited) return {color: inherited, inherited: true};
+  }
+  return {color: null, inherited: false};
 }
 
 export function renameStructuralKey(state, nodeId, rawKey) {
@@ -83,24 +118,30 @@ export function renameStructuralKey(state, nodeId, rawKey) {
   node.value.key = key;
   const oldToken = node.type === 'site' ? parts[0] : node.type === 'zone' ? `${parts[0]}/${parts[1]}` : parts.join('/');
   const newToken = node.type === 'site' ? key : node.type === 'zone' ? `${parts[0]}/${key}` : `${parts[0]}/${parts[1]}/${key}`;
-  const remapped = {};
-  for (const [id, position] of Object.entries(state.layout?.nodes || {})) {
-    let next = id;
-    for (const prefix of node.type === 'site' ? ['site:', 'firewall-zone:', 'firewall:', 'zone:', 'vm:'] : node.type === 'zone' ? ['zone:', 'vm:'] : ['vm:']) {
-      if (id === `${prefix}${oldToken}` || id.startsWith(`${prefix}${oldToken}/`)) next = `${prefix}${newToken}${id.slice(prefix.length + oldToken.length)}`;
+  const remapEntries = entries => {
+    const remapped = {};
+    for (const [id, value] of Object.entries(entries || {})) {
+      let next = id;
+      for (const prefix of node.type === 'site' ? ['site:', 'firewall-zone:', 'firewall:', 'zone:', 'vm:'] : node.type === 'zone' ? ['zone:', 'vm:'] : ['vm:']) {
+        if (id === `${prefix}${oldToken}` || id.startsWith(`${prefix}${oldToken}/`)) next = `${prefix}${newToken}${id.slice(prefix.length + oldToken.length)}`;
+      }
+      remapped[next] = value;
     }
-    remapped[next] = position;
-  }
-  state.layout = {version: 1, nodes: remapped};
+    return remapped;
+  };
+  state.layout = {version: 1, nodes: remapEntries(state.layout?.nodes), themes: remapEntries(state.layout?.themes)};
   return {state, nodeId: `${node.type}:${newToken}`};
 }
 
 export function pruneLayout(state) {
-  const valid = new Set(nodeIndex(state.infrastructure).keys()), nodes = {};
+  const valid = new Set(nodeIndex(state.infrastructure).keys()), nodes = {}, themes = {};
   for (const [id, position] of Object.entries(state.layout?.nodes || {})) {
     if (valid.has(id)) nodes[id] = position;
   }
-  state.layout = {version: 1, nodes};
+  for (const [id, theme] of Object.entries(state.layout?.themes || {})) {
+    if (valid.has(id)) themes[id] = theme;
+  }
+  state.layout = {version: 1, nodes, themes};
   return state;
 }
 
