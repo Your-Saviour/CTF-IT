@@ -47,11 +47,15 @@ test('free-form planner address annotations survive normalization and validation
 
 test('planner address annotations must be text when present', () => {
   const value = structuredClone(infrastructure);
+  value.sites[0].firewall_zone_address_range = ['10.0.0.0/24'];
+  value.sites[0].firewall.address = {host: '10.0.0.1'};
   value.sites[0].zones[0].address_range = {cidr: '10.0.0.0/24'};
   value.sites[0].zones[0].endpoints[0].address = 10;
 
   const errors = validateClientInfrastructure(value, {bases: [{id: 'ubuntu'}, {id: 'opnsense'}]});
 
+  assert.equal(errors.some(error => error.path === 'sites[0].firewall_zone_address_range'), true);
+  assert.equal(errors.some(error => error.path === 'sites[0].firewall.address'), true);
   assert.equal(errors.some(error => error.path === 'sites[0].zones[0].address_range'), true);
   assert.equal(errors.some(error => error.path === 'sites[0].zones[0].endpoints[0].address'), true);
 });

@@ -16,7 +16,10 @@ BASES = {"ubuntu_24_server", "opnsense"}
 
 def test_infrastructure_accepts_free_form_planner_address_annotations():
     infrastructure = default_infrastructure()
-    zone = infrastructure["sites"][0]["zones"][0]
+    site = infrastructure["sites"][0]
+    site["firewall_zone_address_range"] = "x.x.{{team_id}}.0/24"
+    site["firewall"]["address"] = "x.x.{{team_id}}.1"
+    zone = site["zones"][0]
     zone["address_range"] = "x.x.{{team_id}}.0/24"
     zone["endpoints"][0]["address"] = "x.x.{{team_id}}.10"
 
@@ -25,12 +28,17 @@ def test_infrastructure_accepts_free_form_planner_address_annotations():
 
 def test_infrastructure_rejects_non_string_planner_address_annotations():
     infrastructure = default_infrastructure()
-    zone = infrastructure["sites"][0]["zones"][0]
+    site = infrastructure["sites"][0]
+    site["firewall_zone_address_range"] = ["10.0.0.0/24"]
+    site["firewall"]["address"] = {"host": "10.0.0.1"}
+    zone = site["zones"][0]
     zone["address_range"] = {"cidr": "10.0.0.0/24"}
     zone["endpoints"][0]["address"] = 10
 
     errors = validate_infrastructure(infrastructure, BASES)
 
+    assert "sites[0].firewall_zone_address_range must be a string" in errors
+    assert "sites[0].firewall.address must be a string" in errors
     assert "sites[0].zones[0].address_range must be a string" in errors
     assert "sites[0].zones[0].endpoints[0].address must be a string" in errors
 

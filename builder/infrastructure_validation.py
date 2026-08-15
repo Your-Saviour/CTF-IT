@@ -78,11 +78,17 @@ def validate_infrastructure(
             region_counts[region] += max(team_count, 0)
             if valid_regions is not None and region not in valid_regions:
                 errors.append(f"{path}.region references unavailable region '{region}'")
+        firewall_zone_address_range = site.get("firewall_zone_address_range")
+        if firewall_zone_address_range is not None and not isinstance(firewall_zone_address_range, str):
+            errors.append(f"{path}.firewall_zone_address_range must be a string")
         firewall = site.get("firewall")
         if not isinstance(firewall, dict):
             errors.append(f"{path}.firewall is required and must be an object")
         else:
             _validate_machine(firewall, f"{path}.firewall", valid_base_ids, errors)
+            firewall_address = firewall.get("address")
+            if firewall_address is not None and not isinstance(firewall_address, str):
+                errors.append(f"{path}.firewall.address must be a string")
         zones = site.get("zones")
         if not isinstance(zones, list) or not zones:
             errors.append(f"{path}.zones must be a non-empty array")
