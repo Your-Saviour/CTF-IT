@@ -468,6 +468,23 @@ def _snapshot_interface_mapping(vm: VM, lan_mac: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def snapshot_site_validation_command(*, expected_version: str, public_ip: str, private_ip: str,
+                                     wan_interface: str, lan_interface: str, lan_mac: str,
+                                     management_cidr: str) -> str:
+    management_source = str(ip_network(management_cidr).network_address)
+    return (
+        f"test -f /conf/ctf-site-ready && {_opnsense_release_test(expected_version)} && "
+        f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {public_ip}' >/dev/null && "
+        f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
+        f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {private_ip}' >/dev/null && "
+        f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
+        f"pfctl -sr | grep -F 'pass in quick on {lan_interface} inet from ({lan_interface}:network) to any' >/dev/null && "
+        "pfctl -sn | grep -E 'nat on' >/dev/null && "
+        f"pfctl -sr | grep -F {shlex.quote('from ' + management_source + ' to')} | "
+        "grep -E 'port = (ssh|22)' >/dev/null && opnsense-version -v"
+    )
+
+
 def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, lan_mac: str) -> None:
     """Apply unique site state to an already validated OPNsense snapshot."""
     db = object_session(vm)
@@ -506,13 +523,10 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     output = error = ""
     while time.monotonic() < deadline:
         try:
-            validation = (
-                f"test -f /conf/ctf-site-ready && {_opnsense_release_test(expected_version)} && "
-                f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {vm.public_ip}' >/dev/null && "
-                f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
-                f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {vm.private_ip}' >/dev/null && "
-                f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
-                "pfctl -sr | grep -F 'Allow management SSH' >/dev/null && opnsense-version -v"
+            validation = snapshot_site_validation_command(
+                expected_version=expected_version, public_ip=vm.public_ip, private_ip=vm.private_ip,
+                wan_interface=wan_interface, lan_interface=lan_interface, lan_mac=lan_mac,
+                management_cidr=os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32"),
             )
             code, output, error = ssh_command(
                 vm, "/bin/sh -c " + shlex.quote(validation),

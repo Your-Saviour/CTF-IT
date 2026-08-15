@@ -15,7 +15,9 @@ from api.services.gamenet import (
     allocate_event_networks, ensure_user_vpn_credential, render_user_config,
     site_dns_zone, vm_dns_name,
 )
-from api.services.gamenet_provider import VultrGameNetProvider, render_opnsense_config, ubuntu_cloud_init
+from api.services.gamenet_provider import (
+    VultrGameNetProvider, render_opnsense_config, snapshot_site_validation_command, ubuntu_cloud_init,
+)
 from api.services.gamenet_provisioning import ensure_vm_placeholders
 from api.services.secrets import decrypt_secret
 from builder.infrastructure_validation import gamenet_hostname, infrastructure_summary, validate_infrastructure
@@ -32,6 +34,17 @@ INFRASTRUCTURE = {
         ]}],
 }
 BASES = {"ubuntu_24_server", "opnsense"}
+
+
+def test_snapshot_site_validation_checks_effective_pf_policy():
+    command = snapshot_site_validation_command(
+        expected_version="26.7", public_ip="198.51.100.12", private_ip="10.128.0.1",
+        wan_interface="vtnet0", lan_interface="vtnet1", lan_mac="00:11:22:33:44:55",
+        management_cidr="192.0.2.8/32",
+    )
+    assert "pass in quick on vtnet1 inet from (vtnet1:network) to any" in command
+    assert "nat on" in command and "from 192.0.2.8 to" in command
+    assert "Allow management SSH" not in command
 
 
 @pytest.fixture
