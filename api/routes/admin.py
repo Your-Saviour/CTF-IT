@@ -20,6 +20,57 @@ from api.routes.auth import _token_digest, get_current_user
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 
 
+def _aws_resource_plan(infrastructure: dict, team_count: int):
+    from api.services.aws import ResourcePlan
+    instances = Counter()
+    gateway = infrastructure["vpn_gateway"]
+    instances[gateway["default_plan"]] += team_count
+    sites = infrastructure["sites"]
+    endpoints_per_team = 0
+    for site in sites:
+        instances[site["firewall"]["default_plan"]] += team_count
+        for zone in site["zones"]:
+            for endpoint in zone["endpoints"]:
+                count = int(endpoint.get("count", 0))
+                endpoints_per_team += count
+                instances[endpoint["default_plan"]] += count * team_count
+    firewalls = len(sites) * team_count
+    endpoints = endpoints_per_team * team_count
+    vcpu_defaults = {"t3.small": 2, "t3.medium": 2, "t3.large": 2, "t3.xlarge": 4}
+    return ResourcePlan(
+        vpcs=firewalls,
+        subnets=sum(2 + len(site["zones"]) for site in sites) * team_count,
+        network_interfaces=team_count + firewalls * 2 + endpoints,
+        elastic_ips=team_count + firewalls,
+        instances_by_type=dict(instances),
+        on_demand_vcpus=sum(vcpu_defaults.get(kind, 2) * count for kind, count in instances.items()),
+    )
+
+
+def _check_aws_readiness(plan):
+    from api.services.aws import AwsConfig, AwsReadinessService, AwsSessionFactory
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    service = AwsReadinessService(
+        sessions.client("sts"), sessions.client("ec2"), sessions.client("service-quotas"),
+        region=config.default_region,
+        availability_zone=config.availability_zone(config.default_region),
+        ami_ids=tuple(dict.fromkeys((*config.ubuntu_amis.values(), *config.freebsd_amis.values()))),
+        subnet_id=config.standard_subnet_id,
+    )
+    return service.check(plan)
+
+
+def _readiness_payload(report):
+    return {
+        "ready": report.ready, "account_id": report.account_id,
+        "region": report.region, "availability_zone": report.availability_zone,
+        "estimated_hourly_cost": report.estimated_hourly_cost,
+        "checks": {name: {"passed": check.passed, "code": check.code, "detail": check.detail}
+                   for name, check in report.checks.items()},
+    }
+
+
 async def _live_vpc_counts() -> dict[str, int]:
     """Return current Vultr VPC consumption by location for capacity gating."""
     key = os.environ.get("VULTR_API_KEY")
@@ -856,15 +907,19 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
         from builder.base_loader import load_all_bases
         from builder.infrastructure_validation import infrastructure_summary, validate_infrastructure
         valid_base_ids = {base.id for base in load_all_bases() if not base.disabled}
-        try:
-            live_vpcs = await _live_vpc_counts()
-        except Exception:
-            return JSONResponse({"error": "Could not verify live Vultr VPC capacity"}, status_code=502)
-        errors = validate_infrastructure(infrastructure, valid_base_ids, team_count=len(teams),
-                                         live_vpcs_by_region=live_vpcs)
+        errors = validate_infrastructure(infrastructure, valid_base_ids, team_count=len(teams))
         if errors:
             return JSONResponse({"error": "Invalid infrastructure", "details": errors}, status_code=422)
         summary = infrastructure_summary(infrastructure, len(teams))
+        try:
+            readiness = await asyncio.to_thread(
+                _check_aws_readiness, _aws_resource_plan(infrastructure, len(teams)),
+            )
+        except Exception as exc:
+            return JSONResponse({"error": "Could not verify AWS readiness", "detail": str(exc)}, status_code=502)
+        if not readiness.ready:
+            return JSONResponse({"error": "AWS readiness checks failed",
+                                 "aws_capacity": _readiness_payload(readiness)}, status_code=409)
 
         from api.services.gamenet import allocate_event_networks
         from api.services.gamenet_provisioning import ensure_vm_placeholders, provision_event_gamenets
@@ -1246,6 +1301,15 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         "address_plan": address_plan,
         "infrastructure": infrastructure,
         "total_cost": round(total_cost, 2),
+        "aws_resources": {
+            "vpcs": _aws_resource_plan(infrastructure, len(teams)).vpcs,
+            "subnets": _aws_resource_plan(infrastructure, len(teams)).subnets,
+            "network_interfaces": _aws_resource_plan(infrastructure, len(teams)).network_interfaces,
+            "elastic_ips": _aws_resource_plan(infrastructure, len(teams)).elastic_ips,
+            "instances_by_type": dict(_aws_resource_plan(infrastructure, len(teams)).instances_by_type),
+        },
+        "aws_capacity": None,
+        "estimated_hourly_cost": None,
     }
 
 

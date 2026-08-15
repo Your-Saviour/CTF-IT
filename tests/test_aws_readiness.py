@@ -45,3 +45,19 @@ def test_price_lookup_failure_does_not_hide_capacity_success():
     report = service(Pricing()).check(plan(elastic_ips=1))
     assert report.ready is True
     assert report.estimated_hourly_cost is None
+
+
+def test_gamenet_resource_plan_counts_dual_eni_firewalls_and_eips():
+    from api.routes.admin import _aws_resource_plan
+    infrastructure = {
+        "vpn_gateway": {"default_plan": "t3.small"},
+        "sites": [{
+            "firewall": {"default_plan": "t3.medium"},
+            "zones": [{"endpoints": [{"default_plan": "t3.small", "count": 2}]}],
+        }],
+    }
+    result = _aws_resource_plan(infrastructure, 3)
+    assert result.vpcs == 3 and result.subnets == 9
+    assert result.elastic_ips == 6
+    assert result.network_interfaces == 15
+    assert result.instances_by_type == {"t3.small": 9, "t3.medium": 3}
