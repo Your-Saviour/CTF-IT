@@ -256,7 +256,7 @@ def test_legacy_expansion_avoids_existing_endpoint_key_collisions():
     })
 
     keys = [row["key"] for row in normalize_infrastructure(value)["sites"][0]["zones"][0]["endpoints"]]
-    assert keys == ["workstation_1", "workstation_2", "workstation_1_2"]
+    assert keys == ["workstation_1_2", "workstation_2", "workstation_1"]
 
 
 def test_layout_accepts_known_stable_node_ids():
@@ -358,6 +358,37 @@ def test_planner_save_rejects_stale_revision_without_partial_update(monkeypatch,
     assert response.status_code == 409
     assert event.infrastructure == original
     assert event.infrastructure_layout is None
+
+
+def test_planner_save_requires_revision_token(monkeypatch, db_session):
+    event = Event(name="Planner", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.commit()
+    request = MagicMock()
+    request.json = AsyncMock(return_value={"infrastructure_layout": {"version": 1, "nodes": {}}})
+    monkeypatch.setattr("api.routes.admin.require_admin", lambda *_args, **_kwargs: User(is_admin=True))
+
+    response = asyncio.run(update_event(event.id, request, db_session))
+
+    assert response.status_code == 409
+    assert json.loads(response.body)["error"] == "expected_updated_at is required for planner updates"
+
+
+def test_planner_save_accepts_equivalent_timezone_revision(monkeypatch, db_session):
+    event = Event(name="Planner", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.commit()
+    expected = event.updated_at.astimezone(__import__("datetime").timezone(
+        __import__("datetime").timedelta(hours=9, minutes=30)
+    )).isoformat()
+    request = MagicMock()
+    request.json = AsyncMock(return_value={
+        "infrastructure_layout": {"version": 1, "nodes": {}},
+        "expected_updated_at": expected,
+    })
+    monkeypatch.setattr("api.routes.admin.require_admin", lambda *_args, **_kwargs: User(is_admin=True))
+
+    response = asyncio.run(update_event(event.id, request, db_session))
+
+    assert response["status"] == "updated"
 
 
 def test_gamenet_hostname_is_provider_safe_stable_and_bounded():
@@ -1002,6 +1033,30 @@ def test_gamenet_materialises_individual_endpoint_records(db_session):
     assert [vm.vm_type for vm in endpoints] == ["workstation_1", "workstation_2"]
     assert [vm.private_ip for vm in endpoints] == ["10.128.1.10", "10.128.1.11"]
     assert len({vm.hostname for vm in endpoints}) == 2
+
+
+def test_gamenet_materialises_mixed_legacy_and_individual_endpoint_keys(db_session):
+    infrastructure = deepcopy(INFRASTRUCTURE)
+    infrastructure["sites"][0]["zones"][0]["endpoints"] = [
+        {
+            "key": "workstation", "base_type": "ubuntu_24_server", "count": 1,
+            "default_plan": "vc2-1c-1gb",
+        },
+        {
+            "key": "workstation_1", "name": "Existing workstation",
+            "base_type": "ubuntu_24_server", "default_plan": "vc2-1c-1gb",
+        },
+    ]
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(infrastructure))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], infrastructure)
+
+    placeholders = ensure_vm_placeholders(db_session, event, infrastructure)
+    endpoints = [vm for vm in placeholders if vm.role == "blue_endpoint"]
+
+    assert {vm.vm_type for vm in endpoints} == {"workstation_1", "workstation_1_2"}
+    assert len(endpoints) == len({vm.hostname for vm in endpoints}) == 2
 
 
 def test_semaphore_endpoint_proxy_is_team_gateway_not_firewall(db_session):

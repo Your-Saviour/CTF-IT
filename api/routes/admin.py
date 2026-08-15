@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -18,6 +18,17 @@ from api.models import AccountToken, AdminAudit, Event, OpnsenseImage, PlatformS
 from api.routes.auth import _token_digest, get_current_user
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
+
+
+def _utc_instant(value) -> datetime:
+    """Parse a revision timestamp and normalize it for semantic comparison."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not isinstance(value, datetime):
+        raise ValueError("revision must be an ISO-8601 timestamp")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 async def _live_vpc_counts() -> dict[str, int]:
@@ -769,13 +780,26 @@ async def update_event(
 
     body = await request.json()
     planner_fields = {"infrastructure", "infrastructure_layout"} & set(body)
+    original_updated_at = event.updated_at
     if event.status != "draft" and planner_fields:
         return JSONResponse(
             {"error": "infrastructure cannot be edited after provisioning begins; destroy and reprovision the GameNet"},
             status_code=409,
         )
     expected_updated_at = body.get("expected_updated_at")
-    if expected_updated_at is not None and expected_updated_at != event.updated_at.isoformat():
+    if planner_fields and expected_updated_at is None:
+        return JSONResponse({
+            "error": "expected_updated_at is required for planner updates",
+            "current_updated_at": event.updated_at.isoformat(),
+        }, status_code=409)
+    try:
+        revision_matches = (
+            expected_updated_at is None
+            or _utc_instant(expected_updated_at) == _utc_instant(event.updated_at)
+        )
+    except (TypeError, ValueError):
+        revision_matches = False
+    if not revision_matches:
         return JSONResponse({
             "error": "event draft has changed",
             "current_updated_at": event.updated_at.isoformat(),
@@ -841,6 +865,33 @@ async def update_event(
         event.time_limit_minutes = body["time_limit_minutes"]
 
     event.updated_at = utcnow()
+    if planner_fields:
+        # Detach the mutated ORM instance before issuing the compare-and-swap,
+        # otherwise an autoflush could defeat the revision predicate.
+        values = {
+            "quota": event.quota,
+            "infrastructure": event.infrastructure,
+            "infrastructure_layout": event.infrastructure_layout,
+            "name": event.name,
+            "description": event.description,
+            "welcome_message": event.welcome_message,
+            "time_limit_minutes": event.time_limit_minutes,
+            "updated_at": event.updated_at,
+        }
+        new_updated_at = event.updated_at
+        db.expunge(event)
+        changed = db.query(Event).filter(
+            Event.id == event_id, Event.updated_at == original_updated_at,
+        ).update(values, synchronize_session=False)
+        if changed != 1:
+            db.rollback()
+            current = db.query(Event).filter(Event.id == event_id).first()
+            return JSONResponse({
+                "error": "event draft has changed",
+                "current_updated_at": current.updated_at.isoformat(),
+            }, status_code=409)
+        db.commit()
+        return {"status": "updated", "updated_at": new_updated_at.isoformat()}
     db.commit()
     return {"status": "updated", "updated_at": event.updated_at.isoformat()}
 
@@ -1086,7 +1137,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     from builder.attack_tree import build_attack_tree, serialize_tree
     from builder.base_loader import load_base_type
     from builder.infrastructure_validation import gamenet_hostname
-    from builder.infrastructure_planner import endpoint_instances
+    from builder.infrastructure_planner import zone_endpoint_instances
 
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
@@ -1146,15 +1197,14 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             "hostname": lambda team, index, site_key=site["key"]: gamenet_hostname(event_id, team.id, site_key, "fw"),
         })
         for zone in site["zones"]:
-            for endpoint_group in zone["endpoints"]:
-                for endpoint in endpoint_instances(endpoint_group):
-                    machine_types.append({
-                        "type_key": f"{site['key']}_{zone['key']}_{endpoint['key']}",
-                        "role": "attacker" if zone["team"] == "red" else "target",
-                        "count": 1, "spec": endpoint, "region": site["region"],
-                        "hostname": lambda team, index, site_key=site["key"], zone_key=zone["key"], endpoint_key=endpoint["key"]:
-                            gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key),
-                    })
+            for endpoint in zone_endpoint_instances(zone["endpoints"]):
+                machine_types.append({
+                    "type_key": f"{site['key']}_{zone['key']}_{endpoint['key']}",
+                    "role": "attacker" if zone["team"] == "red" else "target",
+                    "count": 1, "spec": endpoint, "region": site["region"],
+                    "hostname": lambda team, index, site_key=site["key"], zone_key=zone["key"], endpoint_key=endpoint["key"]:
+                        gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key),
+                })
 
     for definition in machine_types:
         type_key = definition["type_key"]

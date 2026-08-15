@@ -68,15 +68,7 @@ def normalize_infrastructure(value: dict) -> dict:
     result = deepcopy(value)
     for site in result.get("sites", []):
         for zone in site.get("zones", []):
-            used: set[str] = set()
-            normalized: list[dict] = []
-            for endpoint in zone.get("endpoints", []):
-                for instance in endpoint_instances(endpoint):
-                    instance["key"] = _next_free_key(instance.get("key", "endpoint"), used)
-                    instance.setdefault("name", _humanize(instance["key"]))
-                    used.add(instance["key"])
-                    normalized.append(instance)
-            zone["endpoints"] = normalized
+            zone["endpoints"] = zone_endpoint_instances(zone.get("endpoints", []))
     return result
 
 
@@ -102,12 +94,34 @@ def infrastructure_node_ids(infrastructure: dict) -> set[str]:
 
 def endpoint_instances_for_layout(endpoints: list[dict]) -> list[dict]:
     """Expand a zone endpoint list with the same collision rules as normalization."""
-    used: set[str] = set()
+    return zone_endpoint_instances(endpoints)
+
+
+def zone_endpoint_instances(endpoints: list[dict]) -> list[dict]:
+    """Expand one zone while preserving explicitly assigned endpoint keys.
+
+    Legacy groups are assigned around all individual keys, including keys that
+    occur later in the document. This makes every runtime consumer derive the
+    same collision-free hostnames without renaming an explicitly planned VM.
+    """
+    reserved = {
+        endpoint["key"] for endpoint in endpoints
+        if endpoint.get("count") is None and isinstance(endpoint.get("key"), str)
+    }
+    generated: set[str] = set()
     result: list[dict] = []
     for endpoint in endpoints:
+        if endpoint.get("count") is None:
+            instance = deepcopy(endpoint)
+            instance.setdefault("name", _humanize(instance.get("key", "endpoint")))
+            result.append(instance)
+            continue
         for instance in endpoint_instances(endpoint):
-            instance["key"] = _next_free_key(instance.get("key", "endpoint"), used)
-            used.add(instance["key"])
+            instance["key"] = _next_free_key(
+                instance.get("key", "endpoint"), reserved | generated,
+            )
+            instance.setdefault("name", _humanize(instance["key"]))
+            generated.add(instance["key"])
             result.append(instance)
     return result
 

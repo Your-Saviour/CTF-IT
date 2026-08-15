@@ -5,6 +5,8 @@ TEMPLATE = Path(__file__).resolve().parents[1] / "frontend" / "templates" / "eve
 ROOT = TEMPLATE.parents[2]
 EVENT_EDITOR = ROOT / "frontend" / "templates" / "admin_resource.html"
 CANVAS = ROOT / "frontend" / "static" / "event-planner-canvas.js"
+STATE = ROOT / "frontend" / "static" / "event-planner-state.js"
+CONTROLLER = ROOT / "frontend" / "static" / "event-planner.js"
 
 
 def test_plan_page_loads_full_page_planner_assets():
@@ -46,3 +48,25 @@ def test_canvas_module_supports_durable_accessible_layout():
     assert "focusNode" in source
     assert "d3.zoom" in source
     assert "aria-label" in source
+    assert ".call(zoom.transform,transform)" in source
+    assert "if(!callbacks.readOnly)" in source
+
+
+def test_planner_state_remaps_structural_layout_ids_and_mirrors_server_paths():
+    source = STATE.read_text()
+
+    assert "renameStructuralKey" in source
+    assert "state.layout = {version: 1, nodes: remapped}" in source
+    assert "sites[${si}].zones[${zi}].endpoints[${vi}]" in source
+    assert "A zone supports at most 245 VMs" in source
+    assert "Listen port must be from 1 to 65535" in source
+
+
+def test_planner_recovers_catalogues_and_guards_read_only_mutations():
+    source = CONTROLLER.read_text()
+
+    assert "Promise.allSettled" in source
+    assert "planner-retry-catalogues" in source
+    assert "readOnly:READ_ONLY" in source
+    assert "if(!READ_ONLY)canvas?.resetLayout()" in source
+    assert "document.querySelector('.planner-add-actions').hidden=READ_ONLY" in source
