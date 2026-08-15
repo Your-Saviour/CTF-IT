@@ -1,3 +1,11 @@
+export function topologyNodeClass(node) {
+  return ['topo-node', node.type, node.selected && 'selected', node.invalid && 'invalid'].filter(Boolean).join(' ');
+}
+
+export function topologyLinkClass(link) {
+  return `topo-link${link.source.selected || link.target.selected ? ' selected-adjacent' : ''}`;
+}
+
 export function createPlannerCanvas(svgElement, callbacks = {}) {
   const svg = d3.select(svgElement);
   const scene = svg.append('g');
@@ -36,7 +44,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     const linkSelection = scene.selectAll('line')
       .data(links)
       .join('line')
-      .attr('class', 'topo-link');
+      .attr('class', topologyLinkClass);
 
     function updateLinks() {
       linkSelection
@@ -50,7 +58,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     let groups = scene.selectAll('g.topo-node')
       .data(nodes, d => d.id)
       .join('g')
-      .attr('class', d => `topo-node ${d.type} ${d.selected ? 'selected' : ''}`)
+      .attr('class', topologyNodeClass)
       .attr('data-node-id', d => d.id)
       .attr('role', 'button')
       .attr('tabindex', 0)
@@ -79,11 +87,19 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
     }
 
     groups.append('rect')
+      .attr('class', 'node-body')
       .attr('x', -70)
       .attr('y', -24)
       .attr('width', 140)
       .attr('height', 48)
       .attr('rx', 7);
+    groups.filter(d => d.type === 'vm')
+      .append('rect')
+      .attr('class', 'vm-edge')
+      .attr('x', -70)
+      .attr('y', -24)
+      .attr('width', 4)
+      .attr('height', 48);
     groups.append('text').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
   }
 
