@@ -256,6 +256,17 @@ def test_machine_icon_override_rejects_unknown_library_keyword():
     assert "sites[0].zones[0].endpoints[0].icon must reference a supported planner icon" in errors
 
 
+def test_machine_primary_icon_override_rejects_unknown_library_keyword():
+    from builder.infrastructure_validation import validate_infrastructure
+
+    value = deepcopy(INFRASTRUCTURE)
+    value["sites"][0]["zones"][0]["endpoints"][0]["primary_icon"] = "not-in-library"
+
+    errors = validate_infrastructure(value, BASES)
+
+    assert "sites[0].zones[0].endpoints[0].primary_icon must reference a supported planner icon" in errors
+
+
 def test_legacy_expansion_avoids_existing_endpoint_key_collisions():
     from builder.infrastructure_planner import normalize_infrastructure
 

@@ -116,7 +116,9 @@ export function validateClientInfrastructure(value, catalogues = {}) {
     if (!row.base_type || (bases.size && !bases.has(row.base_type))) add(`${path}.base_type`, nodeId, 'Choose an available base type');
     if (!String(row.default_plan || '').trim()) add(`${path}.default_plan`, nodeId, 'Cloud plan is required');
     if (row.ust_prompt != null && (typeof row.ust_prompt !== 'string' || row.ust_prompt.length > 8000)) add(`${path}.ust_prompt`, nodeId, 'UST prompt must be at most 8000 characters');
-    if (row.icon != null && (typeof row.icon !== 'string' || !PLANNER_ICONS[row.icon])) add(`${path}.icon`, nodeId, 'Choose a supported icon or Automatic');
+    for (const field of ['primary_icon', 'icon']) {
+      if (row[field] != null && (typeof row[field] !== 'string' || !PLANNER_ICONS[row[field]])) add(`${path}.${field}`, nodeId, 'Choose a supported icon or Automatic');
+    }
   };
   const gateway = value?.vpn_gateway;
   if (!gateway) add('vpn_gateway', 'gateway', 'VPN gateway is required');

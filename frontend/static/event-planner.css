@@ -85,20 +85,15 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-node.zone .node-body { fill: #132238; stroke: #466887; }
 .topo-node .node-hit-target { fill: transparent; stroke: none; pointer-events: all; }
 .topo-node .node-state-ring { fill: none; stroke: transparent; stroke-width: 2; pointer-events: none; }
-.topo-node .machine-rack { fill: none; stroke: var(--cyan-dim); stroke-width: 1; pointer-events: none; }
-.topo-node .machine-led { fill: var(--cyan-dim); pointer-events: none; }
 .topo-node .machine-badge { fill: var(--bg-deep); stroke: var(--cyan-dim); stroke-width: 1; pointer-events: none; }
-.topo-node .node-icon { overflow: hidden; pointer-events: none; }
-.topo-node .node-icon path { fill: var(--cyan-dim); }
-.topo-node.firewall .machine-rack, .topo-node.firewall .machine-badge { stroke: var(--amber); }
-.topo-node.firewall .machine-led { fill: var(--amber); }
-.topo-node.firewall .node-icon path { fill: var(--amber); }
-.topo-node.selected .machine-rack, .topo-node.selected .machine-badge { stroke: var(--cyan); }
-.topo-node.selected .machine-led { fill: var(--cyan); }
-.topo-node.selected .node-icon path { fill: var(--cyan); }
-.topo-node.invalid .machine-rack, .topo-node.invalid .machine-badge { stroke: var(--red); }
-.topo-node.invalid .machine-led { fill: var(--red); }
-.topo-node.invalid .node-icon path { fill: var(--red); }
+.topo-node .node-primary-icon, .topo-node .node-secondary-icon { overflow: hidden; pointer-events: none; }
+.topo-node .node-primary-icon path, .topo-node .node-secondary-icon path { fill: var(--cyan-dim); }
+.topo-node.firewall .machine-badge { stroke: var(--amber); }
+.topo-node.firewall .node-primary-icon path, .topo-node.firewall .node-secondary-icon path { fill: var(--amber); }
+.topo-node.selected .machine-badge { stroke: var(--cyan); }
+.topo-node.selected .node-primary-icon path, .topo-node.selected .node-secondary-icon path { fill: var(--cyan); }
+.topo-node.invalid .machine-badge { stroke: var(--red); }
+.topo-node.invalid .node-primary-icon path, .topo-node.invalid .node-secondary-icon path { fill: var(--red); }
 .topo-node.selected .node-body { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }
 .topo-node.selected .node-state-ring { stroke: var(--cyan); filter: drop-shadow(0 0 5px var(--cyan-glow)); }
 .topo-node.invalid .node-body { stroke: var(--red); stroke-width: 2.5; stroke-dasharray: none; filter: drop-shadow(0 0 4px var(--red-glow)); }

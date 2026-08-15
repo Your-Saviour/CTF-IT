@@ -9,6 +9,7 @@ export const PLANNER_ICONS = Object.freeze({
   windows: {label: 'Windows', path: 'M3 3h9v9H3V3zm10 0h9v9h-9V3zM3 13h9v9H3v-9zm10 0h9v9h-9v-9z'},
   router: {label: 'Router', path: 'M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3a4.24 4.24 0 00-6 0zm-4-4l2 2a7.07 7.07 0 0110 0l2-2a9.9 9.9 0 00-14 0z'},
   firewall: {label: 'Firewall', path: 'M3 3h8v4H3V3zm10 0h8v4h-8V3zM3 9h5v4H3V9zm7 0h11v4H10V9zM3 15h8v6H3v-6zm10 0h8v6h-8v-6z'},
+  opnsense: {label: 'OPNsense', path: 'M12 2l8 3v6c0 5.1-3.4 9.7-8 11-4.6-1.3-8-5.9-8-11V5l8-3zm0 3L7 6.9V11c0 3.5 2 6.8 5 8 3-1.2 5-4.5 5-8V6.9L12 5zM9 9h6v2H9V9zm0 4h6v2H9v-2z'},
   attacker: {label: 'Attacker', path: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 4a6 6 0 110 12 6 6 0 010-12zm0 3a3 3 0 100 6 3 3 0 000-6zM11 2h2v4h-2V2zm0 16h2v4h-2v-4zM2 11h4v2H2v-2zm16 0h4v2h-4v-2z'},
   database: {label: 'Database', path: 'M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4zm0 2c4.4 0 7 1.3 7 2s-2.6 2-7 2-7-1.3-7-2 2.6-2 7-2zm0 16c-4.4 0-7-1.3-7-2v-2.5c1.6 1 4.1 1.5 7 1.5s5.4-.5 7-1.5V18c0 .7-2.6 2-7 2z'},
   web: {label: 'Web', path: 'M12 2a10 10 0 100 20 10 10 0 000-20zm6.9 6h-3a15.7 15.7 0 00-1.4-3.6A8.1 8.1 0 0118.9 8zM12 4c.8 1 1.5 2.3 1.9 4h-3.8c.4-1.7 1.1-3 1.9-4zM4.3 14a8.3 8.3 0 010-4h3.4a16.5 16.5 0 000 4H4.3zm.8 2h3a15.7 15.7 0 001.4 3.6A8.1 8.1 0 015.1 16z'},
@@ -37,13 +38,22 @@ export function resolvePlannerIcon(value) {
   return {path: PLANNER_ICONS.server.path, viewBox: '0 0 24 24'};
 }
 
-export function machineIconDefinition(machine, baseTypes) {
+function baseIconDefinition(machine, baseTypes) {
   const baseIcon = (baseTypes || []).find(base => base.id === machine?.base_type)?.icon;
   return resolvePlannerIcon(machine?.icon || baseIcon || 'server');
 }
 
-export function setMachineIconOverride(machine, value) {
-  if (typeof value === 'string' && PLANNER_ICONS[value]) machine.icon = value;
-  else delete machine.icon;
+export function machineIconPair(type, machine, baseTypes) {
+  const automaticPrimary = {gateway: 'router', firewall: 'firewall', vm: 'server'}[type] || 'server';
+  return {
+    primary: resolvePlannerIcon(machine?.primary_icon || automaticPrimary),
+    secondary: baseIconDefinition(machine, baseTypes),
+  };
+}
+
+export function setMachineIconOverride(machine, field, value) {
+  if (!['primary_icon', 'icon'].includes(field)) return machine;
+  if (typeof value === 'string' && PLANNER_ICONS[value]) machine[field] = value;
+  else delete machine[field];
   return machine;
 }

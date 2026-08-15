@@ -68,11 +68,13 @@ test('site key rename remaps firewall zone, primary firewall, zones, and VMs', (
   ]);
 });
 
-test('machine icon overrides must come from the planner icon library', () => {
+test('both machine icon overrides must come from the planner icon library', () => {
   const value = structuredClone(infrastructure);
   value.sites[0].zones[0].endpoints[0].icon = 'not-in-library';
+  value.sites[0].zones[0].endpoints[0].primary_icon = 'also-not-in-library';
 
   const errors = validateClientInfrastructure(value, {bases: [{id: 'ubuntu'}, {id: 'opnsense'}]});
 
   assert.equal(errors.some(error => error.path === 'sites[0].zones[0].endpoints[0].icon'), true);
+  assert.equal(errors.some(error => error.path === 'sites[0].zones[0].endpoints[0].primary_icon'), true);
 });

@@ -145,9 +145,12 @@ def test_planner_projects_configurable_base_type_icons_into_machine_nodes():
     canvas = CANVAS.read_text()
 
     assert "PLANNER_ICON_OPTIONS" in controller
-    assert "machineIconDefinition" in controller
+    assert "machineIconPair" in controller
     assert "setMachineIconOverride" in controller
-    assert "node-icon" in canvas
+    assert "Primary icon" in controller
+    assert "Secondary icon" in controller
+    assert "node-primary-icon" in canvas
+    assert "node-secondary-icon" in canvas
     assert "viewBox" in canvas
 
 
@@ -158,6 +161,4 @@ def test_machine_nodes_render_as_standalone_icons_with_labels_below():
     assert "node-state-ring" in canvas
     assert "machine-label" in canvas
     assert "topologyNodePresentation" in canvas
-    assert "machine-rack" in canvas
-    assert "machine-led" in canvas
     assert "machine-badge" in canvas
