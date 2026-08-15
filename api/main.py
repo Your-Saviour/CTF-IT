@@ -66,6 +66,15 @@ async def lifespan(app: FastAPI):
                 "vultr_id": "VARCHAR(64)",
                 "vultr_plan": "VARCHAR(64)",
                 "vultr_region": "VARCHAR(16)",
+                "cloud_instance_id": "VARCHAR(64)",
+                "instance_type": "VARCHAR(64)",
+                "cloud_region": "VARCHAR(32)",
+                "availability_zone": "VARCHAR(32)",
+                "primary_eni_id": "VARCHAR(64)",
+                "wan_eni_id": "VARCHAR(64)",
+                "lan_eni_id": "VARCHAR(64)",
+                "subnet_id": "VARCHAR(64)",
+                "security_group_ids_json": "TEXT",
                 "cloudflare_record_id": "VARCHAR(64)",
                 "attack_tree_json": "TEXT",
                 "vm_type": "VARCHAR(64)",
@@ -110,6 +119,31 @@ async def lifespan(app: FastAPI):
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE teams ADD COLUMN {col} {typ}"))
+
+        if inspector.has_table("sites"):
+            existing = {col["name"] for col in inspector.get_columns("sites")}
+            for col, typ in {
+                "availability_zone": "VARCHAR(32)",
+                "public_subnet_id": "VARCHAR(64)",
+                "infrastructure_subnet_id": "VARCHAR(64)",
+                "internet_gateway_id": "VARCHAR(64)",
+                "route_table_ids_json": "TEXT",
+            }.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE sites ADD COLUMN {col} {typ}"))
+
+        if inspector.has_table("opnsense_images"):
+            existing = {col["name"] for col in inspector.get_columns("opnsense_images")}
+            for col, typ in {
+                "ami_id": "VARCHAR(64)",
+                "backing_snapshot_ids_json": "TEXT",
+                "region": "VARCHAR(32)",
+                "availability_zone": "VARCHAR(32)",
+                "builder_subnet_id": "VARCHAR(64)",
+                "validation_subnet_id": "VARCHAR(64)",
+            }.items():
+                if col not in existing:
+                    db.execute(text(f"ALTER TABLE opnsense_images ADD COLUMN {col} {typ}"))
 
         if inspector.has_table("users"):
             existing = {col["name"] for col in inspector.get_columns("users")}

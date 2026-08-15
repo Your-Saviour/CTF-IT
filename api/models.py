@@ -174,6 +174,11 @@ class Site(Base):
     allocated_cidr: Mapped[str] = mapped_column(String(43), nullable=False)
     infrastructure_subnet: Mapped[str] = mapped_column(String(43), nullable=False)
     vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    availability_zone: Mapped[str] = mapped_column(String(32), nullable=True)
+    public_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    infrastructure_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    internet_gateway_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    route_table_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
     firewall_vm_id: Mapped[int] = mapped_column(
         ForeignKey("vms.id", name="fk_sites_firewall_vm_id", use_alter=True), nullable=True
     )
@@ -285,10 +290,20 @@ class VM(Base):
     semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
     semaphore_task_id: Mapped[int] = mapped_column(Integer, nullable=True)
     agent_status: Mapped[str] = mapped_column(String(16), nullable=True)
-    # Vultr cloud provisioning
+    # Legacy Vultr fields remain readable for historical records.
     vultr_id: Mapped[str] = mapped_column(String(64), nullable=True)
     vultr_plan: Mapped[str] = mapped_column(String(64), nullable=True)
     vultr_region: Mapped[str] = mapped_column(String(16), nullable=True)
+    # Provider-neutral AWS provisioning fields.
+    cloud_instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    instance_type: Mapped[str] = mapped_column(String(64), nullable=True)
+    cloud_region: Mapped[str] = mapped_column(String(32), nullable=True)
+    availability_zone: Mapped[str] = mapped_column(String(32), nullable=True)
+    primary_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    wan_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    lan_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    security_group_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
     cloudflare_record_id: Mapped[str] = mapped_column(String(64), nullable=True)
     vm_type: Mapped[str] = mapped_column(String(64), nullable=True)
     # Caldera attack tree cache
@@ -354,6 +369,12 @@ class OpnsenseImage(Base):
     second_test_instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
     validation_vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
     snapshot_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    ami_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    backing_snapshot_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    region: Mapped[str] = mapped_column(String(32), nullable=True)
+    availability_zone: Mapped[str] = mapped_column(String(32), nullable=True)
+    builder_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    validation_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
     route_token: Mapped[str] = mapped_column(String(128), nullable=True)
     builder_config_token: Mapped[str] = mapped_column(String(128), nullable=True)
     build_method: Mapped[str] = mapped_column(String(32), nullable=True)
