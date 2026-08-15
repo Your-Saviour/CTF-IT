@@ -74,31 +74,23 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
   const scene = svg.append('g');
   let graph = [];
   let currentLayout = {version: 1, nodes: {}};
+  let pendingLayoutKey = null;
 
   const zoom = d3.zoom()
     .scaleExtent([.35, 2.4])
     .on('zoom', event => scene.attr('transform', event.transform));
   svg.call(zoom);
 
-  function defaults(nodes) {
-    const positions = {};
-    nodes.forEach((row, index) => {
-      positions[row.id] = {x: 120 + (index % 3) * 210, y: 70 + Math.floor(index / 3) * 110};
-    });
-    return {version: 1, nodes: positions};
-  }
-
   function render(nextGraph, layout = {version: 1, nodes: {}}) {
     graph = nextGraph;
     currentLayout = {version: 1, nodes: {...layout.nodes}};
     scene.selectAll('*').remove();
 
-    const nodes = graph.map((row, index) => ({
+    const completed = calculateHierarchicalLayout(graph, currentLayout);
+    currentLayout = {version: 1, nodes: completed.nodes};
+    const nodes = graph.map(row => ({
       ...row,
-      ...(currentLayout.nodes[row.id] || {
-        x: 120 + (index % 3) * 210,
-        y: 70 + Math.floor(index / 3) * 110,
-      }),
+      ...currentLayout.nodes[row.id],
     }));
     const byId = new Map(nodes.map(row => [row.id, row]));
     const links = nodes
@@ -164,6 +156,18 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('width', 4)
       .attr('height', 48);
     groups.append('text').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
+
+    if (completed.added && !callbacks.readOnly) {
+      const key = JSON.stringify(completed.nodes);
+      if (pendingLayoutKey !== key) {
+        pendingLayoutKey = key;
+        queueMicrotask(() => {
+          if (pendingLayoutKey !== key) return;
+          pendingLayoutKey = null;
+          callbacks.onLayoutChange?.({version: 1, nodes: structuredClone(completed.nodes)});
+        });
+      }
+    }
   }
 
   function fit() {
@@ -179,9 +183,10 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
   }
 
   function resetLayout() {
-    currentLayout = defaults(graph);
-    callbacks.onLayoutChange?.(structuredClone(currentLayout));
+    const completed = calculateHierarchicalLayout(graph, {version: 1, nodes: {}});
+    currentLayout = {version: 1, nodes: completed.nodes};
     render(graph, currentLayout);
+    callbacks.onLayoutChange?.(structuredClone(currentLayout));
     fit();
   }
 

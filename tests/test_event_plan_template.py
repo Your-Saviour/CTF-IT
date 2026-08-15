@@ -95,6 +95,16 @@ def test_canvas_drag_updates_node_and_attached_links_before_release():
     assert "updateLinks()" in drag_handler
 
 
+def test_canvas_persists_missing_hierarchical_positions_and_reuses_them_for_reset():
+    source = CANVAS.read_text()
+    compact = "".join(source.split())
+
+    assert "calculateHierarchicalLayout(graph,currentLayout)" in compact
+    assert "completed.added&&!callbacks.readOnly" in compact
+    assert "calculateHierarchicalLayout(graph,{version:1,nodes:{}})" in compact
+    assert "functiondefaults(" not in compact
+
+
 def test_planner_state_remaps_structural_layout_ids_and_mirrors_server_paths():
     source = STATE.read_text()
 
