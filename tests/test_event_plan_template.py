@@ -43,6 +43,14 @@ def test_plan_page_css_fills_the_viewport():
     assert ".planner-account" in source
 
 
+def test_plan_outline_resets_base_navigation_and_grid_stacks_before_clipping():
+    compact = "".join(CSS.read_text().split())
+
+    assert "#planner-outline{display:block;padding:0;border:0;background:transparent;position:static;}" in compact
+    assert "@media(max-width:1100px)" in compact
+    assert ".planner-workspace{grid-template-columns:1fr;}" in compact
+
+
 def test_admin_drawers_restore_focus_and_red_team_tables_are_responsive():
     script = (ROOT / "frontend" / "static" / "admin.js").read_text()
     caldera = (ROOT / "frontend" / "templates" / "caldera_dashboard.html").read_text()

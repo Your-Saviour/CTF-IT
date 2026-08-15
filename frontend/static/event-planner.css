@@ -52,6 +52,7 @@
 .planner-rail h2, .planner-inspector h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
 .planner-add-actions { display: grid; gap: 7px; }
 .planner-add-actions button, .outline-node { width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text-secondary); padding: 8px; text-align: left; cursor: pointer; }
+#planner-outline { display: block; padding: 0; border: 0; background: transparent; position: static; }
 .outline-node { margin-top: 5px; }
 .outline-node.selected { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-glow); }
 .outline-child { padding-left: 14px; }
@@ -81,9 +82,6 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 @media (max-width: 1100px) {
   .planner-toolbar { align-items: flex-start; flex-wrap: wrap; }
   .planner-actions { order: 3; width: 100%; justify-content: flex-start; }
-}
-
-@media (max-width: 900px) {
   .planner-page { height: auto; overflow: auto; }
   .planner-root, .planner { height: auto; min-height: 100dvh; overflow: visible; }
   .planner-workspace { grid-template-columns: 1fr; }
