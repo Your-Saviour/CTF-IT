@@ -16,6 +16,8 @@ test('machine nodes use icon-first presentation while structural nodes retain ca
   assert.equal(typeof canvas.topologyNodePresentation, 'function');
   assert.equal(canvas.topologyNodePresentation({type: 'vm', icon: {path: 'M0 0'}}), 'machine');
   assert.equal(canvas.topologyNodePresentation({type: 'firewall', icon: {path: 'M0 0'}}), 'machine');
+  assert.equal(canvas.topologyNodePresentation({type: 'gateway', icon: null}), 'machine');
+  assert.equal(canvas.topologyNodePresentation({type: 'vm'}), 'machine');
   assert.equal(canvas.topologyNodePresentation({type: 'zone', icon: null}), 'structural');
   assert.equal(canvas.topologyNodePresentation({type: 'site'}), 'structural');
 });

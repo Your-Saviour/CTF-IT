@@ -7,7 +7,7 @@ export function topologyLinkClass(link) {
 }
 
 export function topologyNodePresentation(node) {
-  return node.icon ? 'machine' : 'structural';
+  return ['gateway', 'firewall', 'vm'].includes(node.type) ? 'machine' : 'structural';
 }
 
 const ROOT_X = 120;
@@ -178,9 +178,9 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('y', -22)
       .attr('width', 36)
       .attr('height', 36)
-      .attr('viewBox', d => d.icon.viewBox)
+      .attr('viewBox', d => d.icon?.viewBox || '0 0 24 24')
       .attr('aria-hidden', 'true');
-    icons.append('path').attr('d', d => d.icon.path);
+    icons.append('path').attr('d', d => d.icon?.path || '');
     structuralGroups.append('text').attr('class', 'node-label').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
     machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 32).text(d => d.label);
 
