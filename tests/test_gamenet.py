@@ -1082,6 +1082,27 @@ def test_gamenet_materialises_individual_endpoint_records(db_session):
     assert len({vm.hostname for vm in endpoints}) == 2
 
 
+def test_gamenet_ignores_display_only_address_annotations_when_allocating_vm_ips(db_session):
+    from builder.infrastructure_planner import normalize_infrastructure
+
+    infrastructure = deepcopy(INFRASTRUCTURE)
+    zone = infrastructure["sites"][0]["zones"][0]
+    zone["address_range"] = "display-only/{{team_id}}"
+    zone["endpoints"][0]["address"] = "not-an-ip"
+    infrastructure = normalize_infrastructure(infrastructure)
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(infrastructure))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], infrastructure)
+
+    placeholders = ensure_vm_placeholders(db_session, event, infrastructure)
+    endpoints = [vm for vm in placeholders if vm.role == "blue_endpoint"]
+
+    assert db_session.query(Site).one().zones[0].subnet == "10.128.1.0/24"
+    assert [vm.private_ip for vm in endpoints] == ["10.128.1.10", "10.128.1.11"]
+    assert all(vm.private_ip != "not-an-ip" for vm in endpoints)
+
+
 def test_gamenet_materialises_mixed_legacy_and_individual_endpoint_keys(db_session):
     infrastructure = deepcopy(INFRASTRUCTURE)
     infrastructure["sites"][0]["zones"][0]["endpoints"] = [
