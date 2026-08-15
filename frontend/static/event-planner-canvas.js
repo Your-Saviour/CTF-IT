@@ -62,8 +62,11 @@ export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
   machineAnchorOffset: 36,
   columnGap: 24,
   rowGap: 24,
-  minWidth: 280,
-  minHeight: 190,
+  titleInset: 12,
+  headerTextWidth: 104,
+  headerControlGap: 8,
+  arrangeControlWidth: 96,
+  headerRightInset: 8,
 });
 
 export function machineBounds(node) {
@@ -91,14 +94,42 @@ export function zoneChildren(graph, zoneId) {
   return graph.filter(node => node.parent === zoneId && ['vm', 'firewall'].includes(node.type));
 }
 
+export function zoneGridMetrics(children) {
+  const geometry = ZONE_CONTAINER_GEOMETRY;
+  if (!children.length) {
+    return {
+      columns: 0,
+      rows: [],
+      width: geometry.padding * 2,
+      contentHeight: geometry.padding * 2,
+    };
+  }
+  const columns = Math.ceil(Math.sqrt(children.length));
+  const rows = Array.from({length: Math.ceil(children.length / columns)}, (_, row) =>
+    children.slice(row * columns, (row + 1) * columns));
+  const rowHeights = rows.map(row => Math.max(...row.map(child => machineBounds(child).height)));
+  return {
+    columns,
+    rows,
+    width: geometry.padding * 2 + columns * geometry.machineWidth + (columns - 1) * geometry.columnGap,
+    contentHeight: geometry.padding + geometry.machineAnchorOffset + geometry.machineTop
+      + rowHeights.reduce((height, rowHeight) => height + rowHeight, 0)
+      + (rows.length - 1) * geometry.rowGap + geometry.padding,
+  };
+}
+
 export function calculateZoneBounds(zone, children) {
   const geometry = ZONE_CONTAINER_GEOMETRY;
   const headerHeight = zoneHeaderHeight(zone);
-  const minimumHeight = geometry.minHeight + headerHeight - geometry.baseHeaderHeight;
+  const metrics = zoneGridMetrics(children);
+  const headerWidth = geometry.titleInset + geometry.headerTextWidth + geometry.headerControlGap
+    + geometry.arrangeControlWidth + geometry.headerRightInset;
+  const minimumWidth = Math.max(headerWidth, metrics.width);
+  const minimumHeight = headerHeight + metrics.contentHeight;
   const requiredWidth = children.reduce((width, child) => Math.max(
     width,
     machineBounds(child).x + machineBounds(child).width + geometry.padding - zone.x,
-  ), geometry.minWidth);
+  ), minimumWidth);
   const requiredHeight = children.reduce((height, child) => Math.max(
     height,
     machineBounds(child).y + machineBounds(child).height + geometry.padding - zone.y,
@@ -109,9 +140,7 @@ export function calculateZoneBounds(zone, children) {
 export function arrangeZoneChildren(zone, children) {
   if (!children.length) return {};
   const geometry = ZONE_CONTAINER_GEOMETRY;
-  const columns = Math.ceil(Math.sqrt(children.length));
-  const rows = Array.from({length: Math.ceil(children.length / columns)}, (_, row) =>
-    children.slice(row * columns, (row + 1) * columns));
+  const {columns, rows} = zoneGridMetrics(children);
   const rowOffsets = rows.map((_, row) => rows.slice(0, row).reduce((offset, previous) =>
     offset + Math.max(...previous.map(child => machineBounds(child).height)) + geometry.rowGap, 0));
   return Object.fromEntries(children.map((child, index) => [child.id, {
@@ -378,8 +407,15 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
           callbacks.onArrangeZone?.(d.id);
         }
       });
-    arrangeControls.append('rect').attr('width', 96).attr('height', 28).attr('rx', 5);
-    arrangeControls.append('text').attr('x', 48).attr('y', 18).attr('text-anchor', 'middle').text('Arrange VMs');
+    arrangeControls.append('rect')
+      .attr('width', ZONE_CONTAINER_GEOMETRY.arrangeControlWidth)
+      .attr('height', 28)
+      .attr('rx', 5);
+    arrangeControls.append('text')
+      .attr('x', ZONE_CONTAINER_GEOMETRY.arrangeControlWidth / 2)
+      .attr('y', 18)
+      .attr('text-anchor', 'middle')
+      .text('Arrange VMs');
 
     function updateContainers() {
       const bounds = containerBounds();
@@ -396,7 +432,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
         .attr('y2', d => bounds.get(d.id).headerHeight);
       containers.select('.zone-address-rail')
         .attr('width', d => bounds.get(d.id).width);
-      arrangeControls.attr('transform', d => `translate(${bounds.get(d.id).width - 104},4)`);
+      arrangeControls.attr('transform', d => `translate(${bounds.get(d.id).width
+        - ZONE_CONTAINER_GEOMETRY.arrangeControlWidth - ZONE_CONTAINER_GEOMETRY.headerRightInset},4)`);
     }
     updateContainers();
 
