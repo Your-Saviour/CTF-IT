@@ -144,7 +144,8 @@ def test_planner_projects_configurable_base_type_icons_into_machine_nodes():
     controller = CONTROLLER.read_text()
     canvas = CANVAS.read_text()
 
-    assert "PLANNER_ICON_OPTIONS" in controller
+    assert "PLANNER_ICON_GROUPS" in controller
+    assert "<optgroup" in controller
     assert "machineIconPair" in controller
     assert "setMachineIconOverride" in controller
     assert "Primary icon" in controller

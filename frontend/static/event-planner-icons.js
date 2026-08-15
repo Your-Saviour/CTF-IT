@@ -21,7 +21,7 @@ export const PLANNER_ICONS = Object.freeze({
   file_share: {label: 'File share', category: 'Services', path: 'M2 5h8l2 3h10v12H2V5zm5 7a3 3 0 100 6 3 3 0 000-6zm10 0a3 3 0 100 6 3 3 0 000-6zm-7 2h4v2h-4v-2z'},
   storage: {label: 'Storage', category: 'Services', path: 'M4 2h16l2 6v12a2 2 0 01-2 2H4a2 2 0 01-2-2V8l2-6zm2 3L5 8h14l-1-3H6zm2 8h8v5H8v-5z'},
   certificate_authority: {label: 'Certificate authority', category: 'Services', path: 'M5 2h14v13H5V2zm3 3v2h8V5H8zm0 4v2h5V9H8zm4 5a5 5 0 015 5l-2 3-3-2-3 2-2-3a5 5 0 015-5z'},
-  identity: {label: 'Identity provider', category: 'Services', path: 'M12 2a5 5 0 110 10 5 5 0 010-10zM4 22v-3c0-4 3-6 8-6s8 2 8 6v3H4zm13-7l5 2v3c0 2-2 4-5 5-3-1-5-3-5-5v-3l5-2z'},
+  identity: {label: 'Identity provider', category: 'Services', path: 'M10 2a5 5 0 110 10 5 5 0 010-10zM2 22v-3c0-4 3-6 8-6 2 0 3 0 4 1l3-1 5 2v3c0 2-2 4-5 5-3-1-5-3-5-5v-2H6c-1 1-1 2-1 3v3H2zm15-7l-3 1v2c0 1 1 2 3 3 2-1 3-2 3-3v-2l-3-1z'},
 
   attacker: {label: 'Attacker', category: 'Security', path: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 4a6 6 0 110 12 6 6 0 010-12zm0 3a3 3 0 100 6 3 3 0 000-6zM11 2h2v4h-2V2zm0 16h2v4h-2v-4zM2 11h4v2H2v-2zm16 0h4v2h-4v-2z'},
   target: {label: 'Target', category: 'Security', path: 'M13 2v3a7 7 0 016 6h3v2h-3a7 7 0 01-6 6v3h-2v-3a7 7 0 01-6-6H2v-2h3a7 7 0 016-6V2h2zm-1 6a4 4 0 100 8 4 4 0 000-8zm0 2a2 2 0 110 4 2 2 0 010-4z'},
