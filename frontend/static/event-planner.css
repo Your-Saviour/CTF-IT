@@ -111,16 +111,20 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .topo-zone.red { fill: rgba(255, 23, 68, .035); stroke: rgba(255, 23, 68, .4); }
 .topo-link { stroke: #40576d; stroke-width: 1.5; transition: stroke .15s ease, stroke-width .15s ease; }
 .topo-link.selected-adjacent { stroke: var(--cyan-dim); stroke-width: 2; }
+.zone-container { --zone-control-accent: #7890a8; --zone-control-fill: rgba(88, 114, 140, .12); }
 .zone-container .zone-container-body { fill: rgba(14, 29, 45, .78); stroke: #466887; stroke-width: 1.5; }
 .zone-container .zone-container-header { fill: #17283c; stroke: #58728c; stroke-width: 1.5; }
 .zone-container .zone-container-divider { stroke: #466887; stroke-width: 1; }
 .zone-container.team-red .zone-container-body { fill: rgba(65, 18, 31, .55); stroke: rgba(255, 23, 68, .55); }
 .zone-container.team-red .zone-container-header { fill: #351827; stroke: rgba(255, 23, 68, .72); }
+.zone-container.team-red { --zone-control-accent: #ff566f; --zone-control-fill: rgba(255, 23, 68, .1); }
 .zone-container.system-managed .zone-container-body { fill: rgba(58, 42, 12, .38); stroke: rgba(255, 184, 0, .58); }
 .zone-container.system-managed .zone-container-header { fill: #302817; stroke: rgba(255, 184, 0, .72); }
+.zone-container.system-managed { --zone-control-accent: #d9a632; --zone-control-fill: rgba(255, 184, 0, .1); }
 .zone-container[style*="--node-theme-color"] .zone-container-body { fill: color-mix(in srgb, var(--node-theme-color) 18%, #0e1d2d); stroke: var(--node-theme-color); }
 .zone-container[style*="--node-theme-color"] .zone-container-header { fill: color-mix(in srgb, var(--node-theme-color) 26%, #101b2a); stroke: var(--node-theme-color); }
 .zone-container[style*="--node-theme-color"] .zone-container-divider { stroke: var(--node-theme-color); }
+.zone-container[style*="--node-theme-color"] { --zone-control-accent: var(--node-theme-color); --zone-control-fill: color-mix(in srgb, var(--node-theme-color) 10%, transparent); }
 .zone-container.selected .zone-container-body, .zone-container.selected .zone-container-header { stroke: var(--cyan); stroke-width: 2.5; filter: drop-shadow(0 0 5px var(--cyan-glow)); }
 .zone-container.invalid .zone-container-body, .zone-container.invalid .zone-container-header { stroke: var(--red); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--red-glow)); }
 .zone-container text { fill: var(--text-primary); font-family: 'JetBrains Mono', monospace; pointer-events: none; }
@@ -132,9 +136,10 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 .zone-address-value { fill: var(--cyan); }
 .zone-container-header { cursor: move; }
 .zone-arrange { cursor: pointer; }
-.zone-arrange rect { fill: var(--bg-deep); stroke: var(--border); stroke-width: 1; }
-.zone-arrange path { fill: var(--cyan); pointer-events: none; }
-.zone-arrange:hover rect, .zone-arrange:focus rect { fill: var(--cyan-subtle); stroke: var(--cyan); }
+.zone-arrange rect { fill: var(--zone-control-fill); stroke: color-mix(in srgb, var(--zone-control-accent) 55%, transparent); stroke-width: 1; }
+.zone-arrange path { fill: var(--zone-control-accent); pointer-events: none; }
+.zone-arrange:hover rect, .zone-arrange:focus rect { fill: var(--cyan-subtle); stroke: var(--cyan-dim); }
+.zone-arrange:hover path, .zone-arrange:focus path { fill: var(--cyan); }
 .zone-arrange[aria-disabled="true"] { display: none; }
 .topo-node .node-body { fill: #111d2d; stroke: #58728c; stroke-width: 1.5; transition: fill .15s ease, stroke .15s ease; }
 .topo-node.site .node-body { fill: #18283c; stroke: #7890a8; stroke-width: 2; }
