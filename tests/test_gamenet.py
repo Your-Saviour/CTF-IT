@@ -17,7 +17,8 @@ from api.services.gamenet import (
     site_dns_zone, vm_dns_name,
 )
 from api.services.gamenet_provider import (
-    VultrGameNetProvider, render_opnsense_config, snapshot_site_validation_command, ubuntu_cloud_init,
+    VultrGameNetProvider, endpoint_cloud_init, render_opnsense_config,
+    snapshot_site_validation_command, ubuntu_cloud_init,
 )
 from api.services.gamenet_provisioning import ensure_vm_placeholders
 from api.services.secrets import decrypt_secret
@@ -200,9 +201,11 @@ def test_upload_text_creates_parent_directory(monkeypatch):
 
 
 def test_endpoint_cloud_init_configures_network_before_package_work():
-    from api.services.gamenet_provider import endpoint_cloud_init
     rendered = endpoint_cloud_init("10.128.1.10", "10.128.0.0/20")
-    assert "bootcmd:" in rendered
+    assert "bootcmd:" not in rendered
+    assert rendered.index("write_files:") < rendered.index("runcmd:")
+    assert "  - [sh, /usr/local/sbin/gamenet-network.sh]" in rendered
+    assert rendered.index("gamenet-network.sh]") < rendered.index("systemctl, enable, --now, ssh")
     assert "10.128.1.10/20" in rendered
     assert "via: 10.128.0.1" in rendered
     assert "package_update" not in rendered

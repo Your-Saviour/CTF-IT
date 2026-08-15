@@ -269,9 +269,8 @@ write_files:
             nameservers: {{addresses: [{gateway}]}}
       EOF
       netplan apply
-bootcmd:
-  - [sh, /usr/local/sbin/gamenet-network.sh]
 runcmd:
+  - [sh, /usr/local/sbin/gamenet-network.sh]
   - [systemctl, enable, --now, ssh]
 """
 
