@@ -165,7 +165,7 @@ def test_vpc_connectivity_probe_originates_from_wan_only_peer(monkeypatch):
 def test_running_jobs_interrupt_and_only_validated_active_image_is_selected():
     db = session(); image = image_row(db, status="bootstrapping", phase="bootstrapping")
     assert interrupt_running_jobs(db) == 1 and image.status == "interrupted"
-    image.status = image.phase = "active"; image.snapshot_id = "snap"; image.validated_at = utcnow()
+    image.status = image.phase = "active"; image.ami_id = "ami-opnsense"; image.validated_at = utcnow()
     db.add(PlatformSettings(key="active_opnsense_image_id", value=str(image.id))); db.commit()
     assert active_image(db).id == image.id
 
