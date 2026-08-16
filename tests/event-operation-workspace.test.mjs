@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createViewport, graphPoint, zoomAt, fitViewport, createHistory} from '../frontend/static/event-operation-workspace.js';
+import {createViewport, graphPoint, zoomAt, fitViewport, createHistory, nodeTargetLabel} from '../frontend/static/event-operation-workspace.js';
 
 test('zoomAt keeps the graph point beneath the cursor stable', () => {
   const viewport = {x:100,y:50,zoom:1,width:800,height:600};
@@ -45,4 +45,11 @@ test('new history commit clears redo and respects its limit', () => {
   assert.deepEqual(history.undo(),{value:2});
   assert.deepEqual(history.undo(),{value:1});
   assert.equal(history.undo(),null);
+});
+
+test('nodeTargetLabel resolves configured planned VM names', () => {
+  const catalogue={targets:[{id:'vm:site/zone/web',name:'web-server',zone:'public'}]};
+  assert.equal(nodeTargetLabel({type:'ability',config:{target_vm_id:'vm:site/zone/web'}},catalogue),'web-server');
+  assert.equal(nodeTargetLabel({type:'objective',config:{target_vm_id:'missing'}},catalogue),'Unknown target');
+  assert.equal(nodeTargetLabel({type:'delay',config:{}},catalogue),'');
 });

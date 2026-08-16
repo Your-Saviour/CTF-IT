@@ -24,6 +24,12 @@ export function fitViewport(nodes, bounds, padding=64) {
   return {width,height,zoom,x:(width-contentWidth*zoom)/2-minX*zoom,y:(height-contentHeight*zoom)/2-minY*zoom};
 }
 
+export function nodeTargetLabel(node, catalogue) {
+  if(!['ability','objective'].includes(node?.type))return '';
+  const targetId=node.config?.target_vm_id;
+  return catalogue?.targets?.find(target=>target.id===targetId)?.name||'Unknown target';
+}
+
 export function createHistory(initial, limit=50) {
   let past=[clone(initial)],future=[];
   const current=()=>clone(past.at(-1));
