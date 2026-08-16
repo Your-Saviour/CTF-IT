@@ -16,6 +16,21 @@ def test_workspace_has_rich_catalogue_and_two_inspector_tabs():
         assert marker in html
 
 
+def test_catalogue_exposes_compact_combinable_filters():
+    html = (ROOT / "frontend/templates/event_modules.html").read_text()
+    for marker in [
+        'id="module-difficulty"',
+        'id="module-category"',
+        'id="module-compatibility"',
+        'id="module-relationship"',
+        'value="required_by_others"',
+        'value="no_requirements"',
+        'id="catalogue-result-count" role="status" aria-live="polite"',
+        'id="clear-catalogue-filters"',
+    ]:
+        assert marker in html
+
+
 def test_admin_copy_does_not_use_pin_terminology():
     for path in [ROOT / "frontend/templates/event_modules.html", ROOT / "frontend/static/event-modules.js"]:
         text = path.read_text()
@@ -77,7 +92,8 @@ def test_assignment_colours_use_flat_readable_surfaces_and_borders():
 def test_high_contrast_stylesheet_uses_current_cache_version():
     html = (ROOT / "frontend/templates/event_modules.html").read_text()
     assert 'event-modules-colours.css?v=6' in html
-    assert 'event-modules.js?v=4' in html
+    assert 'event-modules.css?v=3' in html
+    assert 'event-modules.js?v=5' in html
 
 
 def test_coloured_cards_keep_module_information_readable():
