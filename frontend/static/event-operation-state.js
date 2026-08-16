@@ -7,6 +7,24 @@ export function nextId(prefix, rows) {
 
 const clone = value => JSON.parse(JSON.stringify(value));
 
+export function isTriggerType(type) {
+  return ['manual_trigger', 'event_start_trigger', 'scheduled_trigger'].includes(type);
+}
+
+export function replaceTrigger(state, template) {
+  if (!isTriggerType(template.type)) throw new Error('Replacement must be a trigger');
+  const next = clone(state);
+  const triggers = next.nodes.filter(node => isTriggerType(node.type));
+  if (triggers.length !== 1) throw new Error('Graph must contain exactly one trigger to replace');
+  const current = triggers[0];
+  Object.assign(current, {
+    type: template.type,
+    label: template.label || template.type,
+    config: clone(template.config || {}),
+  });
+  return next;
+}
+
 export function addNode(state, template, position = {x: 240, y: 160}) {
   const next = clone(state);
   next.nodes.push({
@@ -22,6 +40,7 @@ export function connectionError(state, source, target, condition = 'success') {
   if (!['success', 'failure', 'always'].includes(condition)) return 'Invalid edge condition';
   const ids = new Set(state.nodes.map(node => node.id));
   if (!ids.has(source) || !ids.has(target)) return 'Edge endpoint does not exist';
+  if (isTriggerType(state.nodes.find(node => node.id === target)?.type)) return 'Trigger nodes cannot receive connections';
   if (state.edges.some(edge => edge.source === source && edge.target === target && edge.condition === condition)) {
     return 'Typed edge already exists';
   }
@@ -57,7 +76,8 @@ export function deleteSelection(state, selection) {
   const next = clone(state);
   if (!selection) return next;
   if (selection.kind === 'node') {
-    if (['start', 'finish'].includes(next.nodes.find(node => node.id === selection.id)?.type)) return next;
+    const type = next.nodes.find(node => node.id === selection.id)?.type;
+    if (type === 'finish' || isTriggerType(type)) return next;
     next.nodes = next.nodes.filter(node => node.id !== selection.id);
     next.edges = next.edges.filter(edge => edge.source !== selection.id && edge.target !== selection.id);
   } else if (selection.kind === 'edge') {
@@ -88,7 +108,7 @@ export function moveNodes(state, nodeIds, delta) {
 
 export function duplicateNodes(state, nodeIds, offset = {x: 40, y: 40}) {
   const selected = new Set(nodeIds), next = clone(state), mapping = new Map(), created = [];
-  state.nodes.filter(node => selected.has(node.id)).forEach(node => {
+  state.nodes.filter(node => selected.has(node.id) && !isTriggerType(node.type)).forEach(node => {
     const id = nextId(node.type, next.nodes);
     mapping.set(node.id, id);
     next.nodes.push({...clone(node), id, x:Math.max(0,node.x+(Number(offset.x)||0)), y:Math.max(0,node.y+(Number(offset.y)||0))});
