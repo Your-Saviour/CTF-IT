@@ -11,22 +11,22 @@ from builder.module_plan import assignable_endpoints, normalize_module_plan
 
 VERSION = 1
 MAX_BYTES = 524_288
-NODE_TYPES = {"start", "finish", "target", "ability", "objective", "delay", "gate"}
+TRIGGER_TYPES = {"manual_trigger", "event_start_trigger", "scheduled_trigger"}
+NODE_TYPES = TRIGGER_TYPES | {"finish", "target", "ability", "objective", "delay", "gate"}
 EDGE_CONDITIONS = {"success", "failure", "always"}
-LAUNCH_MODES = {"manual", "scheduled", "scheduled_hold"}
 GATE_MODES = {"all", "any", "first"}
 
 
 def _default_policy():
-    return {"launch_mode": "manual", "start_offset_minutes": 0, "time_limit_minutes": 60,
-            "max_concurrency": 1, "default_timeout_seconds": 120, "default_retries": 0,
+    return {"time_limit_minutes": 60, "max_concurrency": 1,
+            "default_timeout_seconds": 120, "default_retries": 0,
             "default_retry_delay_seconds": 5, "unreachable_required": "stop",
             "missing_agent": "wait", "instructor_approval": False}
 
 
 def empty_operation_plan():
     return {"version": VERSION, "input_fingerprint": None, "policy": _default_policy(), "nodes": [
-        {"id": "start", "type": "start", "label": "Start", "x": 80, "y": 160, "config": {}},
+        {"id": "trigger", "type": "manual_trigger", "label": "Manual Trigger", "x": 80, "y": 160, "config": {}},
         {"id": "finish", "type": "finish", "label": "Finish", "x": 680, "y": 160, "config": {}},
     ], "edges": []}
 
@@ -44,11 +44,15 @@ def normalize_operation_plan(value):
         raise ValueError("operation_plan.version must be 1")
     if len(json.dumps(value).encode()) > MAX_BYTES:
         raise ValueError(f"operation_plan exceeds {MAX_BYTES} bytes")
-    policy = {**_default_policy(), **(value.get("policy") or {})}
-    if policy["launch_mode"] not in LAUNCH_MODES:
+    source_policy = value.get("policy") or {}
+    legacy_launch_mode = source_policy.get("launch_mode", "manual")
+    if legacy_launch_mode not in {"manual", "scheduled", "scheduled_hold"}:
         raise ValueError("policy.launch_mode is invalid")
-    for field, minimum in (("start_offset_minutes", 0), ("time_limit_minutes", 1),
-                           ("max_concurrency", 1), ("default_timeout_seconds", 1),
+    legacy_offset = source_policy.get("start_offset_minutes", 0)
+    policy = {**_default_policy(), **source_policy}
+    policy.pop("launch_mode", None)
+    policy.pop("start_offset_minutes", None)
+    for field, minimum in (("time_limit_minutes", 1), ("max_concurrency", 1), ("default_timeout_seconds", 1),
                            ("default_retries", 0), ("default_retry_delay_seconds", 0)):
         policy[field] = _integer(policy[field], f"policy.{field}", minimum)
     policy["instructor_approval"] = bool(policy.get("instructor_approval", False))
@@ -64,13 +68,21 @@ def normalize_operation_plan(value):
             raise ValueError(f"nodes[{index}].id must be a non-empty string")
         if node["id"] in node_ids:
             raise ValueError(f"duplicate node ID '{node['id']}'")
-        if node.get("type") not in NODE_TYPES:
+        node_type = node.get("type")
+        node_config = copy.deepcopy(node.get("config") or {})
+        if node_type == "start":
+            node_type = "manual_trigger" if legacy_launch_mode == "manual" else "scheduled_trigger"
+            if node_type == "scheduled_trigger":
+                node_config["offset_minutes"] = legacy_offset
+            if legacy_launch_mode == "scheduled_hold":
+                policy["instructor_approval"] = True
+        if node_type not in NODE_TYPES:
             raise ValueError(f"nodes[{index}].type is invalid")
         node_ids.add(node["id"])
-        result["nodes"].append({"id": node["id"], "type": node["type"],
+        result["nodes"].append({"id": node["id"], "type": node_type,
             "label": str(node.get("label") or node["type"].title()),
             "x": float(node.get("x", 0)), "y": float(node.get("y", 0)),
-            "disabled": bool(node.get("disabled", False)), "config": copy.deepcopy(node.get("config") or {})})
+            "disabled": bool(node.get("disabled", False)), "config": node_config})
     edge_ids = set()
     pairs = set()
     for index, edge in enumerate(edges):
@@ -125,7 +137,7 @@ def operation_catalogue(infrastructure, module_plan, modules):
             objectives.append({"id": f"objective:{module.id}", "module_id": module.id,
                                "name": module.name, "description": module.description})
     return {"targets": targets, "abilities": abilities, "objectives": objectives,
-            "controls": ["start", "finish", "delay", "gate"]}
+            "controls": ["manual_trigger", "event_start_trigger", "scheduled_trigger", "finish", "delay", "gate"]}
 
 
 def _topological(nodes, edges):
@@ -152,31 +164,41 @@ def validate_operation_plan(plan, infrastructure, module_plan, modules, event_mi
     active_nodes = [node for node in plan["nodes"] if not node["disabled"]]
     by_id = {node["id"]: node for node in active_nodes}
     active_edges = [edge for edge in plan["edges"] if edge["source"] in by_id and edge["target"] in by_id]
-    starts = [node for node in active_nodes if node["type"] == "start"]
+    triggers = [node for node in active_nodes if node["type"] in TRIGGER_TYPES]
     finishes = [node for node in active_nodes if node["type"] == "finish"]
-    if len(starts) != 1: issues.append({"code": "start_count", "message": "Graph requires exactly one Start node"})
+    if len(triggers) != 1:
+        issues.append({"code": "trigger_count", "message": "Graph requires exactly one enabled trigger"})
     if len(finishes) != 1: issues.append({"code": "finish_count", "message": "Graph requires exactly one Finish node"})
     order = _topological(active_nodes, active_edges)
     if order is None: issues.append({"code": "cycle", "message": "Operation graph must be acyclic"})
     outgoing = defaultdict(set); incoming = defaultdict(set)
     for edge in active_edges: outgoing[edge["source"]].add(edge["target"]); incoming[edge["target"]].add(edge["source"])
     reachable = set()
-    if starts:
-        stack = [starts[0]["id"]]
+    if triggers:
+        trigger_id = triggers[0]["id"]
+        if incoming[trigger_id]:
+            issues.append({"code": "trigger_incoming", "node_id": trigger_id,
+                           "message": "Trigger nodes cannot have incoming transitions"})
+        stack = [trigger_id]
         while stack:
             current = stack.pop()
             if current in reachable: continue
             reachable.add(current); stack.extend(outgoing[current])
     for node in active_nodes:
-        if starts and node["id"] not in reachable:
-            issues.append({"code": "unreachable", "node_id": node["id"], "message": f"{node['label']} is unreachable from Start"})
+        if triggers and node["id"] not in reachable:
+            issues.append({"code": "unreachable", "node_id": node["id"], "message": f"{node['label']} is unreachable from the trigger"})
     catalogue = operation_catalogue(infrastructure, module_plan, modules)
     targets = {row["id"]: row for row in catalogue["targets"]}
     abilities = {(row["module_id"], row["ability"]): row for row in catalogue["abilities"]}
     objectives = {row["module_id"] for row in catalogue["objectives"]}
     for node in active_nodes:
         config = node["config"]
-        if node["type"] == "ability":
+        if node["type"] == "scheduled_trigger":
+            offset = config.get("offset_minutes")
+            if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+                issues.append({"code": "invalid_trigger_offset", "node_id": node["id"],
+                               "message": "Scheduled trigger offset must be a non-negative integer"})
+        elif node["type"] == "ability":
             target = config.get("target_vm_id")
             ability = abilities.get((config.get("module_id"), config.get("ability")))
             if target not in targets: issues.append({"code": "unknown_target", "node_id": node["id"], "message": "Ability target is not a planned VM"})
@@ -197,8 +219,12 @@ def validate_operation_plan(plan, infrastructure, module_plan, modules, event_mi
             issues.append({"code": "invalid_timing", "node_id": node["id"], "message": "Delay seconds must be non-negative"})
         elif node["type"] == "gate" and config.get("mode", "all") not in GATE_MODES:
             issues.append({"code": "invalid_gate", "node_id": node["id"], "message": "Gate mode is invalid"})
-    if event_minutes is not None and plan["policy"]["start_offset_minutes"] + plan["policy"]["time_limit_minutes"] > event_minutes:
-        issues.append({"code": "outside_event", "message": "Operation timing exceeds the event duration"})
+    if event_minutes is not None and len(triggers) == 1 and triggers[0]["type"] == "scheduled_trigger":
+        offset = triggers[0]["config"].get("offset_minutes")
+        if isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0 \
+                and offset + plan["policy"]["time_limit_minutes"] > event_minutes:
+            issues.append({"code": "outside_event", "node_id": triggers[0]["id"],
+                           "message": "Operation timing exceeds the event duration"})
     return issues
 
 
@@ -219,6 +245,11 @@ def compile_team_preview(plan, infrastructure, module_plan, modules, team):
     active_ids = {node["id"] for node in active_nodes}
     edges = [edge for edge in plan["edges"] if edge["source"] in active_ids and edge["target"] in active_ids]
     order = _topological(active_nodes, edges)
+    trigger_node = next(node for node in active_nodes if node["type"] in TRIGGER_TYPES)
+    trigger = {"type": {"manual_trigger": "manual", "event_start_trigger": "event_start",
+                        "scheduled_trigger": "scheduled"}[trigger_node["type"]], "once": True}
+    if trigger_node["type"] == "scheduled_trigger":
+        trigger["offset_minutes"] = trigger_node["config"]["offset_minutes"]
     manifest = {}
     for node in active_nodes:
         config = node["config"]
@@ -228,6 +259,6 @@ def compile_team_preview(plan, infrastructure, module_plan, modules, team):
         if config.get("ability"): row["ability"] = config["ability"]
         if node["type"] == "objective": row["required"] = bool(config.get("required"))
         manifest[node["id"]] = row
-    return {"team": {"id": team.get("id"), "name": team.get("name")}, "order": order,
+    return {"team": {"id": team.get("id"), "name": team.get("name")}, "order": order, "trigger": trigger,
             "policy": plan["policy"], "edges": edges, "manifest": manifest,
             "input_fingerprint": operation_input_fingerprint(infrastructure, module_plan, modules)}
