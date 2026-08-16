@@ -20,7 +20,7 @@ export function topologyAnnotationPresentation(node) {
     };
   }
   if (['vm', 'firewall'].includes(node.type)) {
-    return {className: 'machine-label topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 46};
+    return {className: 'machine-label topo-node-address', text: truncatedAnnotation(node.annotation, 24), x: 0, y: 50};
   }
   return null;
 }
@@ -67,8 +67,8 @@ export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
   addressRailHeight: 24,
   padding: 20,
   machineWidth: 80,
-  machineHeight: 72,
-  annotatedMachineHeight: 84,
+  machineHeight: 76,
+  annotatedMachineHeight: 88,
   machineTop: -30,
   machineAnchorOffset: 36,
   columnGap: 24,
@@ -601,7 +601,7 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       .attr('aria-hidden', 'true');
     secondaryIcons.append('path').attr('d', d => d.icons?.secondary?.path || '');
     structuralGroups.append('text').attr('class', 'node-label').attr('text-anchor', 'middle').attr('y', 4).text(d => d.label);
-    machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 34).text(d => d.label);
+    machineGroups.append('text').attr('class', 'machine-label').attr('text-anchor', 'middle').attr('y', 38).text(d => d.label);
     machineGroups.filter(d => topologyAnnotationPresentation(d))
       .append('text')
       .attr('class', d => topologyAnnotationPresentation(d).className)

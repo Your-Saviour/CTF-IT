@@ -49,7 +49,7 @@ test('zones and VMs receive distinct address text presentation', () => {
     className: 'zone-address-rail', prefix: 'Range · ', value: '10.0.0.0/24', x: 0, y: 36, height: 24,
   };
   const machine = {
-    className: 'machine-label topo-node-address', text: '10.0.0.10', x: 0, y: 46,
+    className: 'machine-label topo-node-address', text: '10.0.0.10', x: 0, y: 50,
   };
   assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'zone', annotation: '10.0.0.0/24'}), rail);
   assert.deepEqual(canvas.topologyAnnotationPresentation({type: 'firewall-zone', annotation: '10.0.0.0/24'}), rail);
@@ -64,11 +64,11 @@ test('annotated VM bounds contain the address baseline without enlarging plain V
   const plain = {type: 'vm', annotation: null, x: 100, y: 200};
   const address = canvas.topologyAnnotationPresentation(annotated);
 
-  assert.deepEqual(canvas.machineBounds(annotated), {x: 60, y: 170, width: 80, height: 84});
-  assert.deepEqual(canvas.machineBounds(plain), {x: 60, y: 170, width: 80, height: 72});
+  assert.deepEqual(canvas.machineBounds(annotated), {x: 60, y: 170, width: 80, height: 88});
+  assert.deepEqual(canvas.machineBounds(plain), {x: 60, y: 170, width: 80, height: 76});
   assert.equal(annotated.y + address.y < canvas.machineBounds(annotated).y + canvas.machineBounds(annotated).height, true);
-  assert.equal(canvas.machineBounds({type: 'firewall', annotation: '10.0.0.1', x: 100, y: 200}).height, 84);
-  assert.equal(canvas.machineBounds({type: 'firewall', annotation: null, x: 100, y: 200}).height, 72);
+  assert.equal(canvas.machineBounds({type: 'firewall', annotation: '10.0.0.1', x: 100, y: 200}).height, 88);
+  assert.equal(canvas.machineBounds({type: 'firewall', annotation: null, x: 100, y: 200}).height, 76);
 });
 
 test('machine nodes use icon-first presentation while structural nodes retain cards', () => {
@@ -182,7 +182,7 @@ test('empty zone bounds preserve a compact selectable body and grow around direc
   });
   assert.deepEqual(canvas.calculateZoneBounds(zone, [
     {id: 'vm:a/blue/web', type: 'vm', x: 430, y: 390},
-  ]), {x: 100, y: 200, width: 390, height: 252, headerHeight: 36});
+  ]), {x: 100, y: 200, width: 390, height: 256, headerHeight: 36});
 
   const graph = [
     {id: 'zone:a/blue', type: 'zone'},
@@ -224,10 +224,10 @@ test('zone bounds compact to their arranged VM grid in both dimensions', () => {
   const arrangedOne = canvas.arrangeZoneChildren(plainZone, one);
   const arrangedFour = canvas.arrangeZoneChildren(plainZone, four);
   assert.deepEqual(canvas.calculateZoneBounds(plainZone, one.map(node => ({...node, ...arrangedOne[node.id]}))), {
-    x: 100, y: 200, width: 164, height: 154, headerHeight: 36,
+    x: 100, y: 200, width: 164, height: 158, headerHeight: 36,
   });
   assert.deepEqual(canvas.calculateZoneBounds(plainZone, four.map(node => ({...node, ...arrangedFour[node.id]}))), {
-    x: 100, y: 200, width: 224, height: 250, headerHeight: 36,
+    x: 100, y: 200, width: 224, height: 258, headerHeight: 36,
   });
 });
 
@@ -236,10 +236,10 @@ test('compact zone bounds include address rails, VM labels, and manual expansion
   const child = {id: 'one', type: 'vm', annotation: '10.2.0.1'};
   const arranged = {...child, ...canvas.arrangeZoneChildren(zone, [child]).one};
   assert.deepEqual(canvas.calculateZoneBounds(zone, [arranged]), {
-    x: 100, y: 200, width: 164, height: 190, headerHeight: 60,
+    x: 100, y: 200, width: 164, height: 194, headerHeight: 60,
   });
   assert.deepEqual(canvas.calculateZoneBounds(zone, [{...child, x: 420, y: 460}]), {
-    x: 100, y: 200, width: 380, height: 334, headerHeight: 60,
+    x: 100, y: 200, width: 380, height: 338, headerHeight: 60,
   });
 });
 
@@ -261,7 +261,7 @@ test('zone arrangement packs children deterministically and translation is atomi
   const arranged = canvas.arrangeZoneChildren(zone, children);
   assert.deepEqual(arranged.one, {x: 160, y: 292});
   assert.deepEqual(arranged.two, {x: 264, y: 292});
-  assert.deepEqual(arranged.four, {x: 160, y: 388});
+  assert.deepEqual(arranged.four, {x: 160, y: 392});
 
   const moved = canvas.translateZoneLayout(
     {version: 1, nodes: {'zone:a/blue': {x: 100, y: 200}, one: arranged.one}},
