@@ -1,0 +1,6 @@
+.operation-node-picker select{width:100%;box-sizing:border-box;background:#000;border:1px solid var(--border);border-radius:0;color:var(--text-primary);font:inherit;padding:8px}
+.operation-node-picker input:focus-visible,.operation-node-picker select:focus-visible{border-color:var(--cyan);outline:1px solid var(--cyan);outline-offset:1px}
+.picker-filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;padding:0 12px 12px;border:0;border-bottom:1px solid var(--border)}
+.picker-filters legend{padding:0 0 7px;color:var(--text-secondary);font-size:.62rem;text-transform:uppercase;letter-spacing:.08em}
+.picker-filters label{padding:0}
+@media(max-width:900px){.picker-filters{grid-template-columns:1fr}}
