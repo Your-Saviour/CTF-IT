@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Design Operation — {{ event_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><link rel="stylesheet" href="/static/event-operation.css?v=1">{% endblock %}
+{% block body_class %}planner-page{% endblock %}{% block site_nav %}{% endblock %}{% block container_class %}planner-root{% endblock %}
+{% block content %}
+<main class="operation-app" data-event-id="{{ event_id }}" data-read-only="{{ read_only|tojson }}">
+ <header class="planner-toolbar">
+  <div class="planner-context-row"><a class="planner-brand" href="/admin">&gt;_ CTF Platform</a><div class="planner-identity"><div><h1>{{ event_name }}</h1><p>Canonical operation repeated independently for every team</p></div><span class="planner-event-status">{{ event_status }}</span></div><div class="planner-account"><span>{{ user.username }}</span><form method="post" action="/auth/logout"><button class="btn" type="submit">Logout</button></form></div></div>
+  <div class="planner-command-row"><div class="planner-command-start"><a class="planner-back" href="/admin/events/{{ event_id }}/modules">Back to module assignment</a><span id="operation-save-state" role="status" aria-live="polite">Loading…</span></div><div class="planner-actions"><div class="planner-action-group"><button id="operation-validate" class="btn">Validate graph</button><button id="operation-arrange" class="btn">Auto-arrange</button><button id="operation-preview" class="btn">Preview per team</button></div><div class="planner-action-group"><button id="operation-save" class="btn btn-primary">Save draft</button><a class="btn" href="/admin/events">Finish planning</a></div></div></div>
+ </header>
+ <section id="operation-validation" class="planner-validation" aria-live="polite"></section>
+ <div class="operation-workspace">
+  <aside class="operation-library"><header><h2>Node library</h2><label><span>Search</span><input id="library-search" type="search" placeholder="Ability, objective, or target"></label></header><div id="operation-library"></div></aside>
+  <section class="operation-canvas-wrap" aria-label="Operation graph"><svg id="operation-canvas" tabindex="0" role="application" aria-label="Editable operation graph"><defs><marker id="operation-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs><g id="operation-edges"></g><g id="operation-nodes"></g></svg><nav id="operation-outline" aria-label="Operation graph outline"></nav></section>
+  <aside class="operation-inspector"><h2>Inspector</h2><div id="operation-inspector"><p>Select a node or transition to edit it.</p></div></aside>
+ </div>
+</main>
+<dialog id="edge-dialog"><form method="dialog"><header><h2>Create transition</h2><button value="cancel" aria-label="Close">×</button></header><label>From<select id="edge-source"></select></label><label>To<select id="edge-target"></select></label><label>Condition<select id="edge-condition"><option value="success">Success</option><option value="failure">Failure</option><option value="always">Always</option></select></label><footer><button value="cancel" class="btn">Cancel</button><button id="edge-create" type="button" class="btn btn-primary">Create transition</button></footer></form></dialog>
+<dialog id="operation-preview-dialog"><form method="dialog"><header><h2>Per-team preview</h2><button value="cancel" aria-label="Close">×</button></header><div id="operation-preview-content"></div></form></dialog>
+<script type="module" src="/static/event-operation.js?v=1"></script>
+{% endblock %}
