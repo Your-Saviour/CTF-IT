@@ -13,6 +13,7 @@
 - Keep manual cyan, random green, dependency amber, invalid red, and absent neutral.
 - Preserve explicit state labels so meaning does not rely on colour alone.
 - Preserve the cyan outer selection outline.
+- Keep module names and descriptions near-white, secondary metadata light blue-grey, and incompatible cards at full opacity.
 - Do not change data, assignment behaviour, or workspace geometry.
 
 ---

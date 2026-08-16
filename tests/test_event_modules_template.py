@@ -76,4 +76,16 @@ def test_assignment_colours_use_flat_readable_surfaces_and_borders():
 
 def test_high_contrast_stylesheet_uses_current_cache_version():
     html = (ROOT / "frontend/templates/event_modules.html").read_text()
-    assert 'event-modules-colours.css?v=3' in html
+    assert 'event-modules-colours.css?v=4' in html
+
+
+def test_coloured_cards_keep_module_information_readable():
+    css = (ROOT / "frontend/static/event-modules-colours.css").read_text()
+    for rule in [
+        "--card-text-primary:#eef4ff",
+        "--card-text-secondary:#bdc9da",
+        ".module-card p{color:var(--card-text-primary)}",
+        ".module-card code{color:var(--card-text-secondary)}",
+        ".module-card.incompatible{opacity:1}",
+    ]:
+        assert rule in css

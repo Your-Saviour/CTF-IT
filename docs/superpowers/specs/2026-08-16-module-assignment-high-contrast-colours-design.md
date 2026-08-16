@@ -14,4 +14,6 @@ Assigned catalogue cards use a six-pixel saturated left rail, a full semantic-co
 
 The selected module keeps a separate cyan outer outline so selection remains distinguishable from assignment provenance. The treatment must remain legible without colour through the existing assignment labels.
 
+All card information remains high contrast over semantic surfaces: names and descriptions use near-white, while IDs, facts, and relationships use a light blue-grey. Incompatible modules remain at full opacity because their red state treatment and warning text already communicate incompatibility.
+
 No data model, controller behaviour, layout, or assignment workflow changes are in scope.

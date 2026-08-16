@@ -1,6 +1,8 @@
 .module-card{
     --state-color:var(--text-muted);
     --state-surface:var(--bg-elevated);
+    --card-text-primary:#eef4ff;
+    --card-text-secondary:#bdc9da;
     border-color:var(--state-color);
     border-left:6px solid var(--state-color);
     background:var(--state-surface);
@@ -11,6 +13,13 @@
 .module-card.provenance-absent{--state-color:var(--text-muted);--state-surface:var(--bg-elevated)}
 .module-card.invalid-state{--state-color:var(--red);--state-surface:color-mix(in srgb,var(--state-color) 14%,var(--bg-elevated))}
 .module-card:hover{border-color:var(--state-color)}
+.module-card h3,.module-card p{color:var(--card-text-primary)}
+.module-card code{color:var(--card-text-secondary)}
+.module-card .module-facts span{color:var(--card-text-secondary)}
+.module-card .module-tags span{color:var(--cyan)}
+.module-card .relationship{color:var(--card-text-secondary)}
+.module-card .warning,.module-card .card-warning{color:var(--amber)}
+.module-card.incompatible{opacity:1}
 .module-card.selected{
     outline:2px solid var(--cyan);
     outline-offset:3px;
