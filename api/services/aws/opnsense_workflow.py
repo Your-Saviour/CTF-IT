@@ -120,8 +120,7 @@ class AwsOpnsenseWorkflow:
                     )
                     code, _, error = workflow._ssh(
                         db, builder.public_ip,
-                        f"nohup sh /root/opnsense-bootstrap.sh -r {image.version} -y "
-                        ">/var/log/opnsense-bootstrap.log 2>&1 </dev/null &",
+                        workflow.bootstrap_launch_command(image.version),
                         timeout=30,
                     )
                     if code:

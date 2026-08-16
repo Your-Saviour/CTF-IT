@@ -36,6 +36,15 @@ def test_release_and_bootstrap_inputs_are_strict():
     with pytest.raises(ImageWorkflowError): validate_bootstrap_url("https://example.com/bootstrap.sh")
 
 
+def test_aws_bootstrap_launch_pins_the_vpc_resolver_before_fetching():
+    from api.services import opnsense_images
+
+    command = opnsense_images.bootstrap_launch_command("26.7")
+
+    assert command.index("169.254.169.253") < command.index("opnsense-bootstrap.sh")
+    assert "nohup sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
+
+
 @pytest.mark.parametrize("value", ["", "not-a-cidr", "10.0.0.1", "2001:db8::/64"])
 def test_control_plane_cidr_must_be_ipv4(value):
     with pytest.raises(ImageWorkflowError): validate_control_plane_cidr(value)

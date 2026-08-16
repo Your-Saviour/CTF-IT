@@ -249,6 +249,15 @@ def _verify_freebsd_base(db: Session, host: str) -> None:
         raise ImageWorkflowError(f"builder must be amd64 FreeBSD 15.1-compatible: {(error or output)[:300]}")
 
 
+def bootstrap_launch_command(version: str) -> str:
+    release = validate_release(version)
+    return (
+        "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
+        f"nohup sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y "
+        ">/var/log/opnsense-bootstrap.log 2>&1 </dev/null &"
+    )
+
+
 def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
     deadline = time.monotonic() + POLL_TIMEOUT
     last = "OPNsense has not answered"
