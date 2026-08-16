@@ -138,3 +138,26 @@ def test_freebsd_cloud_user_fallback_uses_available_privilege_escalation(monkeyp
     assert "/usr/local/bin/sudo" in commands[0]
     assert "sudo -n" in commands[0]
     assert "uname -m" in commands[0]
+
+
+def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
+    from api.services import opnsense_images
+
+    commands = []
+
+    def ssh(_db, _host, command, **_kwargs):
+        commands.append(command)
+        error = "pkg: repository metadata unavailable" if "tail" in command else ""
+        return 2, "", error
+
+    times = iter((0, 0, 2))
+    monkeypatch.setattr(opnsense_images, "POLL_TIMEOUT", 1)
+    monkeypatch.setattr(opnsense_images.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(opnsense_images, "_ssh", ssh)
+
+    with pytest.raises(ImageWorkflowError, match="repository metadata unavailable"):
+        opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")
+
+    assert "tail" in commands[0]
+    assert "/var/log/opnsense-bootstrap.log" in commands[0]

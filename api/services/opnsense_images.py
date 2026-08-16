@@ -254,12 +254,24 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
     last = "OPNsense has not answered"
     while time.monotonic() < deadline:
         try:
+            command = (
+                "if test -x /usr/local/sbin/configctl; then opnsense-version -v; "
+                "elif pgrep -f '[o]pnsense-bootstrap' >/dev/null; then "
+                "tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; "
+                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; fi"
+            )
             code, output, error = _ssh(
-                db, host, f"test -x /usr/local/sbin/configctl && opnsense-version -v", retry=False,
+                db, host, command, retry=False,
             )
             if code == 0 and release_matches(output.strip(), version):
                 return
             last = (error or output or f"exit {code}")[:300]
+            if code == 2:
+                raise ImageWorkflowError(
+                    f"OPNsense bootstrap exited before conversion completed: {last}"
+                )
+        except ImageWorkflowError:
+            raise
         except Exception as exc:
             last = redact_error(exc)
         time.sleep(POLL_SECONDS)
