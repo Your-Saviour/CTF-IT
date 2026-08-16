@@ -102,6 +102,32 @@ class Event(Base):
     teams: Mapped[list["Team"]] = relationship(back_populates="event")
     vms: Mapped[list["VM"]] = relationship(back_populates="event")
     sites: Mapped[list["Site"]] = relationship(back_populates="event", cascade="all, delete-orphan")
+    operations: Mapped[list["EventOperation"]] = relationship(
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="EventOperation.position",
+    )
+
+
+class EventOperation(Base):
+    __tablename__ = "event_operations"
+    __table_args__ = (
+        UniqueConstraint("event_id", "name", name="uq_event_operations_event_name"),
+        Index("ix_event_operations_event_position", "event_id", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    operation_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
+
+    event: Mapped["Event"] = relationship(back_populates="operations")
 
 
 class Team(Base):
