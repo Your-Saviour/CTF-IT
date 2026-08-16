@@ -74,6 +74,10 @@
 .card-states{display:flex;align-items:flex-end;gap:5px;flex-direction:column}
 .direct-badge{padding:4px 7px;border:1px solid var(--relation);border-radius:4px;background:var(--relation);color:var(--bg-deep);font-size:10px;font-weight:800;text-transform:uppercase;white-space:nowrap}
 .module-card.direct-dependant{border-color:var(--relation);border-left-color:var(--relation);background:color-mix(in srgb,var(--relation) 12%,var(--bg-elevated))}
-.module-card.relationship-muted:not(.invalid-state){border-color:color-mix(in srgb,var(--state-color) 35%,var(--border));border-left-color:color-mix(in srgb,var(--state-color) 35%,var(--border))}
 .direct-reason{margin-top:9px;padding:7px 8px;border-left:3px solid var(--relation);background:color-mix(in srgb,var(--relation) 10%,transparent);color:var(--relation);font-size:11px;font-weight:700}
+.relationship-group{margin-bottom:18px;padding:10px;border:1px solid color-mix(in srgb,var(--relation) 65%,var(--border));border-radius:7px;background:color-mix(in srgb,var(--relation) 6%,var(--bg-surface))}
+.relationship-group>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-10px -10px 10px;padding:9px 10px;border-bottom:1px solid color-mix(in srgb,var(--relation) 55%,var(--border));color:var(--relation)}
+.relationship-group>header span{color:var(--card-text-secondary);font-size:10px;text-transform:uppercase}
+.relationship-group .module-card:last-child{margin-bottom:0}
+.catalogue-remainder{padding-top:4px}
 .module-card.invalid-state{border-color:var(--red);border-left-color:var(--red)}

@@ -14,7 +14,7 @@
 - Do not mutate or persist assignment data.
 - Invalid red overrides relationship violet.
 - Keep explicit text labels alongside colour.
-- Start focus inactive and clear it on VM change or `Clear focus`.
+- Start focus inactive. Once established, preserve it across ordinary catalogue selection and clear it only on VM change or `Clear relationship view`.
 
 ---
 
@@ -46,8 +46,9 @@
 
 - [ ] Add failing template/controller contracts for the focus notice, clear control, direct-dependant class, and invalid precedence.
 - [ ] Render an initially hidden live focus notice above the catalogue.
-- [ ] Track focus separately from the selected details module; activate on card click and clear on VM change or button click.
-- [ ] Render direct matches with explicit relationship text, subdue unrelated cards, and prevent invalid cards receiving the valid relationship class.
+- [ ] Track focus separately from the selected details module; activate it on the first card click, preserve it across later card selection, and clear it on VM change or button click.
+- [ ] Render the parent and valid direct matches in a stable group above the remaining catalogue, with explicit relationship text.
+- [ ] Add `Use as parent` to module details as the only way to replace an existing focus parent.
 - [ ] Add flat violet relationship styling and preserve red invalid precedence.
 - [ ] Bump JavaScript and colour stylesheet cache versions.
 - [ ] Run focused Node, pytest, and JavaScript syntax checks.
