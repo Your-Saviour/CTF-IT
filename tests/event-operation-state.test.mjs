@@ -4,6 +4,7 @@ import {
   addNode, addEdge, connectionError, deleteSelection, autoArrange, moveNode,
   moveNodes, duplicateNodes, insertConnectedNode, nextId,
   isTriggerType, replaceTrigger,
+  operationTriggerTemplates, triggerPreviewText,
 } from '../frontend/static/event-operation-state.js';
 
 const base = () => ({version:1, policy:{time_limit_minutes:60}, nodes:[
@@ -126,4 +127,19 @@ test('trigger nodes cannot receive edges, be deleted, or be duplicated', () => {
   const duplicated = duplicateNodes(base(), ['trigger'], {x:20,y:20});
   assert.deepEqual(duplicated.state, base());
   assert.deepEqual(duplicated.nodeIds, []);
+});
+
+test('operationTriggerTemplates exposes the three real trigger choices', () => {
+  assert.deepEqual(operationTriggerTemplates(), [
+    {type:'manual_trigger',label:'Manual Trigger',config:{},detail:'Start explicitly by an instructor'},
+    {type:'event_start_trigger',label:'Event Start Trigger',config:{},detail:'Start once when the event begins'},
+    {type:'scheduled_trigger',label:'Scheduled Trigger',config:{offset_minutes:0},detail:'Start once after the event begins'},
+  ]);
+});
+
+test('triggerPreviewText describes manual, event-start, and scheduled contracts', () => {
+  assert.equal(triggerPreviewText({type:'manual',once:true}), 'Manual trigger · runs once');
+  assert.equal(triggerPreviewText({type:'event_start',once:true}), 'Event start trigger · runs once');
+  assert.equal(triggerPreviewText({type:'scheduled',offset_minutes:15,once:true}), 'Scheduled trigger · 15 minutes after event start · runs once');
+  assert.equal(triggerPreviewText({type:'scheduled',offset_minutes:0,once:true}), 'Scheduled trigger · when the event starts · runs once');
 });

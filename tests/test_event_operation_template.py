@@ -72,3 +72,15 @@ def test_operation_controller_wires_direct_canvas_interactions():
     assert "clipboard" in source
     assert "node-picker-search" in source
     assert "operation-connection-preview" in source
+
+
+def test_operation_designer_exposes_trigger_node_language():
+    html = (ROOT / "frontend/templates/event_operation.html").read_text()
+    source = (ROOT / "frontend/static/event-operation.js").read_text()
+    assert "Search triggers, targets, abilities, objectives, and controls" in html
+    assert "operationTriggerTemplates" in source
+    assert "replaceTrigger" in source
+    assert "Start after event begins (minutes)" in source
+    assert "triggerPreviewText" in source
+    assert "Launch mode" not in source
+    assert "Start offset (min)" not in source

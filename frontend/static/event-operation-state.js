@@ -11,6 +11,26 @@ export function isTriggerType(type) {
   return ['manual_trigger', 'event_start_trigger', 'scheduled_trigger'].includes(type);
 }
 
+export function operationTriggerTemplates() {
+  return [
+    {type:'manual_trigger', label:'Manual Trigger', config:{}, detail:'Start explicitly by an instructor'},
+    {type:'event_start_trigger', label:'Event Start Trigger', config:{}, detail:'Start once when the event begins'},
+    {type:'scheduled_trigger', label:'Scheduled Trigger', config:{offset_minutes:0}, detail:'Start once after the event begins'},
+  ];
+}
+
+export function triggerPreviewText(trigger) {
+  if (trigger.type === 'manual') return 'Manual trigger · runs once';
+  if (trigger.type === 'event_start') return 'Event start trigger · runs once';
+  if (trigger.type === 'scheduled' && trigger.offset_minutes === 0) {
+    return 'Scheduled trigger · when the event starts · runs once';
+  }
+  if (trigger.type === 'scheduled') {
+    return `Scheduled trigger · ${trigger.offset_minutes} minutes after event start · runs once`;
+  }
+  return 'Unknown trigger';
+}
+
 export function replaceTrigger(state, template) {
   if (!isTriggerType(template.type)) throw new Error('Replacement must be a trigger');
   const next = clone(state);

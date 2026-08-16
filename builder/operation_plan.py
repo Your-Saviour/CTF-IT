@@ -174,11 +174,12 @@ def validate_operation_plan(plan, infrastructure, module_plan, modules, event_mi
     outgoing = defaultdict(set); incoming = defaultdict(set)
     for edge in active_edges: outgoing[edge["source"]].add(edge["target"]); incoming[edge["target"]].add(edge["source"])
     reachable = set()
+    for trigger_node in triggers:
+        if incoming[trigger_node["id"]]:
+            issues.append({"code": "trigger_incoming", "node_id": trigger_node["id"],
+                           "message": "Trigger nodes cannot have incoming transitions"})
     if triggers:
         trigger_id = triggers[0]["id"]
-        if incoming[trigger_id]:
-            issues.append({"code": "trigger_incoming", "node_id": trigger_id,
-                           "message": "Trigger nodes cannot have incoming transitions"})
         stack = [trigger_id]
         while stack:
             current = stack.pop()

@@ -154,8 +154,11 @@ def test_validation_requires_one_root_trigger_with_no_incoming_edge():
     multiple = valid_plan()
     multiple["nodes"].append({"id": "event-trigger", "type": "event_start_trigger",
                               "label": "Event Start Trigger", "x": 0, "y": 0, "config": {}})
-    assert "trigger_count" in {issue["code"] for issue in validate_operation_plan(
+    multiple["edges"].append({"id": "incoming-second", "source": "ability",
+                              "target": "event-trigger", "condition": "failure"})
+    multiple_codes = {issue["code"] for issue in validate_operation_plan(
         multiple, infrastructure(), module_plan(), modules())}
+    assert {"trigger_count", "trigger_incoming"} <= multiple_codes
 
     incoming = valid_plan()
     incoming["edges"].append({"id": "incoming", "source": "ability", "target": "trigger", "condition": "failure"})

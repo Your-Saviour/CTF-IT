@@ -28,12 +28,12 @@
    <aside id="operation-inspector-panel" class="operation-overlay operation-inspector-panel" aria-label="Inspector" hidden><header><h2>Inspector</h2><button type="button" data-close-panel="operation-inspector-panel" aria-label="Close inspector">Close</button></header><div id="operation-inspector"></div></aside>
    <aside id="operation-outline-panel" class="operation-overlay operation-outline-panel" aria-label="Operation graph outline" hidden><header><h2>Graph outline</h2><button type="button" data-close-panel="operation-outline-panel" aria-label="Close outline">Close</button></header><nav id="operation-outline"></nav></aside>
    <aside id="operation-validation-panel" class="operation-validation-panel" aria-label="Validation issues" hidden><header><h2>Validation</h2><button type="button" data-close-panel="operation-validation-panel" aria-label="Close validation">Close</button></header><div id="operation-validation"></div></aside>
-   <section id="node-picker" class="operation-node-picker" aria-label="Add a node" hidden><header><h2>Add a node</h2><button type="button" data-close-panel="node-picker" aria-label="Close node picker">Close</button></header><label><span>Search nodes</span><input id="node-picker-search" type="search" autocomplete="off" placeholder="Search targets, abilities, objectives, and controls"></label><div id="node-picker-results"></div></section>
+   <section id="node-picker" class="operation-node-picker" aria-label="Add a node" hidden><header><h2>Add a node</h2><button type="button" data-close-panel="node-picker" aria-label="Close node picker">Close</button></header><label><span>Search nodes</span><input id="node-picker-search" type="search" autocomplete="off" placeholder="Search triggers, targets, abilities, objectives, and controls"></label><div id="node-picker-results"></div></section>
    <div id="operation-context-menu" class="operation-context-menu" role="toolbar" aria-label="Selected node actions" hidden><button type="button" data-context-action="duplicate">Duplicate</button><button type="button" data-context-action="toggle">Disable</button><button type="button" data-context-action="delete" class="danger">Delete</button></div>
    <p id="operation-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
   </section>
  </div>
 </main>
 <dialog id="operation-preview-dialog"><form method="dialog"><header><h2>Per-team preview</h2><button value="cancel" aria-label="Close">×</button></header><div id="operation-preview-content"></div></form></dialog>
-<script type="module" src="/static/event-operation.js?v=2"></script>
+<script type="module" src="/static/event-operation.js?v=3"></script>
 {% endblock %}
