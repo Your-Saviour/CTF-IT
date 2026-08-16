@@ -26,6 +26,10 @@ class AcceptanceContext:
                 "Environment": "acceptance", "AcceptanceRunId": self.run_id}
 
     @property
+    def standard_vm_tags(self):
+        return {**self.tags, "Canary": "standard-vm"}
+
+    @property
     def cleanup_context(self):
         return CleanupContext(self.run_id, self.expected_account_id)
 
@@ -43,6 +47,7 @@ class AcceptanceContext:
         from api.services.aws.tags import aws_tag_list
 
         ec2 = self.ec2()
+        tags = self.standard_vm_tags
         cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR", "").strip()
         if not cidr:
             raise ValueError("CTF_CONTROL_PLANE_CIDR is required for the SSH canary")
@@ -50,7 +55,7 @@ class AcceptanceContext:
         group = ec2.create_security_group(
             VpcId=self.config.standard_vpc_id, GroupName=group_name,
             Description="CTF-IT disposable standard VM acceptance canary",
-            TagSpecifications=[{"ResourceType": "security-group", "Tags": aws_tag_list(self.tags)}],
+            TagSpecifications=[{"ResourceType": "security-group", "Tags": aws_tag_list(tags)}],
         )
         group_id = group["GroupId"]
         ec2.authorize_security_group_ingress(
@@ -73,7 +78,7 @@ class AcceptanceContext:
         key_name = f"ctf-it-acceptance-{self.run_id}"
         ec2.import_key_pair(
             KeyName=key_name, PublicKeyMaterial=public_text.encode(),
-            TagSpecifications=[{"ResourceType": "key-pair", "Tags": aws_tag_list(self.tags)}],
+            TagSpecifications=[{"ResourceType": "key-pair", "Tags": aws_tag_list(tags)}],
         )
         compute = AwsComputeProvider(ec2)
         instance = compute.launch_instance(InstanceSpec(
@@ -84,16 +89,16 @@ class AcceptanceContext:
                 0, subnet_id=self.config.standard_subnet_id,
                 security_group_ids=(group_id,), associate_public_ip=False,
             ),),
-            tags=self.tags, key_name=key_name,
+            tags=tags, key_name=key_name,
             user_data="#cloud-config\nwrite_files:\n  - path: /var/lib/ctf-it-ready\n    content: ctf-it-ready\n",
         ))
         compute.wait_running(instance.instance_id)
-        address = compute.ensure_eip(self.tags)
+        address = compute.ensure_eip(tags)
         compute.associate_eip(address.allocation_id, instance.primary_eni_id)
         return {
             "instance_id": instance.instance_id, "public_ip": address.public_ip,
             "private_key": private_text, "allocation_id": address.allocation_id,
-            "security_group_id": group_id, "key_name": key_name,
+            "security_group_id": group_id, "key_name": key_name, "tags": tags,
         }
 
     def destroy_standard_vm(self, vm):
@@ -102,14 +107,15 @@ class AcceptanceContext:
 
         ec2 = self.ec2()
         compute = AwsComputeProvider(ec2)
-        compute.terminate_owned(vm["instance_id"], self.tags)
+        tags = vm["tags"]
+        compute.terminate_owned(vm["instance_id"], tags)
         compute.wait_terminated(vm["instance_id"])
-        compute.release_owned_eip(vm["allocation_id"], self.tags)
+        compute.release_owned_eip(vm["allocation_id"], tags)
         AwsNetworkProvider(ec2).delete_owned_security_group(
-            vm["security_group_id"], self.tags,
+            vm["security_group_id"], tags,
         )
         key = ec2.describe_key_pairs(KeyNames=[vm["key_name"]])["KeyPairs"][0]
-        assert_owned(aws_tag_dict(key.get("Tags")), self.tags)
+        assert_owned(aws_tag_dict(key.get("Tags")), tags)
         ec2.delete_key_pair(KeyName=vm["key_name"])
 
     def run_standard_vm_smoke(self, vm):

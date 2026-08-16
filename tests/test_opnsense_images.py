@@ -98,7 +98,7 @@ def test_activation_source_rejects_unvalidated_ami(monkeypatch):
     assert image.status == "failed" and active_image(db) is None
 
 
-def test_freebsd_cloud_user_fallback_executes_commands_through_doas(monkeypatch):
+def test_freebsd_cloud_user_fallback_uses_available_privilege_escalation(monkeypatch):
     from paramiko import AuthenticationException
     from api.services import opnsense_images
 
@@ -133,4 +133,8 @@ def test_freebsd_cloud_user_fallback_executes_commands_through_doas(monkeypatch)
 
     assert _ssh(object(), "198.51.100.10", "uname -m") == (0, "amd64\n", "")
     assert attempts == ["root", "freebsd"]
-    assert commands == ["doas /bin/sh -c 'uname -m'"]
+    assert len(commands) == 1
+    assert "/usr/local/bin/doas" in commands[0]
+    assert "/usr/local/bin/sudo" in commands[0]
+    assert "sudo -n" in commands[0]
+    assert "uname -m" in commands[0]

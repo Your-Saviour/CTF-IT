@@ -162,13 +162,23 @@ def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
                 client.connect(host, username=username, pkey=key, allow_agent=False,
                                look_for_keys=False, timeout=15, banner_timeout=15,
                                auth_timeout=15)
-                # Official FreeBSD images disable direct root login and grant
-                # their cloud user passwordless doas. Converted OPNsense images
-                # instead expose the managed root key. Select POSIX sh in both
-                # cases because OPNsense root otherwise receives csh.
+                # Official FreeBSD images disable direct root login. Depending
+                # on the image release, their cloud user receives passwordless
+                # doas or sudo. Converted OPNsense images instead expose the
+                # managed root key. Select POSIX sh in both cases because the
+                # account's login shell may be csh.
                 shell = _posix_command(command)
                 if username != "root":
-                    shell = "doas " + shell
+                    privileged = (
+                        "if test -x /usr/local/bin/doas; then "
+                        f"exec /usr/local/bin/doas /bin/sh -c {shlex.quote(command)}; "
+                        "elif test -x /usr/local/bin/sudo; then "
+                        f"exec /usr/local/bin/sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "elif command -v sudo >/dev/null 2>&1; then "
+                        f"exec sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "else echo 'no supported privilege escalation tool' >&2; exit 127; fi"
+                    )
+                    shell = _posix_command(privileged)
                 _stdin, stdout, stderr = client.exec_command(shell, timeout=timeout)
                 return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
                         stderr.read().decode(errors="replace"))

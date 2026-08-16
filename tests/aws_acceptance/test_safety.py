@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.aws_acceptance_cleanup import CleanupContext, cleanup_owned
-from .context import require_acceptance_context
+from .context import AcceptanceContext, require_acceptance_context
 
 
 def test_acceptance_requires_explicit_opt_in(monkeypatch):
@@ -13,6 +13,20 @@ def test_acceptance_requires_explicit_opt_in(monkeypatch):
 def test_cleanup_filter_requires_run_id_and_expected_account():
     with pytest.raises(ValueError): CleanupContext(run_id="", expected_account_id="123456789012")
     with pytest.raises(ValueError): CleanupContext(run_id="run-123456", expected_account_id="")
+
+
+def test_standard_vm_resources_have_a_canary_discriminator():
+    context = AcceptanceContext(
+        run_id="run-123456", expected_account_id="123456789012",
+        account_id="123456789012", region="ap-southeast-2",
+        config=None, sessions=None,
+    )
+
+    assert context.standard_vm_tags == {
+        **context.tags,
+        "Canary": "standard-vm",
+    }
+    assert context.standard_vm_tags != context.tags
 
 
 class CleanupEc2:
