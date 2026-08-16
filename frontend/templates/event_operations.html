@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Operations — {{ event_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-operations.css?v=1">{% endblock %}
+{% block content %}
+<main class="operations-app" data-event-id="{{ event_id }}" data-read-only="{{ read_only|tojson }}">
+  <header class="operations-header">
+    <div><a class="operations-brand" href="/admin">&gt;_ CTF Platform</a><p class="operations-step">Event planning / Operations</p><h1>{{ event_name }}</h1><p>Independent operation graphs for this training event.</p></div>
+    <div class="operations-header-actions"><span class="operations-status">{{ event_status }}</span><a class="btn" href="/admin/events/{{ event_id }}/modules">Back to modules</a><a class="btn" href="/admin/events">Finish planning</a></div>
+  </header>
+  <section class="operations-toolbar" aria-label="Operation management">
+    <div><h2>Operations</h2><p id="operations-count">Loading operations…</p></div>
+    <button id="operation-create" class="btn btn-primary" type="button"{% if read_only %} disabled{% endif %}>New operation</button>
+  </section>
+  <p id="operations-message" class="operations-message" role="status" aria-live="polite"></p>
+  <section id="operations-list" class="operations-list" aria-label="Event operations"></section>
+</main>
+
+<dialog id="operation-editor-dialog" class="operations-dialog">
+  <form id="operation-editor-form">
+    <header><div><p id="operation-editor-mode">New operation</p><h2 id="operation-editor-title">Create operation</h2></div><button type="button" data-close-editor aria-label="Close">Close</button></header>
+    <label>Name<input id="operation-name" name="name" maxlength="128" required autocomplete="off"></label>
+    <label>Description<textarea id="operation-description" name="description" rows="4"></textarea></label>
+    <p id="operation-editor-error" class="operations-error" role="alert"></p>
+    <footer><button type="button" class="btn" data-close-editor>Cancel</button><button class="btn btn-primary" type="submit">Save operation</button></footer>
+  </form>
+</dialog>
+
+<dialog id="operation-delete-dialog" class="operations-dialog operations-delete-dialog">
+  <form id="operation-delete-form">
+    <h2>Delete operation?</h2><p id="operation-delete-copy"></p><p>This removes its graph and cannot be undone.</p>
+    <footer><button type="button" class="btn" data-close-delete>Cancel</button><button class="btn operations-danger" type="submit">Delete operation</button></footer>
+  </form>
+</dialog>
+<script type="module" src="/static/event-operations.js?v=1"></script>
+{% endblock %}

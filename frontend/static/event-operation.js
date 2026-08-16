@@ -5,7 +5,7 @@ import {
 } from './event-operation-state.js?v=4';
 import {createViewport, graphPoint, zoomAt, fitViewport, createHistory, nodeTargetLabel, nodeLabelLines} from './event-operation-workspace.js';
 
-const app=document.querySelector('.operation-app'),eventId=app.dataset.eventId,readOnly=app.dataset.readOnly==='true';
+const app=document.querySelector('.operation-app'),eventId=app.dataset.eventId,operationId=app.dataset.operationId,readOnly=app.dataset.readOnly==='true';
 const $=id=>document.getElementById(id),svgNS='http://www.w3.org/2000/svg',canvas=$('operation-canvas'),wrap=canvas.closest('.operation-canvas-wrap'),NODE_WIDTH=190,NODE_HEIGHT=104;
 const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 let plan=null,catalogue=null,updatedAt=null,dirty=false,issues=[],history=null,viewport=createViewport(1,1);
@@ -14,7 +14,7 @@ let selectedNodes=new Set(),selectedEdge=null,gesture=null,pickerRows=[],pickerP
 function setState(text){$('operation-save-state').textContent=text}
 function announce(text){$('operation-announcer').textContent='';requestAnimationFrame(()=>{$('operation-announcer').textContent=text})}
 function markDirty(){dirty=true;setState('Unsaved changes')}
-function api(path,options={}){return fetch(`/admin/api/events/${eventId}/operation-plan${path}`,{headers:{'Content-Type':'application/json'},...options}).then(async response=>{const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Request failed'),{data});return data})}
+function api(path,options={}){return fetch(`/admin/api/events/${eventId}/operations/${operationId}/plan${path}`,{headers:{'Content-Type':'application/json'},...options}).then(async response=>{const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Request failed'),{data});return data})}
 function svgElement(name,attrs={}){const element=document.createElementNS(svgNS,name);Object.entries(attrs).forEach(([key,value])=>element.setAttribute(key,value));return element}
 function screenPoint(event){const rect=canvas.getBoundingClientRect();return{x:event.clientX-rect.left,y:event.clientY-rect.top}}
 function eventGraphPoint(event){return graphPoint(viewport,screenPoint(event))}

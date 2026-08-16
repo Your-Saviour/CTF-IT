@@ -32,7 +32,7 @@ def test_operation_designer_exposes_real_workflow_actions_and_dialogs():
     html = (ROOT / "frontend/templates/event_operation.html").read_text()
     for identifier in ("operation-validate", "operation-arrange", "operation-preview", "operation-save"):
         assert f'id="{identifier}"' in html
-    assert f'/admin/events/{{{{ event_id }}}}/modules' in html
+    assert f'/admin/events/{{{{ event_id }}}}/operation' in html
     assert 'id="operation-preview-dialog"' in html
     assert 'id="edge-dialog"' not in html
 
