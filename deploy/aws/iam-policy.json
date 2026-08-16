@@ -18,6 +18,7 @@
         "ec2:DescribeAddresses",
         "ec2:DescribeImages",
         "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
         "ec2:DescribeInstanceTypes",
         "ec2:DescribeInstanceTypeOfferings",
         "ec2:DescribeInternetGateways",
@@ -27,7 +28,9 @@
         "ec2:DescribeSecurityGroups",
         "ec2:DescribeSnapshots",
         "ec2:DescribeSubnets",
-        "ec2:DescribeVpcs"
+        "ec2:DescribeVpcs",
+        "ec2:GetConsoleOutput",
+        "ec2:GetConsoleScreenshot"
       ],
       "Resource": "*"
     },
