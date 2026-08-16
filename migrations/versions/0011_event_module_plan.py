@@ -13,8 +13,11 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("events", sa.Column("module_plan", sa.Text(), nullable=True))
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("events")}
+    if "module_plan" not in columns:
+        with op.batch_alter_table("events") as batch:
+            batch.add_column(sa.Column("module_plan", sa.Text(), nullable=True))
 
 
 def downgrade():
-    op.drop_column("events", "module_plan")
+    pass
