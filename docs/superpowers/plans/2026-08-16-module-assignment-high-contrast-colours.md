@@ -39,7 +39,7 @@ Expected: FAIL because the current styling uses a four-pixel rail, low-opacity b
 
 - [ ] **Step 3: Write minimal implementation**
 
-Update `event-modules-colours.css` so assigned and invalid cards use a six-pixel rail, semantic outer border, and stronger linear-gradient tint. Give badges a solid semantic background and dark text. Give usage rows semantic border, tint, padding, and radius while leaving absent rows neutral.
+Update `event-modules-colours.css` so assigned and invalid cards use a six-pixel rail, semantic outer border, and one flat low-luminance semantic surface without gradients or glow. Give badges a solid semantic background and dark text. Give usage rows semantic border, flat tint, padding, and radius while leaving absent rows neutral.
 
 - [ ] **Step 4: Run focused verification**
 

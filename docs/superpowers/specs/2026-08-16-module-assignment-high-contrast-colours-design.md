@@ -10,7 +10,7 @@ Increase the visibility of the existing semantic assignment colours without chan
 - Conflict and incompatibility remain red and override provenance styling.
 - Unassigned modules remain neutral.
 
-Assigned catalogue cards use a six-pixel saturated left rail, a full semantic-colour border, and a stronger tinted surface. Status badges use solid semantic fills with dark high-contrast text. Assignment summary and plan-wide usage rows use tinted inset panels with semantic borders, while retaining markers and explicit text labels.
+Assigned catalogue cards use a six-pixel saturated left rail, a full semantic-colour border, and one flat low-luminance semantic surface. There are no gradients or glows behind card content. Status badges use solid semantic fills with dark high-contrast text. Assignment summary and plan-wide usage rows use flat tinted inset panels with semantic borders, while retaining markers and explicit text labels.
 
 The selected module keeps a separate cyan outer outline so selection remains distinguishable from assignment provenance. The treatment must remain legible without colour through the existing assignment labels.
 

@@ -1,23 +1,21 @@
 .module-card{
     --state-color:var(--text-muted);
-    --state-tint-strength:0%;
+    --state-surface:var(--bg-elevated);
     border-color:var(--state-color);
     border-left:6px solid var(--state-color);
-    background:
-        linear-gradient(90deg,color-mix(in srgb,var(--state-color) var(--state-tint-strength),transparent),transparent 68%),
-        var(--bg-elevated);
+    background:var(--state-surface);
 }
-.module-card.provenance-manual{--state-color:var(--cyan);--state-tint-strength:28%}
-.module-card.provenance-random{--state-color:var(--green);--state-tint-strength:28%}
-.module-card.provenance-dependency{--state-color:var(--amber);--state-tint-strength:28%}
-.module-card.provenance-absent{--state-color:var(--text-muted);--state-tint-strength:0%}
-.module-card.invalid-state{--state-color:var(--red);--state-tint-strength:32%}
-.module-card:hover{border-color:var(--state-color);filter:brightness(1.08)}
+.module-card.provenance-manual{--state-color:var(--cyan);--state-surface:color-mix(in srgb,var(--state-color) 12%,var(--bg-elevated))}
+.module-card.provenance-random{--state-color:var(--green);--state-surface:color-mix(in srgb,var(--state-color) 12%,var(--bg-elevated))}
+.module-card.provenance-dependency{--state-color:var(--amber);--state-surface:color-mix(in srgb,var(--state-color) 12%,var(--bg-elevated))}
+.module-card.provenance-absent{--state-color:var(--text-muted);--state-surface:var(--bg-elevated)}
+.module-card.invalid-state{--state-color:var(--red);--state-surface:color-mix(in srgb,var(--state-color) 14%,var(--bg-elevated))}
+.module-card:hover{border-color:var(--state-color)}
 .module-card.selected{
     outline:2px solid var(--cyan);
     outline-offset:3px;
     border-color:var(--state-color);
-    box-shadow:0 0 18px color-mix(in srgb,var(--state-color) 28%,transparent);
+    box-shadow:none;
 }
 .assignment-state{
     display:inline-flex;
@@ -27,7 +25,7 @@
     background:var(--state-color);
     color:var(--bg-deep);
     font-weight:800;
-    box-shadow:0 0 12px color-mix(in srgb,var(--state-color) 38%,transparent);
+    box-shadow:none;
 }
 .provenance-marker{
     display:inline-block;
@@ -36,7 +34,7 @@
     flex:0 0 auto;
     border-radius:50%;
     background:currentColor;
-    box-shadow:0 0 7px color-mix(in srgb,var(--state-color) 55%,transparent);
+    box-shadow:none;
 }
 .usage-row{
     --state-color:var(--text-muted);
