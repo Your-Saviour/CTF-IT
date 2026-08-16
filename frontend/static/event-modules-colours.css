@@ -1,11 +1,62 @@
-.module-card{--state-color:var(--text-muted);--state-tint:transparent;border-left:4px solid var(--state-color);background:linear-gradient(90deg,var(--state-tint),transparent 42%),var(--bg-elevated)}
-.module-card.provenance-manual{--state-color:var(--cyan);--state-tint:var(--cyan-subtle)}
-.module-card.provenance-random{--state-color:var(--green);--state-tint:var(--green-glow)}
-.module-card.provenance-dependency{--state-color:var(--amber);--state-tint:var(--amber-glow)}
-.module-card.provenance-absent{--state-color:var(--text-muted);--state-tint:transparent}
-.module-card.invalid-state{--state-color:var(--red);--state-tint:var(--red-glow)}
-.module-card.selected{outline:2px solid var(--cyan);outline-offset:2px;border-top-color:var(--state-color);border-right-color:var(--state-color);border-bottom-color:var(--state-color);box-shadow:none}
-.assignment-state{display:inline-flex;align-items:center;gap:6px;border-color:color-mix(in srgb,var(--state-color) 60%,var(--border));color:var(--state-color);background:color-mix(in srgb,var(--state-color) 10%,transparent)}
-.provenance-marker{background:var(--state-color);display:inline-block;width:8px;height:8px;border-radius:50%;box-shadow:0 0 7px color-mix(in srgb,var(--state-color) 55%,transparent);flex:0 0 auto}
-.usage-row{--state-color:var(--text-muted);display:grid!important;grid-template-columns:8px minmax(0,1fr) auto!important;align-items:center}.usage-row.provenance-manual{--state-color:var(--cyan)}.usage-row.provenance-random{--state-color:var(--green)}.usage-row.provenance-dependency{--state-color:var(--amber)}.usage-row.provenance-absent{--state-color:var(--text-muted)}.usage-row>span{color:var(--state-color);font-size:9px;text-transform:uppercase}
-.detail-head.provenance-manual{--state-color:var(--cyan)}.detail-head.provenance-random{--state-color:var(--green)}.detail-head.provenance-dependency{--state-color:var(--amber)}.detail-head.provenance-absent{--state-color:var(--text-muted)}
+.module-card{
+    --state-color:var(--text-muted);
+    --state-tint-strength:0%;
+    border-color:var(--state-color);
+    border-left:6px solid var(--state-color);
+    background:
+        linear-gradient(90deg,color-mix(in srgb,var(--state-color) var(--state-tint-strength),transparent),transparent 68%),
+        var(--bg-elevated);
+}
+.module-card.provenance-manual{--state-color:var(--cyan);--state-tint-strength:28%}
+.module-card.provenance-random{--state-color:var(--green);--state-tint-strength:28%}
+.module-card.provenance-dependency{--state-color:var(--amber);--state-tint-strength:28%}
+.module-card.provenance-absent{--state-color:var(--text-muted);--state-tint-strength:0%}
+.module-card.invalid-state{--state-color:var(--red);--state-tint-strength:32%}
+.module-card:hover{border-color:var(--state-color);filter:brightness(1.08)}
+.module-card.selected{
+    outline:2px solid var(--cyan);
+    outline-offset:3px;
+    border-color:var(--state-color);
+    box-shadow:0 0 18px color-mix(in srgb,var(--state-color) 28%,transparent);
+}
+.assignment-state{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    border-color:var(--state-color);
+    background:var(--state-color);
+    color:var(--bg-deep);
+    font-weight:800;
+    box-shadow:0 0 12px color-mix(in srgb,var(--state-color) 38%,transparent);
+}
+.provenance-marker{
+    display:inline-block;
+    width:8px;
+    height:8px;
+    flex:0 0 auto;
+    border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 7px color-mix(in srgb,var(--state-color) 55%,transparent);
+}
+.usage-row{
+    --state-color:var(--text-muted);
+    display:grid!important;
+    grid-template-columns:8px minmax(0,1fr) auto!important;
+    align-items:center;
+    margin:6px 0;
+    padding:9px 10px!important;
+    border:1px solid var(--state-color)!important;
+    border-radius:5px;
+    background:color-mix(in srgb,var(--state-color) 16%,var(--bg-elevated));
+    box-shadow:inset 0 0 0 1px var(--state-color);
+}
+.usage-row.provenance-manual{--state-color:var(--cyan)}
+.usage-row.provenance-random{--state-color:var(--green)}
+.usage-row.provenance-dependency{--state-color:var(--amber)}
+.usage-row.provenance-absent{--state-color:var(--text-muted)}
+.usage-row>.provenance-marker{background:var(--state-color)}
+.usage-row>span{color:var(--state-color);font-size:9px;font-weight:800;text-transform:uppercase}
+.detail-head.provenance-manual{--state-color:var(--cyan)}
+.detail-head.provenance-random{--state-color:var(--green)}
+.detail-head.provenance-dependency{--state-color:var(--amber)}
+.detail-head.provenance-absent{--state-color:var(--text-muted)}

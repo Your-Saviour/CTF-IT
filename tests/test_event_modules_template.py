@@ -56,3 +56,21 @@ def test_controller_renders_provenance_classes_beyond_badges():
     script = (ROOT / "frontend/static/event-modules.js").read_text()
     assert 'provenance-${provenance}' in script
     assert 'class="usage-row provenance-${item.provenance}"' in script
+
+
+def test_assignment_colours_use_high_contrast_surfaces_and_borders():
+    css = (ROOT / "frontend/static/event-modules-colours.css").read_text()
+    for rule in [
+        "border-left:6px solid var(--state-color)",
+        "border-color:var(--state-color)",
+        "--state-tint-strength:28%",
+        "background:var(--state-color)",
+        "color:var(--bg-deep)",
+        "box-shadow:inset 0 0 0 1px var(--state-color)",
+    ]:
+        assert rule in css
+
+
+def test_high_contrast_stylesheet_uses_current_cache_version():
+    html = (ROOT / "frontend/templates/event_modules.html").read_text()
+    assert 'event-modules-colours.css?v=2' in html
