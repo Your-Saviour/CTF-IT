@@ -76,6 +76,7 @@ class Event(Base):
     quota: Mapped[str] = mapped_column(Text, nullable=False)
     infrastructure: Mapped[str] = mapped_column(Text, nullable=True)
     infrastructure_layout: Mapped[str] = mapped_column(Text, nullable=True)
+    module_plan: Mapped[str] = mapped_column(Text, nullable=True)
     open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
     status: Mapped[str] = mapped_column(String(16), default="draft")
     description: Mapped[str] = mapped_column(Text, nullable=True)
