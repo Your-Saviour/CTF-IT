@@ -97,7 +97,18 @@ def operation_catalogue(infrastructure, module_plan, modules):
     assignments = normalize_module_plan(module_plan)["assignments"]
     assigned = set()
     for row in assignments.values():
+        assigned.update(row["pinned_module_ids"])
         assigned.update(row["resolved_module_ids"])
+    by_id = {module.id: module for module in modules}
+    pending = list(assigned)
+    while pending:
+        module = by_id.get(pending.pop())
+        if not module:
+            continue
+        for required_id in getattr(module, "requires", []):
+            if required_id not in assigned:
+                assigned.add(required_id)
+                pending.append(required_id)
     abilities, objectives = [], []
     for module in sorted(modules, key=lambda item: item.id):
         if module.id not in assigned or module.disabled or not module.caldera:

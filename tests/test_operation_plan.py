@@ -85,6 +85,23 @@ def test_catalogue_only_contains_assigned_caldera_abilities_and_planned_vms():
     assert [row["module_id"] for row in catalogue["objectives"]] == ["exfil"]
 
 
+def test_catalogue_treats_pins_and_recursive_dependencies_as_effective_assignments():
+    library = modules()
+    library[0].requires = ["foundation"]
+    library.append(SimpleNamespace(
+        id="foundation", name="Foundation", description="Required service", type="vulnerability",
+        disabled=False, supported_bases=["ubuntu"], stage="caldera", requires=[], caldera={
+            "tactic": "discovery", "technique": {"attack_id": "T1082", "name": "System Information"},
+            "recon": {"command": "uname -a"},
+        },
+    ))
+    pinned_only = module_plan()
+    pinned_only["assignments"][VM_ID]["pinned_module_ids"] = ["weak_ssh"]
+    pinned_only["assignments"][VM_ID]["resolved_module_ids"] = []
+    ability_modules = {row["module_id"] for row in operation_catalogue(infrastructure(), pinned_only, library)["abilities"]}
+    assert ability_modules == {"weak_ssh", "foundation"}
+
+
 def test_validation_accepts_optional_objective_and_rejects_cycle():
     assert validate_operation_plan(valid_plan(), infrastructure(), module_plan(), modules()) == []
     plan = valid_plan()
@@ -107,6 +124,7 @@ def test_fingerprint_changes_with_inputs_not_layout():
     moved["sites"][0]["x"] = 900
     assert operation_input_fingerprint(moved, module_plan(), modules()) == first
     changed = module_plan()
+    changed["assignments"][VM_ID]["pinned_module_ids"] = ["weak_ssh"]
     changed["assignments"][VM_ID]["resolved_module_ids"] = ["weak_ssh"]
     assert operation_input_fingerprint(infrastructure(), changed, modules()) != first
 
