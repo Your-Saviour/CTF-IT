@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {addNode, addEdge, deleteSelection, autoArrange, nextId} from '../frontend/static/event-operation-state.js';
+import {addNode, addEdge, deleteSelection, autoArrange, moveNode, nextId} from '../frontend/static/event-operation-state.js';
 
 const base = () => ({version:1, policy:{launch_mode:'manual'}, nodes:[
   {id:'start',type:'start',label:'Start',x:0,y:0,config:{}},
@@ -43,4 +43,12 @@ test('autoArrange is deterministic and orders connected nodes by depth', () => {
   const xs = Object.fromEntries(arranged.nodes.map(node => [node.id,node.x]));
   assert.ok(xs.start < xs['delay-1'] && xs['delay-1'] < xs.finish);
   assert.deepEqual(autoArrange(state), arranged);
+});
+
+test('moveNode updates one node without mutating state and clamps to the canvas origin', () => {
+  const state = base();
+  const moved = moveNode(state, 'start', {x:-30,y:245});
+  assert.deepEqual([state.nodes[0].x,state.nodes[0].y], [0,0]);
+  assert.deepEqual([moved.nodes[0].x,moved.nodes[0].y], [0,245]);
+  assert.deepEqual(moved.nodes[1], state.nodes[1]);
 });

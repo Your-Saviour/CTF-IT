@@ -43,6 +43,15 @@ export function deleteSelection(state, selection) {
   return next;
 }
 
+export function moveNode(state, nodeId, position) {
+  const next = clone(state);
+  const node = next.nodes.find(row => row.id === nodeId);
+  if (!node) throw new Error('Node does not exist');
+  node.x = Math.max(0, Number(position.x) || 0);
+  node.y = Math.max(0, Number(position.y) || 0);
+  return next;
+}
+
 export function autoArrange(state) {
   const next = clone(state);
   const ids = next.nodes.map(node => node.id);

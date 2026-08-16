@@ -37,3 +37,12 @@ def test_module_assignment_links_forward_to_operation_design():
     html = (ROOT / "frontend/templates/event_modules.html").read_text()
     assert f'/admin/events/{{{{ event_id }}}}/operation' in html
     assert "Design operation" in html
+
+
+def test_operation_nodes_use_pointer_capture_for_dragging():
+    source = (ROOT / "frontend/static/event-operation.js").read_text()
+    assert "onpointerdown" in source
+    assert "setPointerCapture" in source
+    assert "onpointermove" in source
+    assert "releasePointerCapture" in source
+    assert "moveNode" in source
