@@ -265,7 +265,7 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
             )
             if code == 0 and release_matches(output.strip(), version):
                 return
-            last = (error or output or f"exit {code}")[:300]
+            last = (error or output or f"exit {code}")[-1000:]
         except Exception as exc:
             last = redact_error(exc)
         else:

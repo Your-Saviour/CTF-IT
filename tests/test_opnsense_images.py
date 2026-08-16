@@ -145,9 +145,11 @@ def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
 
     commands = []
 
+    decisive_error = "fetch failed: decisive network error"
+
     def ssh(_db, _host, command, **_kwargs):
         commands.append(command)
-        error = "pkg: repository metadata unavailable" if "tail" in command else ""
+        error = ("x" * 350 + decisive_error) if "tail" in command else ""
         return 2, "", error
 
     times = iter((0, 0, 2))
@@ -156,7 +158,7 @@ def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
     monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(opnsense_images, "_ssh", ssh)
 
-    with pytest.raises(ImageWorkflowError, match="repository metadata unavailable"):
+    with pytest.raises(ImageWorkflowError, match=decisive_error):
         opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")
 
     assert "tail" in commands[0]
