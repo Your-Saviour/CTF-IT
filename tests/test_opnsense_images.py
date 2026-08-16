@@ -161,3 +161,26 @@ def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
 
     assert "tail" in commands[0]
     assert "/var/log/opnsense-bootstrap.log" in commands[0]
+
+
+def test_opnsense_wait_retries_transient_ssh_banner_failure(monkeypatch):
+    from api.services import opnsense_images
+
+    results = iter((
+        ImageWorkflowError("SSH did not become ready: Error reading SSH protocol banner"),
+        (0, "26.7\n", ""),
+    ))
+
+    def ssh(*_args, **_kwargs):
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    times = iter((0, 0, 1))
+    monkeypatch.setattr(opnsense_images, "POLL_TIMEOUT", 10)
+    monkeypatch.setattr(opnsense_images.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(opnsense_images, "_ssh", ssh)
+
+    opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")

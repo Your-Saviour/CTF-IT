@@ -266,14 +266,13 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
             if code == 0 and release_matches(output.strip(), version):
                 return
             last = (error or output or f"exit {code}")[:300]
+        except Exception as exc:
+            last = redact_error(exc)
+        else:
             if code == 2:
                 raise ImageWorkflowError(
                     f"OPNsense bootstrap exited before conversion completed: {last}"
                 )
-        except ImageWorkflowError:
-            raise
-        except Exception as exc:
-            last = redact_error(exc)
         time.sleep(POLL_SECONDS)
     raise ImageWorkflowError(f"bootstrap reboot did not return the expected OPNsense release: {last}")
 
