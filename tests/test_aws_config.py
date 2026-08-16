@@ -1,3 +1,5 @@
+import importlib
+
 import pytest
 
 from api.services.aws import (
@@ -120,3 +122,7 @@ def test_session_factory_uses_profile_and_region_without_explicit_secrets(monkey
         "region_name": "ap-southeast-2",
     }
     assert captured["client"] == ("ec2", {"region_name": "us-east-1"})
+
+
+def test_runtime_includes_crt_for_aws_login_profiles():
+    assert importlib.import_module("awscrt")
