@@ -195,3 +195,22 @@ def test_opnsense_wait_retries_transient_ssh_banner_failure(monkeypatch):
     monkeypatch.setattr(opnsense_images, "_ssh", ssh)
 
     opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")
+
+
+def test_opnsense_wait_fails_when_bootstrap_log_stops_changing(monkeypatch, caplog):
+    from api.services import opnsense_images
+
+    monkeypatch.setattr(opnsense_images, "POLL_TIMEOUT", 60)
+    monkeypatch.setattr(opnsense_images, "POLL_SECONDS", 10)
+    monkeypatch.setattr(opnsense_images, "BOOTSTRAP_STALL_TIMEOUT", 20)
+    monkeypatch.setattr(opnsense_images.time, "monotonic", iter((0, 0, 1, 2)).__next__)
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        opnsense_images, "_ssh",
+        lambda *_args, **_kwargs: (1, "", "fetching package index: 42%"),
+    )
+
+    with caplog.at_level("INFO"), pytest.raises(ImageWorkflowError, match="stalled.*42%"):
+        opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")
+
+    assert "OPNsense bootstrap progress" in caplog.text

@@ -12,6 +12,7 @@ import bcrypt
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -41,6 +42,9 @@ TERMINAL_STATES = {"ready", "active", "retired"}
 ACTIVE_SETTING = "active_opnsense_image_id"
 POLL_SECONDS = int(os.environ.get("OPNSENSE_IMAGE_POLL_SECONDS", "10"))
 POLL_TIMEOUT = int(os.environ.get("OPNSENSE_IMAGE_TIMEOUT_SECONDS", "1800"))
+BOOTSTRAP_STALL_TIMEOUT = int(os.environ.get("OPNSENSE_BOOTSTRAP_STALL_SECONDS", "600"))
+
+logger = logging.getLogger(__name__)
 
 
 class ImageWorkflowError(RuntimeError):
@@ -261,6 +265,8 @@ def bootstrap_launch_command(version: str) -> str:
 def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
     deadline = time.monotonic() + POLL_TIMEOUT
     last = "OPNsense has not answered"
+    last_progress = None
+    stalled_polls = 0
     while time.monotonic() < deadline:
         try:
             command = (
@@ -282,6 +288,15 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
                 raise ImageWorkflowError(
                     f"OPNsense bootstrap exited before conversion completed: {last}"
                 )
+            if code:
+                if last != last_progress:
+                    logger.info("OPNsense bootstrap progress: %s", last)
+                    last_progress = last
+                    stalled_polls = 0
+                else:
+                    stalled_polls += 1
+                    if stalled_polls * POLL_SECONDS >= BOOTSTRAP_STALL_TIMEOUT:
+                        raise ImageWorkflowError(f"OPNsense bootstrap stalled: {last}")
         time.sleep(POLL_SECONDS)
     raise ImageWorkflowError(f"bootstrap reboot did not return the expected OPNsense release: {last}")
 
