@@ -712,6 +712,70 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
     }
 
 
+@router.get("/events/{event_id}/module-plan")
+async def get_module_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    from builder.infrastructure_planner import normalize_infrastructure
+    from builder.module_loader import load_all_modules
+    from builder.module_plan import assignable_endpoints, empty_module_plan, reconcile_module_plan
+    infrastructure = normalize_infrastructure(json.loads(event.infrastructure))
+    plan, issues = reconcile_module_plan(json.loads(event.module_plan) if event.module_plan else empty_module_plan(), infrastructure)
+    modules = load_all_modules()
+    return {"module_plan": plan, "vms": assignable_endpoints(infrastructure), "issues": issues,
+            "updated_at": event.updated_at.isoformat(), "quota": json.loads(event.quota),
+            "modules": [{"id": m.id, "name": m.name, "description": m.description, "type": m.type,
+                         "difficulty": m.difficulty, "category": m.category, "tags": m.tags,
+                         "stage": m.stage, "points": m.points, "requires": m.requires,
+                         "conflicts": m.conflicts, "supported_bases": m.supported_bases,
+                         "disabled": m.disabled} for m in modules]}
+
+
+@router.put("/events/{event_id}/module-plan")
+async def save_module_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "module assignments are read only"}, status_code=409)
+    body = await request.json()
+    try:
+        if _utc_instant(body.get("expected_updated_at")) != _utc_instant(event.updated_at):
+            return JSONResponse({"error": "event draft has changed", "current_updated_at": event.updated_at.isoformat()}, status_code=409)
+        from builder.module_plan import normalize_module_plan
+        plan = normalize_module_plan(body.get("module_plan"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    event.module_plan = json.dumps(plan); event.updated_at = utcnow(); db.commit(); db.refresh(event)
+    return {"status": "saved", "updated_at": event.updated_at.isoformat()}
+
+
+@router.post("/events/{event_id}/module-plan/resolve")
+async def resolve_module_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event or event.status != "draft":
+        return JSONResponse({"error": "draft event not found"}, status_code=404)
+    body = await request.json()
+    from builder.infrastructure_planner import normalize_infrastructure
+    from builder.module_loader import load_all_modules
+    from builder.module_plan import assignable_endpoints, resolve_assignment
+    endpoints = {row["id"]: row for row in assignable_endpoints(normalize_infrastructure(json.loads(event.infrastructure)))}
+    endpoint = endpoints.get(body.get("vm_id"))
+    if not endpoint:
+        return JSONResponse({"error": "planned VM not found"}, status_code=404)
+    refill = bool(body.get("refill", False))
+    if endpoint["role"] == "red" and refill:
+        return JSONResponse({"error": "red-team VMs are manual-only"}, status_code=422)
+    return resolve_assignment(endpoint, body.get("assignment", {}), json.loads(event.quota), load_all_modules(), refill=refill)
+
+
 @router.post("/events")
 async def create_event(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)

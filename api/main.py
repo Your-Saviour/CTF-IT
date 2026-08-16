@@ -629,6 +629,18 @@ async def event_plan_page(event_id: int, request: Request, db: Session = Depends
     })
 
 
+@app.get("/admin/events/{event_id}/modules", response_class=HTMLResponse)
+async def event_modules_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_modules.html", {"user": user, "event_id": event.id,
+        "event_name": event.name, "event_status": event.status, "read_only": event.status != "draft"})
+
+
 @app.get("/admin/events/{event_id}/dashboard", response_class=HTMLResponse)
 async def event_dashboard_page(event_id: int, request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)

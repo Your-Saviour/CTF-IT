@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Assign Modules — {{ event_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-modules.css">{% endblock %}{% block site_nav %}{% endblock %}
+{% block container_class %}modules-root{% endblock %}{% block content %}
+<main class="modules-app" data-event-id="{{ event_id }}" data-read-only="{{ read_only|tojson }}">
+<header class="modules-bar"><a href="/admin/events/{{ event_id }}/plan">Back to network plan</a><div><h1>{{ event_name }}</h1><span>{{ event_status }} · canonical across all teams</span></div><span id="save-state">Loading…</span><button id="preview">Preview</button><button id="save">Save draft</button><form method="post" action="/auth/logout"><button>Logout</button></form></header>
+<section id="module-errors" aria-live="polite"></section><div class="modules-workspace"><aside><h2>Planned VMs</h2><nav id="vm-list"></nav></aside><section><div class="catalogue-head"><h2>Module catalogue</h2><input id="module-search" placeholder="Search modules"><select id="module-type"><option value="">All types</option></select></div><div id="catalogue"></div></section><aside><h2>Assignment</h2><div id="assignment"></div></aside></div></main>
+<script type="module" src="/static/event-modules.js"></script>{% endblock %}
