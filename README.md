@@ -164,6 +164,8 @@ Draft events include a full-page network planner at `/admin/events/{id}/plan`. T
 
 New endpoint entries represent one VM each and include `key`, `name`, `base_type`, and `default_plan`. Existing count-based endpoint groups remain supported and expand into individual nodes when opened in the planner.
 
+The operation step at `/admin/events/{id}/operation` supports multiple independent, named operation graphs per event. Administrators can create, describe, duplicate, rename, and delete operations from the overview, then open each operation in its own full-page designer. Operations share the event's planned machines and assigned modules, but keep separate triggers, policies, validation, previews, and save revisions.
+
 Events are the central organising unit. Each event has its own module quota, leaderboard, and settings. Invitation links assign new participants to an event; administrators can reassign them later.
 
 ### Event lifecycle

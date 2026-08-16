@@ -96,6 +96,7 @@ The platform supports multiple concurrent events, each with independent settings
 - **Scoreboard scoping**: `GET /api/scoreboard?event_id=X` returns per-event rankings. `GET /api/scoreboard/events` lists all non-draft events for the selector dropdown.
 - **Legacy `open` column**: the `Event.open` boolean is kept in the schema for SQLite compatibility (no column drops) but superseded by the `status` field. All code uses `status`.
 - **Network planning**: `/admin/events/{id}/plan` is the diagram-first editor for draft GameNet infrastructure. Its canonical topology repeats per team. Endpoint records without `count` represent individual VMs; legacy count groups normalize on edit and remain provisionable. Presentation coordinates live in `Event.infrastructure_layout`, separate from the provisioning JSON, and planner saves use `Event.updated_at` for optimistic concurrency.
+- **Operation planning**: `/admin/events/{id}/operation` lists the event's independent named operations. Each `EventOperation` owns its description, display position, provider-neutral graph JSON, and optimistic-lock timestamp while sharing the parent event's network and module catalogue. `/admin/events/{id}/operations/{operation_id}` opens the full-page graph designer. Legacy `Event.operation_plan` data migrates once into an operation named `Operation 1`; the legacy column is retained only for database compatibility.
 
 ### Ansible Export
 

@@ -33,12 +33,3 @@ def test_operation_plan_migration_is_guarded_for_existing_databases():
     assert 'revision = "0012_event_operation_plan"' in source
     assert 'down_revision = "0011_event_module_plan"' in source
     assert '"operation_plan" not in columns' in source
-
-
-def test_admin_routes_expose_save_validate_and_preview_contracts():
-    source = Path("api/routes/admin.py").read_text()
-    assert '@router.get("/events/{event_id}/operation-plan")' in source
-    assert '@router.put("/events/{event_id}/operation-plan")' in source
-    assert '@router.post("/events/{event_id}/operation-plan/validate")' in source
-    assert '@router.post("/events/{event_id}/operation-plan/preview")' in source
-    assert "compile_team_preview" in source
