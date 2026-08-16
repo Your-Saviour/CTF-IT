@@ -67,3 +67,13 @@
 .detail-head.provenance-random{--state-color:var(--green)}
 .detail-head.provenance-dependency{--state-color:var(--amber)}
 .detail-head.provenance-absent{--state-color:var(--text-muted)}
+.modules-app{--relation:#b388ff}
+#dependency-focus{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:9px 10px;border:1px solid var(--relation);border-radius:5px;background:color-mix(in srgb,var(--relation) 12%,var(--bg-elevated));color:var(--card-text-primary,#eef4ff);font-size:11px}
+#dependency-focus[hidden]{display:none}
+#clear-dependency-focus{padding:5px 7px;border:1px solid var(--relation);border-radius:4px;background:transparent;color:var(--relation);font:10px 'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer}
+.card-states{display:flex;align-items:flex-end;gap:5px;flex-direction:column}
+.direct-badge{padding:4px 7px;border:1px solid var(--relation);border-radius:4px;background:var(--relation);color:var(--bg-deep);font-size:10px;font-weight:800;text-transform:uppercase;white-space:nowrap}
+.module-card.direct-dependant{border-color:var(--relation);border-left-color:var(--relation);background:color-mix(in srgb,var(--relation) 12%,var(--bg-elevated))}
+.module-card.relationship-muted:not(.invalid-state){border-color:color-mix(in srgb,var(--state-color) 35%,var(--border));border-left-color:color-mix(in srgb,var(--state-color) 35%,var(--border))}
+.direct-reason{margin-top:9px;padding:7px 8px;border-left:3px solid var(--relation);background:color-mix(in srgb,var(--relation) 10%,transparent);color:var(--relation);font-size:11px;font-weight:700}
+.module-card.invalid-state{border-color:var(--red);border-left-color:var(--red)}

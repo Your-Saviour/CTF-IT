@@ -76,7 +76,8 @@ def test_assignment_colours_use_flat_readable_surfaces_and_borders():
 
 def test_high_contrast_stylesheet_uses_current_cache_version():
     html = (ROOT / "frontend/templates/event_modules.html").read_text()
-    assert 'event-modules-colours.css?v=4' in html
+    assert 'event-modules-colours.css?v=5' in html
+    assert 'event-modules.js?v=3' in html
 
 
 def test_coloured_cards_keep_module_information_readable():
@@ -89,3 +90,22 @@ def test_coloured_cards_keep_module_information_readable():
         ".module-card.incompatible{opacity:1}",
     ]:
         assert rule in css
+
+
+def test_catalogue_exposes_direct_dependant_focus_controls():
+    html = (ROOT / "frontend/templates/event_modules.html").read_text()
+    for marker in ['id="dependency-focus"', 'id="dependency-focus-copy"', 'id="clear-dependency-focus"']:
+        assert marker in html
+
+
+def test_controller_renders_only_valid_direct_dependants_as_applicable():
+    script = (ROOT / "frontend/static/event-modules.js").read_text()
+    for marker in ["directDependants", "relationshipFocus", "direct-dependant", "relationship-muted", "Applies directly"]:
+        assert marker in script
+    assert "direct&&!bad&&!conflicting" in script
+
+
+def test_direct_dependant_style_preserves_invalid_red_precedence():
+    css = (ROOT / "frontend/static/event-modules-colours.css").read_text()
+    for marker in ["--relation:#b388ff", ".module-card.direct-dependant", ".module-card.relationship-muted", ".module-card.invalid-state"]:
+        assert marker in css
