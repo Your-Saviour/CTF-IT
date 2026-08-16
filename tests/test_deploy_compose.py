@@ -110,6 +110,20 @@ def test_iam_policy_separates_run_instances_dependencies_from_tagged_resources()
     assert created["Condition"]["StringEquals"]["aws:RequestTag/ManagedBy"] == "ctf-it"
 
 
+def test_iam_policy_allows_explicit_create_actions_that_reference_existing_resources() -> None:
+    policy = json.loads((ROOT / "deploy" / "aws" / "iam-policy.json").read_text())
+    statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+    creates = statements["CreateInfrastructure"]
+
+    assert "Condition" not in creates
+    assert set(creates["Action"]) == {
+        "ec2:AllocateAddress", "ec2:CreateImage", "ec2:CreateInternetGateway",
+        "ec2:CreateNetworkInterface", "ec2:CreateRouteTable",
+        "ec2:CreateSecurityGroup", "ec2:CreateSubnet", "ec2:CreateTags",
+        "ec2:CreateVpc", "ec2:ImportKeyPair",
+    }
+
+
 def test_aws_login_and_acceptance_are_containerized() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
     tools = compose["services"]["aws-tools"]

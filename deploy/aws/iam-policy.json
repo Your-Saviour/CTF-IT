@@ -32,7 +32,7 @@
       "Resource": "*"
     },
     {
-      "Sid": "CreateTaggedInfrastructure",
+      "Sid": "CreateInfrastructure",
       "Effect": "Allow",
       "Action": [
         "ec2:AllocateAddress",
@@ -46,12 +46,7 @@
         "ec2:CreateVpc",
         "ec2:ImportKeyPair"
       ],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": {
-          "aws:RequestTag/ManagedBy": "ctf-it"
-        }
-      }
+      "Resource": "*"
     },
     {
       "Sid": "RunInstancesDependencies",
