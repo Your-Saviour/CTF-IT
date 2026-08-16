@@ -48,11 +48,11 @@ test('autoArrange is deterministic and orders connected nodes by depth', () => {
   assert.deepEqual(autoArrange(state), arranged);
 });
 
-test('moveNode updates one node without mutating state and clamps to the canvas origin', () => {
+test('moveNode updates one node without mutating state across the unbounded canvas', () => {
   const state = base();
   const moved = moveNode(state, 'start', {x:-30,y:245});
   assert.deepEqual([state.nodes[0].x,state.nodes[0].y], [0,0]);
-  assert.deepEqual([moved.nodes[0].x,moved.nodes[0].y], [0,245]);
+  assert.deepEqual([moved.nodes[0].x,moved.nodes[0].y], [-30,245]);
   assert.deepEqual(moved.nodes[1], state.nodes[1]);
 });
 
@@ -80,11 +80,11 @@ test('insertConnectedNode atomically adds a node and typed edge without mutating
   });
 });
 
-test('moveNodes moves only selected nodes and clamps each to the canvas origin', () => {
+test('moveNodes moves only selected nodes across the unbounded canvas', () => {
   let state = addNode(base(), {type:'delay',label:'Wait',config:{}}, {x:50,y:75});
   const moved = moveNodes(state, ['start','delay-1'], {x:-80,y:25});
-  assert.deepEqual([moved.nodes.find(node=>node.id==='start').x,moved.nodes.find(node=>node.id==='start').y], [0,25]);
-  assert.deepEqual([moved.nodes.find(node=>node.id==='delay-1').x,moved.nodes.find(node=>node.id==='delay-1').y], [0,100]);
+  assert.deepEqual([moved.nodes.find(node=>node.id==='start').x,moved.nodes.find(node=>node.id==='start').y], [-80,25]);
+  assert.deepEqual([moved.nodes.find(node=>node.id==='delay-1').x,moved.nodes.find(node=>node.id==='delay-1').y], [-30,100]);
   assert.deepEqual(moved.nodes.find(node=>node.id==='finish'), state.nodes.find(node=>node.id==='finish'));
 });
 

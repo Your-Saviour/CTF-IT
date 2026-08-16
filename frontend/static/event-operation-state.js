@@ -70,8 +70,8 @@ export function moveNode(state, nodeId, position) {
   const next = clone(state);
   const node = next.nodes.find(row => row.id === nodeId);
   if (!node) throw new Error('Node does not exist');
-  node.x = Math.max(0, Number(position.x) || 0);
-  node.y = Math.max(0, Number(position.y) || 0);
+  node.x = Number(position.x) || 0;
+  node.y = Number(position.y) || 0;
   return next;
 }
 
@@ -80,8 +80,8 @@ export function moveNodes(state, nodeIds, delta) {
   const next = clone(state);
   next.nodes.forEach(node => {
     if (!selected.has(node.id)) return;
-    node.x = Math.max(0, node.x + (Number(delta.x) || 0));
-    node.y = Math.max(0, node.y + (Number(delta.y) || 0));
+    node.x += Number(delta.x) || 0;
+    node.y += Number(delta.y) || 0;
   });
   return next;
 }
