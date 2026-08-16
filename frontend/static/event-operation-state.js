@@ -31,15 +31,17 @@ export function triggerPreviewText(trigger) {
   return 'Unknown trigger';
 }
 
-export function replaceTrigger(state, template) {
+export function replaceTrigger(state, template, position = {x:240, y:160}) {
   if (!isTriggerType(template.type)) throw new Error('Replacement must be a trigger');
   const next = clone(state);
   const triggers = next.nodes.filter(node => isTriggerType(node.type));
-  if (triggers.length !== 1) throw new Error('Graph must contain exactly one trigger to replace');
+  if (triggers.length === 0) return addNode(next, template, position);
+  if (triggers.length > 1) throw new Error('Graph must contain at most one trigger to replace');
   const current = triggers[0];
   Object.assign(current, {
     type: template.type,
     label: template.label || template.type,
+    disabled: false,
     config: clone(template.config || {}),
   });
   return next;

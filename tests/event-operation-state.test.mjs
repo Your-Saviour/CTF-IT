@@ -119,6 +119,27 @@ test('replaceTrigger changes trigger type atomically while preserving graph iden
   assert.equal(state.nodes[0].type, 'manual_trigger');
 });
 
+test('replaceTrigger creates an enabled trigger when an invalid draft has none', () => {
+  const state = base();
+  state.nodes = state.nodes.filter(node => node.id !== 'trigger');
+  const next = replaceTrigger(
+    state,
+    {type:'manual_trigger',label:'Manual Trigger',config:{}},
+    {x:180,y:90},
+  );
+  assert.deepEqual(next.nodes.at(-1), {
+    id:'manual_trigger-1',type:'manual_trigger',label:'Manual Trigger',x:180,y:90,
+    disabled:false,config:{},
+  });
+});
+
+test('replaceTrigger re-enables a disabled legacy trigger', () => {
+  const state = base();
+  state.nodes[0].disabled = true;
+  const next = replaceTrigger(state, {type:'manual_trigger',label:'Manual Trigger',config:{}});
+  assert.equal(next.nodes[0].disabled, false);
+});
+
 test('trigger nodes cannot receive edges, be deleted, or be duplicated', () => {
   assert.equal(isTriggerType('event_start_trigger'), true);
   assert.equal(isTriggerType('delay'), false);
