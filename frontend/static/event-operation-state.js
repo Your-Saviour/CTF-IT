@@ -17,17 +17,40 @@ export function addNode(state, template, position = {x: 240, y: 160}) {
   return next;
 }
 
-export function addEdge(state, source, target, condition = 'success') {
-  if (source === target) throw new Error('Edge endpoints must be different');
-  if (!['success', 'failure', 'always'].includes(condition)) throw new Error('Invalid edge condition');
+export function connectionError(state, source, target, condition = 'success') {
+  if (source === target) return 'Edge endpoints must be different';
+  if (!['success', 'failure', 'always'].includes(condition)) return 'Invalid edge condition';
   const ids = new Set(state.nodes.map(node => node.id));
-  if (!ids.has(source) || !ids.has(target)) throw new Error('Edge endpoint does not exist');
+  if (!ids.has(source) || !ids.has(target)) return 'Edge endpoint does not exist';
   if (state.edges.some(edge => edge.source === source && edge.target === target && edge.condition === condition)) {
-    throw new Error('Typed edge already exists');
+    return 'Typed edge already exists';
   }
+  const outgoing = new Map(state.nodes.map(node => [node.id, []]));
+  state.edges.forEach(edge => outgoing.get(edge.source)?.push(edge.target));
+  const pending = [target], visited = new Set();
+  while (pending.length) {
+    const id = pending.pop();
+    if (id === source) return 'Connection would create a cycle';
+    if (visited.has(id)) continue;
+    visited.add(id);
+    pending.push(...(outgoing.get(id) || []));
+  }
+  return null;
+}
+
+export function addEdge(state, source, target, condition = 'success') {
+  const error = connectionError(state, source, target, condition);
+  if (error) throw new Error(error);
   const next = clone(state);
   next.edges.push({id: nextId('edge', next.edges), source, target, condition, label: ''});
   return next;
+}
+
+export function insertConnectedNode(state, source, condition, template, position) {
+  const withNode = addNode(state, template, position);
+  const nodeId = withNode.nodes.at(-1).id;
+  const next = addEdge(withNode, source, nodeId, condition);
+  return {state: next, nodeId, edgeId: next.edges.at(-1).id};
 }
 
 export function deleteSelection(state, selection) {
@@ -50,6 +73,31 @@ export function moveNode(state, nodeId, position) {
   node.x = Math.max(0, Number(position.x) || 0);
   node.y = Math.max(0, Number(position.y) || 0);
   return next;
+}
+
+export function moveNodes(state, nodeIds, delta) {
+  const selected = new Set(nodeIds);
+  const next = clone(state);
+  next.nodes.forEach(node => {
+    if (!selected.has(node.id)) return;
+    node.x = Math.max(0, node.x + (Number(delta.x) || 0));
+    node.y = Math.max(0, node.y + (Number(delta.y) || 0));
+  });
+  return next;
+}
+
+export function duplicateNodes(state, nodeIds, offset = {x: 40, y: 40}) {
+  const selected = new Set(nodeIds), next = clone(state), mapping = new Map(), created = [];
+  state.nodes.filter(node => selected.has(node.id)).forEach(node => {
+    const id = nextId(node.type, next.nodes);
+    mapping.set(node.id, id);
+    next.nodes.push({...clone(node), id, x:Math.max(0,node.x+(Number(offset.x)||0)), y:Math.max(0,node.y+(Number(offset.y)||0))});
+    created.push(id);
+  });
+  state.edges.filter(edge => mapping.has(edge.source) && mapping.has(edge.target)).forEach(edge => {
+    next.edges.push({...clone(edge), id:nextId('edge',next.edges), source:mapping.get(edge.source), target:mapping.get(edge.target)});
+  });
+  return {state: next, nodeIds: created};
 }
 
 export function autoArrange(state) {

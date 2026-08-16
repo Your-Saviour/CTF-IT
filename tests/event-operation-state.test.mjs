@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {addNode, addEdge, deleteSelection, autoArrange, moveNode, nextId} from '../frontend/static/event-operation-state.js';
+import {
+  addNode, addEdge, connectionError, deleteSelection, autoArrange, moveNode,
+  moveNodes, duplicateNodes, insertConnectedNode, nextId,
+} from '../frontend/static/event-operation-state.js';
 
 const base = () => ({version:1, policy:{launch_mode:'manual'}, nodes:[
   {id:'start',type:'start',label:'Start',x:0,y:0,config:{}},
@@ -51,4 +54,51 @@ test('moveNode updates one node without mutating state and clamps to the canvas 
   assert.deepEqual([state.nodes[0].x,state.nodes[0].y], [0,0]);
   assert.deepEqual([moved.nodes[0].x,moved.nodes[0].y], [0,245]);
   assert.deepEqual(moved.nodes[1], state.nodes[1]);
+});
+
+test('connectionError rejects a connection that would create a cycle', () => {
+  let state = addNode(base(), {type:'delay',label:'Wait',config:{}}, {x:100,y:0});
+  state = addEdge(state, 'start', 'delay-1', 'always');
+  state = addEdge(state, 'delay-1', 'finish', 'always');
+  assert.match(connectionError(state, 'finish', 'start', 'always'), /cycle/i);
+  assert.throws(() => addEdge(state, 'finish', 'start', 'always'), /cycle/i);
+});
+
+test('insertConnectedNode atomically adds a node and typed edge without mutating state', () => {
+  const state = base();
+  const result = insertConnectedNode(
+    state, 'start', 'failure',
+    {type:'gate',label:'Handle failure',config:{mode:'any'}},
+    {x:220,y:140},
+  );
+  assert.equal(state.nodes.length, 2);
+  assert.equal(state.edges.length, 0);
+  assert.equal(result.nodeId, 'gate-1');
+  assert.equal(result.edgeId, 'edge-1');
+  assert.deepEqual(result.state.edges[0], {
+    id:'edge-1',source:'start',target:'gate-1',condition:'failure',label:'',
+  });
+});
+
+test('moveNodes moves only selected nodes and clamps each to the canvas origin', () => {
+  let state = addNode(base(), {type:'delay',label:'Wait',config:{}}, {x:50,y:75});
+  const moved = moveNodes(state, ['start','delay-1'], {x:-80,y:25});
+  assert.deepEqual([moved.nodes.find(node=>node.id==='start').x,moved.nodes.find(node=>node.id==='start').y], [0,25]);
+  assert.deepEqual([moved.nodes.find(node=>node.id==='delay-1').x,moved.nodes.find(node=>node.id==='delay-1').y], [0,100]);
+  assert.deepEqual(moved.nodes.find(node=>node.id==='finish'), state.nodes.find(node=>node.id==='finish'));
+});
+
+test('duplicateNodes creates new IDs and copies internal edges only', () => {
+  let state = addNode(base(), {type:'delay',label:'Wait',config:{}}, {x:100,y:80});
+  state = addNode(state, {type:'gate',label:'Branch',config:{mode:'any'}}, {x:300,y:80});
+  state = addEdge(state, 'delay-1', 'gate-1', 'success');
+  state = addEdge(state, 'start', 'delay-1', 'always');
+  const result = duplicateNodes(state, ['delay-1','gate-1'], {x:40,y:30});
+  assert.deepEqual(result.nodeIds, ['delay-2','gate-2']);
+  assert.deepEqual(
+    result.state.nodes.filter(node=>result.nodeIds.includes(node.id)).map(node=>[node.id,node.x,node.y]),
+    [['delay-2',140,110],['gate-2',340,110]],
+  );
+  assert.ok(result.state.edges.some(edge=>edge.source==='delay-2'&&edge.target==='gate-2'&&edge.condition==='success'));
+  assert.ok(!result.state.edges.some(edge=>edge.source==='start'&&edge.target==='delay-2'));
 });

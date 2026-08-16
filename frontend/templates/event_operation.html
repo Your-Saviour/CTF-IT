@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Design Operation — {{ event_name }}{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><link rel="stylesheet" href="/static/event-operation.css?v=1">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><link rel="stylesheet" href="/static/event-operation.css?v=2">{% endblock %}
 {% block body_class %}planner-page{% endblock %}{% block site_nav %}{% endblock %}{% block container_class %}planner-root{% endblock %}
 {% block content %}
 <main class="operation-app" data-event-id="{{ event_id }}" data-read-only="{{ read_only|tojson }}">
@@ -8,14 +8,32 @@
   <div class="planner-context-row"><a class="planner-brand" href="/admin">&gt;_ CTF Platform</a><div class="planner-identity"><div><h1>{{ event_name }}</h1><p>Canonical operation repeated independently for every team</p></div><span class="planner-event-status">{{ event_status }}</span></div><div class="planner-account"><span>{{ user.username }}</span><form method="post" action="/auth/logout"><button class="btn" type="submit">Logout</button></form></div></div>
   <div class="planner-command-row"><div class="planner-command-start"><a class="planner-back" href="/admin/events/{{ event_id }}/modules">Back to module assignment</a><span id="operation-save-state" role="status" aria-live="polite">Loading…</span></div><div class="planner-actions"><div class="planner-action-group"><button id="operation-validate" class="btn">Validate graph</button><button id="operation-arrange" class="btn">Auto-arrange</button><button id="operation-preview" class="btn">Preview per team</button></div><div class="planner-action-group"><button id="operation-save" class="btn btn-primary">Save draft</button><a class="btn" href="/admin/events">Finish planning</a></div></div></div>
  </header>
- <section id="operation-validation" class="planner-validation" aria-live="polite"></section>
  <div class="operation-workspace">
-  <aside class="operation-library"><header><h2>Node library</h2><label><span>Search</span><input id="library-search" type="search" placeholder="Ability, objective, or target"></label></header><div id="operation-library"></div></aside>
-  <section class="operation-canvas-wrap" aria-label="Operation graph"><svg id="operation-canvas" tabindex="0" role="application" aria-label="Editable operation graph"><defs><marker id="operation-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs><g id="operation-edges"></g><g id="operation-nodes"></g></svg><nav id="operation-outline" aria-label="Operation graph outline"></nav></section>
-  <aside class="operation-inspector"><h2>Inspector</h2><div id="operation-inspector"><p>Select a node or transition to edit it.</p></div></aside>
+  <section class="operation-canvas-wrap" aria-label="Operation graph">
+   <svg id="operation-canvas" tabindex="0" role="application" aria-label="Editable operation graph">
+    <defs><marker id="operation-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z"></path></marker></defs>
+    <g id="operation-world"><g id="operation-edges"></g><g id="operation-selection-box"></g><g id="operation-connection-preview"></g><g id="operation-nodes"></g></g>
+   </svg>
+   <div class="operation-canvas-tools" aria-label="Canvas tools">
+    <button id="operation-add-node" class="btn btn-primary" type="button">Add node</button>
+    <button id="operation-undo" class="btn" type="button">Undo</button>
+    <button id="operation-redo" class="btn" type="button">Redo</button>
+    <button id="operation-toggle-outline" class="btn" type="button" aria-expanded="false">Outline</button>
+    <button id="operation-toggle-policy" class="btn" type="button">Policy</button>
+   </div>
+   <div class="operation-zoom-tools" aria-label="Canvas navigation">
+    <button id="operation-zoom-out" type="button" aria-label="Zoom out">−</button><output id="operation-zoom-value">100%</output><button id="operation-zoom-in" type="button" aria-label="Zoom in">+</button><button id="operation-fit" type="button">Fit</button>
+   </div>
+   <svg id="operation-minimap" class="operation-minimap" aria-label="Operation graph minimap"></svg>
+   <aside id="operation-inspector-panel" class="operation-overlay operation-inspector-panel" aria-label="Inspector" hidden><header><h2>Inspector</h2><button type="button" data-close-panel="operation-inspector-panel" aria-label="Close inspector">Close</button></header><div id="operation-inspector"></div></aside>
+   <aside id="operation-outline-panel" class="operation-overlay operation-outline-panel" aria-label="Operation graph outline" hidden><header><h2>Graph outline</h2><button type="button" data-close-panel="operation-outline-panel" aria-label="Close outline">Close</button></header><nav id="operation-outline"></nav></aside>
+   <aside id="operation-validation-panel" class="operation-validation-panel" aria-label="Validation issues" hidden><header><h2>Validation</h2><button type="button" data-close-panel="operation-validation-panel" aria-label="Close validation">Close</button></header><div id="operation-validation"></div></aside>
+   <section id="node-picker" class="operation-node-picker" aria-label="Add a node" hidden><header><h2>Add a node</h2><button type="button" data-close-panel="node-picker" aria-label="Close node picker">Close</button></header><label><span>Search nodes</span><input id="node-picker-search" type="search" autocomplete="off" placeholder="Search targets, abilities, objectives, and controls"></label><div id="node-picker-results"></div></section>
+   <div id="operation-context-menu" class="operation-context-menu" role="toolbar" aria-label="Selected node actions" hidden><button type="button" data-context-action="duplicate">Duplicate</button><button type="button" data-context-action="toggle">Disable</button><button type="button" data-context-action="delete" class="danger">Delete</button></div>
+   <p id="operation-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+  </section>
  </div>
 </main>
-<dialog id="edge-dialog"><form method="dialog"><header><h2>Create transition</h2><button value="cancel" aria-label="Close">×</button></header><label>From<select id="edge-source"></select></label><label>To<select id="edge-target"></select></label><label>Condition<select id="edge-condition"><option value="success">Success</option><option value="failure">Failure</option><option value="always">Always</option></select></label><footer><button value="cancel" class="btn">Cancel</button><button id="edge-create" type="button" class="btn btn-primary">Create transition</button></footer></form></dialog>
 <dialog id="operation-preview-dialog"><form method="dialog"><header><h2>Per-team preview</h2><button value="cancel" aria-label="Close">×</button></header><div id="operation-preview-content"></div></form></dialog>
-<script type="module" src="/static/event-operation.js?v=1"></script>
+<script type="module" src="/static/event-operation.js?v=2"></script>
 {% endblock %}

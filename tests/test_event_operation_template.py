@@ -3,16 +3,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_operation_designer_uses_dedicated_planner_shell_and_three_columns():
+def test_operation_designer_uses_canvas_dominant_workspace():
     html = (ROOT / "frontend/templates/event_operation.html").read_text()
     assert '{% extends "base.html" %}' in html
     assert "planner-toolbar" in html
-    assert "operation-library" in html
     assert 'id="operation-canvas"' in html
-    assert "operation-inspector" in html
-    assert 'id="operation-outline"' in html
-    assert 'id="operation-validation"' in html
+    assert 'id="operation-world"' in html
+    assert 'id="operation-selection-box"' in html
+    assert 'id="operation-add-node"' in html
+    assert 'id="operation-undo"' in html
+    assert 'id="operation-redo"' in html
+    assert 'id="operation-zoom-in"' in html
+    assert 'id="operation-zoom-out"' in html
+    assert 'id="operation-fit"' in html
+    assert 'id="operation-minimap"' in html
+    assert 'id="node-picker"' in html
+    assert 'id="node-picker-search"' in html
+    assert 'id="node-picker-results"' in html
+    assert 'id="operation-inspector-panel"' in html
+    assert 'id="operation-outline-panel"' in html
+    assert 'id="operation-validation-panel"' in html
+    assert 'id="operation-announcer"' in html
     assert 'aria-live="polite"' in html
+    assert 'class="operation-library"' not in html
 
 
 def test_operation_designer_exposes_real_workflow_actions_and_dialogs():
@@ -21,7 +34,7 @@ def test_operation_designer_exposes_real_workflow_actions_and_dialogs():
         assert f'id="{identifier}"' in html
     assert f'/admin/events/{{{{ event_id }}}}/modules' in html
     assert 'id="operation-preview-dialog"' in html
-    assert 'id="edge-dialog"' in html
+    assert 'id="edge-dialog"' not in html
 
 
 def test_operation_designer_assets_and_route_are_wired():
@@ -46,3 +59,16 @@ def test_operation_nodes_use_pointer_capture_for_dragging():
     assert "onpointermove" in source
     assert "releasePointerCapture" in source
     assert "moveNode" in source
+
+
+def test_operation_controller_wires_direct_canvas_interactions():
+    source = (ROOT / "frontend/static/event-operation.js").read_text()
+    for helper in (
+        "connectionError", "insertConnectedNode", "moveNodes", "duplicateNodes",
+        "createViewport", "zoomAt", "fitViewport", "createHistory",
+    ):
+        assert helper in source
+    assert "onwheel" in source
+    assert "clipboard" in source
+    assert "node-picker-search" in source
+    assert "operation-connection-preview" in source
