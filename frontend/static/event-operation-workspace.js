@@ -18,7 +18,7 @@ export function fitViewport(nodes, bounds, padding=64) {
   const width=Number(bounds.width)||0,height=Number(bounds.height)||0;
   if(!nodes.length)return createViewport(width,height);
   const minX=Math.min(...nodes.map(node=>node.x)),minY=Math.min(...nodes.map(node=>node.y));
-  const maxX=Math.max(...nodes.map(node=>node.x+180)),maxY=Math.max(...nodes.map(node=>node.y+86));
+  const maxX=Math.max(...nodes.map(node=>node.x+190)),maxY=Math.max(...nodes.map(node=>node.y+104));
   const contentWidth=Math.max(1,maxX-minX),contentHeight=Math.max(1,maxY-minY);
   const zoom=clamp(Math.min((width-padding*2)/contentWidth,(height-padding*2)/contentHeight),.35,2);
   return {width,height,zoom,x:(width-contentWidth*zoom)/2-minX*zoom,y:(height-contentHeight*zoom)/2-minY*zoom};
@@ -28,6 +28,13 @@ export function nodeTargetLabel(node, catalogue) {
   if(!['ability','objective'].includes(node?.type))return '';
   const targetId=node.config?.target_vm_id;
   return catalogue?.targets?.find(target=>target.id===targetId)?.name||'Unknown target';
+}
+
+export function nodeLabelLines(label, maxLength=18) {
+  const words=String(label??'').trim().split(/\s+/).filter(Boolean),lines=[];
+  while(words.length&&lines.length<2){let line=words.shift();while(words.length&&`${line} ${words[0]}`.length<=maxLength)line+=` ${words.shift()}`;lines.push(line)}
+  if(words.length){const last=lines.length-1;lines[last]=`${lines[last].slice(0,Math.max(1,maxLength-1))}…`}
+  return lines.length?lines:[''];
 }
 
 export function createHistory(initial, limit=50) {
