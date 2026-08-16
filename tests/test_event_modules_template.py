@@ -39,3 +39,20 @@ def test_workspace_uses_planner_geometry_and_theme_tokens():
                  'background:var(--bg-surface)', 'border:1px solid var(--border)',
                  'border-radius:9px', '@media(max-width:1100px)']:
         assert rule in css
+
+
+def test_assignment_provenance_uses_semantic_colour_tokens():
+    css = (ROOT / "frontend/static/event-modules-colours.css").read_text()
+    for rule in ['.module-card.provenance-manual{--state-color:var(--cyan)',
+                 '.module-card.provenance-random{--state-color:var(--green)',
+                 '.module-card.provenance-dependency{--state-color:var(--amber)',
+                 '.module-card.provenance-absent{--state-color:var(--text-muted)',
+                 '.module-card.invalid-state{--state-color:var(--red)',
+                 '.provenance-marker{background:var(--state-color)']:
+        assert rule in css
+
+
+def test_controller_renders_provenance_classes_beyond_badges():
+    script = (ROOT / "frontend/static/event-modules.js").read_text()
+    assert 'provenance-${provenance}' in script
+    assert 'class="usage-row provenance-${item.provenance}"' in script
