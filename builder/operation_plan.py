@@ -104,23 +104,31 @@ def normalize_operation_plan(value):
     return result
 
 
-def operation_catalogue(infrastructure, module_plan, modules):
-    targets = assignable_endpoints(infrastructure)
-    assignments = normalize_module_plan(module_plan)["assignments"]
-    assigned = set()
-    for row in assignments.values():
-        assigned.update(row["pinned_module_ids"])
-        assigned.update(row["resolved_module_ids"])
-    by_id = {module.id: module for module in modules}
-    pending = list(assigned)
+def _effective_module_ids(assignment, modules_by_id):
+    effective = set(assignment["pinned_module_ids"])
+    effective.update(assignment["resolved_module_ids"])
+    pending = list(effective)
     while pending:
-        module = by_id.get(pending.pop())
+        module = modules_by_id.get(pending.pop())
         if not module:
             continue
         for required_id in getattr(module, "requires", []):
-            if required_id not in assigned:
-                assigned.add(required_id)
+            if required_id not in effective:
+                effective.add(required_id)
                 pending.append(required_id)
+    return effective
+
+
+def operation_catalogue(infrastructure, module_plan, modules):
+    targets = assignable_endpoints(infrastructure)
+    assignments = normalize_module_plan(module_plan)["assignments"]
+    by_id = {module.id: module for module in modules}
+    effective_by_target = {
+        target_id: _effective_module_ids(assignment, by_id)
+        for target_id, assignment in assignments.items()
+    }
+    assigned = set().union(*effective_by_target.values()) if effective_by_target else set()
+    targets_by_id = {target["id"]: target for target in targets}
     abilities, objectives = [], []
     for module in sorted(modules, key=lambda item: item.id):
         if module.id not in assigned or module.disabled or not module.caldera:
@@ -129,12 +137,19 @@ def operation_catalogue(infrastructure, module_plan, modules):
         for phase in ("recon", "exploit"):
             row = caldera.get(phase) or {}
             if row.get("command"):
+                applicable_target_ids = sorted(
+                    target_id for target_id, effective in effective_by_target.items()
+                    if target_id in targets_by_id and module.id in effective
+                    and (not module.supported_bases
+                         or targets_by_id[target_id]["base_type"] in module.supported_bases)
+                )
                 abilities.append({"id": f"ability:{module.id}:{phase}", "module_id": module.id,
                     "ability": phase, "name": f"{phase.title()}: {module.name}",
                     "description": row.get("description", module.description),
                     "command": row["command"], "tactic": caldera.get("tactic"),
                     "technique": caldera.get("technique"),
-                    "supported_bases": list(module.supported_bases)})
+                    "supported_bases": list(module.supported_bases),
+                    "applicable_target_ids": applicable_target_ids})
         if module.type == "goal":
             objectives.append({"id": f"objective:{module.id}", "module_id": module.id,
                                "name": module.name, "description": module.description})

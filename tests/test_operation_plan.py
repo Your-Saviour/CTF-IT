@@ -120,6 +120,45 @@ def test_catalogue_only_contains_assigned_caldera_abilities_and_planned_vms():
     assert catalogue["controls"] == ["manual_trigger", "event_start_trigger", "scheduled_trigger", "finish", "delay", "gate"]
 
 
+def test_catalogue_exposes_only_effectively_assigned_compatible_targets_per_ability():
+    topology = {"version": 1, "sites": [{"key": "hq", "name": "HQ", "zones": [
+        {"key": "blue", "name": "Blue", "team": "blue", "endpoints": [
+            {"key": "web", "name": "Web", "base_type": "ubuntu"},
+            {"key": "desk", "name": "Desk", "base_type": "windows"},
+        ]},
+        {"key": "red", "name": "Red", "team": "red", "endpoints": [
+            {"key": "jump", "name": "Jump", "base_type": "ubuntu"},
+        ]},
+    ]}]}
+    assignments = {"version": 1, "assignments": {
+        "vm:hq/blue/web": {"mode": "manual_only", "pinned_module_ids": ["weak_ssh"],
+                           "resolved_module_ids": ["weak_ssh"]},
+        "vm:hq/blue/desk": {"mode": "manual_only", "pinned_module_ids": ["weak_ssh"],
+                            "resolved_module_ids": ["weak_ssh"]},
+        "vm:hq/red/jump": {"mode": "manual_only", "pinned_module_ids": ["carrier"],
+                           "resolved_module_ids": ["carrier"]},
+    }}
+    library = modules()
+    library[0].requires = []
+    library.append(SimpleNamespace(
+        id="carrier", name="Carrier", description="Requires SSH", type="vulnerability",
+        disabled=False, supported_bases=["ubuntu"], stage="caldera", requires=["foundation"],
+        caldera={"recon": {"command": "echo carrier"}},
+    ))
+    library.append(SimpleNamespace(
+        id="foundation", name="Foundation", description="Dependency", type="vulnerability",
+        disabled=False, supported_bases=["ubuntu"], stage="caldera", requires=[],
+        caldera={"recon": {"command": "uname -a"}},
+    ))
+
+    catalogue = operation_catalogue(topology, assignments, library)
+    by_module = {row["module_id"]: row for row in catalogue["abilities"] if row["ability"] == "recon"}
+
+    assert by_module["weak_ssh"]["applicable_target_ids"] == ["vm:hq/blue/web"]
+    assert by_module["carrier"]["applicable_target_ids"] == ["vm:hq/red/jump"]
+    assert by_module["foundation"]["applicable_target_ids"] == ["vm:hq/red/jump"]
+
+
 def test_catalogue_exposes_execution_metadata_for_ability_details():
     catalogue = operation_catalogue(infrastructure(), module_plan(), modules())
     exploit = next(row for row in catalogue["abilities"]
