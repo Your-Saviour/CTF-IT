@@ -118,13 +118,9 @@ class AwsOpnsenseWorkflow:
                     workflow._upload_atomic(
                         db, builder.public_ip, "/root/opnsense-bootstrap.sh", script, 0o700,
                     )
-                    code, _, error = workflow._ssh(
-                        db, builder.public_ip,
-                        workflow.bootstrap_launch_command(image.version),
-                        timeout=30,
+                    workflow._run_bootstrap_foreground(
+                        db, builder.public_ip, image.version,
                     )
-                    if code:
-                        raise RuntimeError(f"could not launch OPNsense bootstrap: {error[:300]}")
                 elif guest_state not in {"converting", "opnsense"}:
                     raise RuntimeError(f"unexpected builder guest state: {guest_state}")
                 workflow._wait_for_opnsense(db, builder.public_ip, image.version)

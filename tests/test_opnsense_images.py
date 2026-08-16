@@ -42,7 +42,35 @@ def test_aws_bootstrap_launch_pins_the_vpc_resolver_before_fetching():
     command = opnsense_images.bootstrap_launch_command("26.7")
 
     assert command.index("169.254.169.253") < command.index("opnsense-bootstrap.sh")
-    assert "nohup sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
+    assert "sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
+    assert "tee /var/log/opnsense-bootstrap.log" in command
+    assert "nohup" not in command
+    assert not command.rstrip().endswith("&")
+
+
+def test_foreground_bootstrap_accepts_expected_reboot_disconnect(monkeypatch):
+    from api.services import opnsense_images
+
+    monkeypatch.setattr(
+        opnsense_images, "_ssh",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ImageWorkflowError("SSH did not become ready: socket is closed")
+        ),
+    )
+
+    opnsense_images._run_bootstrap_foreground(object(), "198.51.100.10", "26.7")
+
+
+def test_foreground_bootstrap_rejects_command_failure(monkeypatch):
+    from api.services import opnsense_images
+
+    monkeypatch.setattr(
+        opnsense_images, "_ssh",
+        lambda *_args, **_kwargs: (1, "", "pkg install failed"),
+    )
+
+    with pytest.raises(ImageWorkflowError, match="pkg install failed"):
+        opnsense_images._run_bootstrap_foreground(object(), "198.51.100.10", "26.7")
 
 
 @pytest.mark.parametrize("value", ["", "not-a-cidr", "10.0.0.1", "2001:db8::/64"])

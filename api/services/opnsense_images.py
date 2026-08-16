@@ -257,9 +257,31 @@ def bootstrap_launch_command(version: str) -> str:
     release = validate_release(version)
     return (
         "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
-        f"nohup sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y "
-        ">/var/log/opnsense-bootstrap.log 2>&1 </dev/null &"
+        "set -o pipefail && "
+        f"sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y 2>&1 | "
+        "tee /var/log/opnsense-bootstrap.log"
     )
+
+
+def _run_bootstrap_foreground(db: Session, host: str, version: str) -> None:
+    try:
+        code, output, error = _ssh(
+            db, host, bootstrap_launch_command(version),
+            timeout=POLL_TIMEOUT, retry=False,
+        )
+    except ImageWorkflowError as exc:
+        detail = str(exc).lower()
+        expected_disconnects = (
+            "socket is closed", "eof", "ssh session not active",
+            "error reading ssh protocol banner",
+        )
+        if any(marker in detail for marker in expected_disconnects):
+            logger.info("OPNsense bootstrap disconnected for reboot: %s", exc)
+            return
+        raise
+    if code not in {0, -1}:
+        detail = (error or output or f"exit {code}")[-1000:]
+        raise ImageWorkflowError(f"OPNsense bootstrap failed: {detail}")
 
 
 def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
