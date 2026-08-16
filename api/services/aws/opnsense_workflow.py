@@ -118,7 +118,7 @@ class AwsOpnsenseWorkflow:
                     workflow._upload_atomic(
                         db, builder.public_ip, "/root/opnsense-bootstrap.sh", script, 0o700,
                     )
-                    workflow._run_bootstrap_foreground(
+                    workflow._launch_bootstrap_daemon(
                         db, builder.public_ip, image.version,
                     )
                 elif guest_state not in {"converting", "opnsense"}:

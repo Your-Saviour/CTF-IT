@@ -257,13 +257,12 @@ def bootstrap_launch_command(version: str) -> str:
     release = validate_release(version)
     return (
         "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
-        "set -o pipefail && "
-        f"sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y 2>&1 | "
-        "tee /var/log/opnsense-bootstrap.log"
+        "/usr/sbin/daemon -f -o /var/log/opnsense-bootstrap.log "
+        f"/bin/sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y"
     )
 
 
-def _run_bootstrap_foreground(db: Session, host: str, version: str) -> None:
+def _launch_bootstrap_daemon(db: Session, host: str, version: str) -> None:
     try:
         code, output, error = _ssh(
             db, host, bootstrap_launch_command(version),

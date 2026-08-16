@@ -36,32 +36,29 @@ def test_release_and_bootstrap_inputs_are_strict():
     with pytest.raises(ImageWorkflowError): validate_bootstrap_url("https://example.com/bootstrap.sh")
 
 
-def test_aws_bootstrap_launch_pins_the_vpc_resolver_before_fetching():
+def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
     from api.services import opnsense_images
 
     command = opnsense_images.bootstrap_launch_command("26.7")
 
     assert command.index("169.254.169.253") < command.index("opnsense-bootstrap.sh")
-    assert "sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
-    assert "tee /var/log/opnsense-bootstrap.log" in command
-    assert "nohup" not in command
+    assert "/usr/sbin/daemon -f -o /var/log/opnsense-bootstrap.log" in command
+    assert "/bin/sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
     assert not command.rstrip().endswith("&")
 
 
-def test_foreground_bootstrap_accepts_expected_reboot_disconnect(monkeypatch):
+def test_bootstrap_launcher_returns_after_daemon_is_started(monkeypatch):
     from api.services import opnsense_images
 
     monkeypatch.setattr(
         opnsense_images, "_ssh",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ImageWorkflowError("SSH did not become ready: socket is closed")
-        ),
+        lambda *_args, **_kwargs: (0, "", ""),
     )
 
-    opnsense_images._run_bootstrap_foreground(object(), "198.51.100.10", "26.7")
+    opnsense_images._launch_bootstrap_daemon(object(), "198.51.100.10", "26.7")
 
 
-def test_foreground_bootstrap_rejects_command_failure(monkeypatch):
+def test_bootstrap_launcher_rejects_command_failure(monkeypatch):
     from api.services import opnsense_images
 
     monkeypatch.setattr(
@@ -70,7 +67,7 @@ def test_foreground_bootstrap_rejects_command_failure(monkeypatch):
     )
 
     with pytest.raises(ImageWorkflowError, match="pkg install failed"):
-        opnsense_images._run_bootstrap_foreground(object(), "198.51.100.10", "26.7")
+        opnsense_images._launch_bootstrap_daemon(object(), "198.51.100.10", "26.7")
 
 
 @pytest.mark.parametrize("value", ["", "not-a-cidr", "10.0.0.1", "2001:db8::/64"])
