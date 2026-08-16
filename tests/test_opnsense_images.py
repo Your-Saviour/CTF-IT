@@ -42,9 +42,11 @@ def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
     command = opnsense_images.bootstrap_launch_command("26.7")
 
     assert command.index("169.254.169.253") < command.index("opnsense-bootstrap.sh")
-    assert "/usr/sbin/daemon -f -o /var/log/opnsense-bootstrap.log" in command
+    assert "/usr/sbin/daemon -f /bin/sh -c" in command
     assert "/bin/sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
+    assert "/usr/bin/tee -a /var/log/opnsense-bootstrap.log /dev/console" in command
     assert not command.rstrip().endswith("&")
+    assert opnsense_images.POLL_TIMEOUT >= 3600
 
 
 def test_bootstrap_launcher_returns_after_daemon_is_started(monkeypatch):

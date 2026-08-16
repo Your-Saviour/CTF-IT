@@ -41,7 +41,7 @@ RESUMABLE_STATES = RUNNING_STATES | {"interrupted", "failed"}
 TERMINAL_STATES = {"ready", "active", "retired"}
 ACTIVE_SETTING = "active_opnsense_image_id"
 POLL_SECONDS = int(os.environ.get("OPNSENSE_IMAGE_POLL_SECONDS", "10"))
-POLL_TIMEOUT = int(os.environ.get("OPNSENSE_IMAGE_TIMEOUT_SECONDS", "1800"))
+POLL_TIMEOUT = int(os.environ.get("OPNSENSE_IMAGE_TIMEOUT_SECONDS", "3600"))
 BOOTSTRAP_STALL_TIMEOUT = int(os.environ.get("OPNSENSE_BOOTSTRAP_STALL_SECONDS", "600"))
 
 logger = logging.getLogger(__name__)
@@ -255,10 +255,13 @@ def _verify_freebsd_base(db: Session, host: str) -> None:
 
 def bootstrap_launch_command(version: str) -> str:
     release = validate_release(version)
+    bootstrap = (
+        f"/bin/sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y 2>&1 | "
+        "/usr/bin/tee -a /var/log/opnsense-bootstrap.log /dev/console >/dev/null"
+    )
     return (
         "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
-        "/usr/sbin/daemon -f -o /var/log/opnsense-bootstrap.log "
-        f"/bin/sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y"
+        f"/usr/sbin/daemon -f /bin/sh -c {shlex.quote(bootstrap)}"
     )
 
 
