@@ -702,6 +702,7 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "quota": json.loads(event.quota),
         "infrastructure": json.loads(event.infrastructure) if event.infrastructure else None,
         "infrastructure_layout": json.loads(event.infrastructure_layout) if event.infrastructure_layout else None,
+        "operation_plan": json.loads(event.operation_plan) if event.operation_plan else None,
         "updated_at": event.updated_at.isoformat(),
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
@@ -776,6 +777,95 @@ async def resolve_module_plan(event_id: int, request: Request, db: Session = Dep
     if endpoint["role"] == "red" and refill:
         return JSONResponse({"error": "red-team VMs are manual-only"}, status_code=422)
     return resolve_assignment(endpoint, body.get("assignment", {}), json.loads(event.quota), load_all_modules(), refill=refill)
+
+
+def _operation_context(event):
+    from builder.infrastructure_planner import default_infrastructure, normalize_infrastructure
+    from builder.module_plan import empty_module_plan
+    from builder.module_loader import load_all_modules
+    infrastructure = normalize_infrastructure(json.loads(event.infrastructure) if event.infrastructure else default_infrastructure())
+    module_plan = json.loads(event.module_plan) if event.module_plan else empty_module_plan()
+    return infrastructure, module_plan, load_all_modules()
+
+
+@router.get("/events/{event_id}/operation-plan")
+async def get_operation_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    from builder.operation_plan import (empty_operation_plan, operation_catalogue,
+        operation_input_fingerprint, validate_operation_plan)
+    infrastructure, module_plan, modules = _operation_context(event)
+    plan = json.loads(event.operation_plan) if event.operation_plan else empty_operation_plan()
+    fingerprint = operation_input_fingerprint(infrastructure, module_plan, modules)
+    issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    if plan.get("input_fingerprint") and plan["input_fingerprint"] != fingerprint:
+        issues.insert(0, {"code": "stale_inputs", "message": "Network or module assignments changed after this operation draft was saved"})
+    return {"operation_plan": plan, "catalogue": operation_catalogue(infrastructure, module_plan, modules),
+            "issues": issues, "input_fingerprint": fingerprint, "updated_at": event.updated_at.isoformat(),
+            "event_minutes": event.time_limit_minutes, "read_only": event.status != "draft"}
+
+
+@router.put("/events/{event_id}/operation-plan")
+async def save_operation_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "operation plan is read only"}, status_code=409)
+    body = await request.json()
+    try:
+        if _utc_instant(body.get("expected_updated_at")) != _utc_instant(event.updated_at):
+            return JSONResponse({"error": "event draft has changed", "current_updated_at": event.updated_at.isoformat()}, status_code=409)
+        from builder.operation_plan import normalize_operation_plan, operation_input_fingerprint
+        infrastructure, module_plan, modules = _operation_context(event)
+        plan = normalize_operation_plan(body.get("operation_plan"))
+        plan["input_fingerprint"] = operation_input_fingerprint(infrastructure, module_plan, modules)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    event.operation_plan = json.dumps(plan); event.updated_at = utcnow(); db.commit(); db.refresh(event)
+    return {"status": "saved", "operation_plan": plan, "updated_at": event.updated_at.isoformat()}
+
+
+@router.post("/events/{event_id}/operation-plan/validate")
+async def validate_event_operation_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    body = await request.json()
+    from builder.operation_plan import validate_operation_plan
+    infrastructure, module_plan, modules = _operation_context(event)
+    issues = validate_operation_plan(body.get("operation_plan"), infrastructure, module_plan, modules, event.time_limit_minutes)
+    return {"valid": not issues, "issues": issues}
+
+
+@router.post("/events/{event_id}/operation-plan/preview")
+async def preview_event_operation_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    body = await request.json()
+    from builder.operation_plan import compile_team_preview, validate_operation_plan
+    infrastructure, module_plan, modules = _operation_context(event)
+    plan = body.get("operation_plan")
+    issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    if issues:
+        return JSONResponse({"error": "operation plan is invalid", "issues": issues}, status_code=422)
+    team = None
+    if body.get("team_id") is not None:
+        team = db.query(Team).filter(Team.id == body["team_id"], Team.event_id == event_id).first()
+        if not team:
+            return JSONResponse({"error": "Team not found"}, status_code=404)
+    team_data = {"id": team.id, "name": team.name} if team else {"id": None, "name": "Canonical team"}
+    return compile_team_preview(plan, infrastructure, module_plan, modules, team_data)
 
 
 @router.post("/events")
