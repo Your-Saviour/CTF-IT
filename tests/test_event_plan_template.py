@@ -45,6 +45,16 @@ def test_planner_command_header_styles_create_readable_two_row_hierarchy():
         assert rule in css
 
 
+def test_disabled_planner_actions_keep_their_labels_readable():
+    css = "".join(CSS.read_text().split())
+
+    assert ".planner-actions.btn:disabled{" in css
+    assert "background:var(--bg-elevated)" in css
+    assert "color:var(--text-secondary)" in css
+    assert "opacity:1" in css
+    assert "cursor:not-allowed" in css
+
+
 def test_infrastructure_accepts_free_form_planner_address_annotations():
     infrastructure = default_infrastructure()
     site = infrastructure["sites"][0]

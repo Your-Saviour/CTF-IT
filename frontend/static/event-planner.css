@@ -52,7 +52,7 @@
 .planner-action-group { display: flex; align-items: center; gap: 8px; }
 .planner-action-group + .planner-action-group { border-left: 1px solid var(--border); padding-left: 10px; }
 .planner-actions .btn { white-space: nowrap; }
-.planner-actions .btn:disabled { border-color: var(--border); color: var(--text-muted); opacity: .58; }
+.planner-actions .btn:disabled { border-color: var(--border); background: var(--bg-elevated); color: var(--text-secondary); opacity: 1; cursor: not-allowed; }
 .planner-actions button, .planner-add-actions button { min-height: 40px; }
 
 .planner-validation { display: none; flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--amber-dim); border-radius: 7px; background: var(--amber-glow); color: var(--amber); font-size: 12px; }
