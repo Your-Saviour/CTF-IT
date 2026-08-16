@@ -120,6 +120,18 @@ def test_catalogue_only_contains_assigned_caldera_abilities_and_planned_vms():
     assert catalogue["controls"] == ["manual_trigger", "event_start_trigger", "scheduled_trigger", "finish", "delay", "gate"]
 
 
+def test_catalogue_exposes_execution_metadata_for_ability_details():
+    catalogue = operation_catalogue(infrastructure(), module_plan(), modules())
+    exploit = next(row for row in catalogue["abilities"]
+                   if row["module_id"] == "weak_ssh" and row["ability"] == "exploit")
+
+    assert exploit["command"] == "ssh"
+    assert exploit["description"] == "Use valid accounts"
+    assert exploit["tactic"] == "credential-access"
+    assert exploit["technique"] == {"attack_id": "T1078", "name": "Valid Accounts"}
+    assert exploit["supported_bases"] == ["ubuntu"]
+
+
 def test_catalogue_treats_pins_and_recursive_dependencies_as_effective_assignments():
     library = modules()
     library[0].requires = ["foundation"]

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ operation_name }} — {{ event_name }}{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><link rel="stylesheet" href="/static/event-operation.css?v=2">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><link rel="stylesheet" href="/static/event-operation.css?v=2"><link rel="stylesheet" href="/static/event-operation-ability-details.css?v=1">{% endblock %}
 {% block body_class %}planner-page{% endblock %}{% block site_nav %}{% endblock %}{% block container_class %}planner-root{% endblock %}
 {% block content %}
 <main class="operation-app" data-event-id="{{ event_id }}" data-operation-id="{{ operation_id }}" data-read-only="{{ read_only|tojson }}">
@@ -35,5 +35,6 @@
  </div>
 </main>
 <dialog id="operation-preview-dialog"><form method="dialog"><header><h2>Per-team preview</h2><button value="cancel" aria-label="Close">×</button></header><div id="operation-preview-content"></div></form></dialog>
-<script type="module" src="/static/event-operation.js?v=4"></script>
+<dialog id="ability-details-dialog" aria-labelledby="ability-details-dialog-title"><div class="ability-dialog-shell"><header><div><span>Ability details</span><h2 id="ability-details-dialog-title">Execution dossier</h2></div><button type="button" data-ability-dialog-action="close" aria-label="Close ability details">Close</button></header><div id="ability-details-dialog-content"></div></div></dialog>
+<script type="module" src="/static/event-operation.js?v=5"></script>
 {% endblock %}

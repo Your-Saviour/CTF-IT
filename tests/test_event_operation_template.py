@@ -49,8 +49,24 @@ def test_operation_designer_assets_and_route_are_wired():
 def test_operation_designer_cache_busts_controller_and_state_module_together():
     html = (ROOT / "frontend/templates/event_operation.html").read_text()
     source = (ROOT / "frontend/static/event-operation.js").read_text()
-    assert '/static/event-operation.js?v=4' in html
+    assert '/static/event-operation.js?v=5' in html
     assert "from './event-operation-state.js?v=4'" in source
+
+
+def test_ability_nodes_expose_shared_details_and_expandable_dialog():
+    html = (ROOT / "frontend/templates/event_operation.html").read_text()
+    source = (ROOT / "frontend/static/event-operation.js").read_text()
+
+    assert 'id="ability-details-dialog"' in html
+    assert 'id="ability-details-dialog-content"' in html
+    assert 'data-ability-dialog-action="close"' in html
+    assert '/static/event-operation.js?v=5' in html
+    assert "from './event-operation-ability-details.js?v=1'" in source
+    assert 'data-inspector-tab="details"' in source
+    assert 'data-inspector-tab="settings"' in source
+    assert 'data-ability-action="expand"' in source
+    assert 'navigator.clipboard.writeText(command)' in source
+    assert 'abilityExpandButton?.focus()' in source
 
 
 def test_module_assignment_links_forward_to_operation_design():

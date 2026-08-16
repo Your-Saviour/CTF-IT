@@ -132,7 +132,9 @@ def operation_catalogue(infrastructure, module_plan, modules):
                 abilities.append({"id": f"ability:{module.id}:{phase}", "module_id": module.id,
                     "ability": phase, "name": f"{phase.title()}: {module.name}",
                     "description": row.get("description", module.description),
-                    "tactic": caldera.get("tactic"), "supported_bases": list(module.supported_bases)})
+                    "command": row["command"], "tactic": caldera.get("tactic"),
+                    "technique": caldera.get("technique"),
+                    "supported_bases": list(module.supported_bases)})
         if module.type == "goal":
             objectives.append({"id": f"objective:{module.id}", "module_id": module.id,
                                "name": module.name, "description": module.description})
