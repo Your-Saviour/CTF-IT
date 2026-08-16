@@ -4,6 +4,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_modules_command_header_separates_context_from_actions():
+    html = (ROOT / "frontend/templates/event_modules.html").read_text()
+
+    for marker in [
+        'event-planner.css?v=3',
+        'class="planner-context-row"',
+        'class="planner-brand" href="/admin">&gt;_ CTF Platform</a>',
+        'class="planner-command-row"',
+        'class="planner-command-start"',
+        'id="save-state" role="status" aria-live="polite"',
+        'id="preview"',
+        'id="save"',
+    ]:
+        assert marker in html
+
+
 def test_planned_vm_navigation_stacks_rows_vertically():
     css = (ROOT / "frontend/static/event-modules.css").read_text()
     assert "#vm-list{display:flex;flex-direction:column" in css

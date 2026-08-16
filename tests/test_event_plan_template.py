@@ -14,6 +14,37 @@ CSS = ROOT / "frontend" / "static" / "event-planner.css"
 BASES = {"ubuntu_24_server", "opnsense"}
 
 
+def test_planner_command_header_separates_context_from_actions():
+    html = TEMPLATE.read_text()
+
+    for marker in [
+        'event-planner.css?v=3',
+        'class="planner-context-row"',
+        'class="planner-brand" href="/admin">&gt;_ CTF Platform</a>',
+        'class="planner-command-row"',
+        'class="planner-command-start"',
+        'id="planner-save-state" role="status" aria-live="polite"',
+        'id="planner-advanced"',
+        'id="planner-save"',
+    ]:
+        assert marker in html
+
+
+def test_planner_command_header_styles_create_readable_two_row_hierarchy():
+    css = "".join(CSS.read_text().split())
+
+    for rule in [
+        ".planner-toolbar{display:grid",
+        ".planner-context-row{display:grid",
+        ".planner-command-row{display:flex",
+        ".planner-brand{color:var(--cyan);font-family:'ShareTechMono',monospace",
+        ".planner-toolbarp{margin:4px00;color:var(--text-secondary)",
+        ".planner-action-group+.planner-action-group{border-left:1pxsolidvar(--border)",
+        "@media(max-width:1100px)",
+    ]:
+        assert rule in css
+
+
 def test_infrastructure_accepts_free_form_planner_address_annotations():
     infrastructure = default_infrastructure()
     site = infrastructure["sites"][0]
