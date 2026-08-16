@@ -155,24 +155,34 @@ def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
     deadline = time.monotonic() + (POLL_TIMEOUT if retry else 1)
     last_error = None
     while time.monotonic() < deadline:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            client.connect(host, username="root", pkey=key, allow_agent=False, look_for_keys=False,
-                           timeout=15, banner_timeout=15, auth_timeout=15)
-            # OPNsense assigns root a csh login shell.  Always select POSIX sh
-            # explicitly because lifecycle and validation commands use sh
-            # conditionals, substitutions, and `set -eu`.
-            _stdin, stdout, stderr = client.exec_command(_posix_command(command), timeout=timeout)
-            return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
-                    stderr.read().decode(errors="replace"))
-        except Exception as exc:
-            last_error = exc
-            if not retry:
+        for username in ("root", "freebsd", "ec2-user"):
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                client.connect(host, username=username, pkey=key, allow_agent=False,
+                               look_for_keys=False, timeout=15, banner_timeout=15,
+                               auth_timeout=15)
+                # Official FreeBSD images disable direct root login and grant
+                # their cloud user passwordless doas. Converted OPNsense images
+                # instead expose the managed root key. Select POSIX sh in both
+                # cases because OPNsense root otherwise receives csh.
+                shell = _posix_command(command)
+                if username != "root":
+                    shell = "doas " + shell
+                _stdin, stdout, stderr = client.exec_command(shell, timeout=timeout)
+                return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
+                        stderr.read().decode(errors="replace"))
+            except paramiko.AuthenticationException as exc:
+                last_error = exc
+                continue
+            except Exception as exc:
+                last_error = exc
                 break
-            time.sleep(POLL_SECONDS)
-        finally:
-            client.close()
+            finally:
+                client.close()
+        if not retry:
+            break
+        time.sleep(POLL_SECONDS)
     raise ImageWorkflowError(f"SSH did not become ready: {last_error}")
 
 

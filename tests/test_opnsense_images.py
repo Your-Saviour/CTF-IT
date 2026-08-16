@@ -9,7 +9,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     BOOTSTRAP_SOURCE_URL, ImageWorkflowError, active_image, elapsed_seconds,
-    interrupt_running_jobs, new_image, release_matches, run_image_build,
+    _ssh, interrupt_running_jobs, new_image, release_matches, run_image_build,
     validate_bootstrap_url, validate_control_plane_cidr, validate_release,
 )
 
@@ -96,3 +96,41 @@ def test_activation_source_rejects_unvalidated_ami(monkeypatch):
     image = new_image(db, "26.7", provider_factory=lambda: Provider())
     run_image_build(db, image.id, provider_factory=lambda: Provider())
     assert image.status == "failed" and active_image(db) is None
+
+
+def test_freebsd_cloud_user_fallback_executes_commands_through_doas(monkeypatch):
+    from paramiko import AuthenticationException
+    from api.services import opnsense_images
+
+    attempts = []
+    commands = []
+
+    class Stream:
+        def __init__(self, content=b""):
+            self.content = content
+            self.channel = self
+        def recv_exit_status(self): return 0
+        def read(self): return self.content
+
+    class Client:
+        def set_missing_host_key_policy(self, _policy): pass
+        def connect(self, _host, *, username, **_kwargs):
+            attempts.append(username)
+            if username == "root":
+                raise AuthenticationException("root disabled")
+        def exec_command(self, command, **_kwargs):
+            commands.append(command)
+            return Stream(), Stream(b"amd64\n"), Stream()
+        def close(self): pass
+
+    times = iter((0, 0, 2))
+    monkeypatch.setattr(opnsense_images, "POLL_TIMEOUT", 1)
+    monkeypatch.setattr(opnsense_images.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(opnsense_images.paramiko, "SSHClient", Client)
+    monkeypatch.setattr(opnsense_images.paramiko.Ed25519Key, "from_private_key", lambda _value: object())
+    monkeypatch.setattr(opnsense_images, "get_or_create_platform_keypair", lambda _db: ("private", "public"))
+
+    assert _ssh(object(), "198.51.100.10", "uname -m") == (0, "amd64\n", "")
+    assert attempts == ["root", "freebsd"]
+    assert commands == ["doas /bin/sh -c 'uname -m'"]
