@@ -44,10 +44,36 @@
         "ec2:CreateSubnet",
         "ec2:CreateTags",
         "ec2:CreateVpc",
-        "ec2:ImportKeyPair",
-        "ec2:RunInstances"
+        "ec2:ImportKeyPair"
       ],
       "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/ManagedBy": "ctf-it"
+        }
+      }
+    },
+    {
+      "Sid": "RunInstancesDependencies",
+      "Effect": "Allow",
+      "Action": ["ec2:RunInstances"],
+      "Resource": [
+        "arn:aws:ec2:*::image/*",
+        "arn:aws:ec2:*:*:key-pair/*",
+        "arn:aws:ec2:*:*:security-group/*",
+        "arn:aws:ec2:*:*:snapshot/*",
+        "arn:aws:ec2:*:*:subnet/*"
+      ]
+    },
+    {
+      "Sid": "RunTaggedCompute",
+      "Effect": "Allow",
+      "Action": ["ec2:RunInstances"],
+      "Resource": [
+        "arn:aws:ec2:*:*:instance/*",
+        "arn:aws:ec2:*:*:network-interface/*",
+        "arn:aws:ec2:*:*:volume/*"
+      ],
       "Condition": {
         "StringEquals": {
           "aws:RequestTag/ManagedBy": "ctf-it"

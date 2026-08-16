@@ -111,7 +111,7 @@ def test_readiness_counts_existing_vpcs_enis_and_vcpus_before_passing_capacity()
     assert report.checks["on_demand_vcpus"].code == "quota_exceeded"
 
 
-def test_readiness_uses_vpc_service_for_network_quotas_and_ec2_for_vcpus():
+def test_readiness_uses_verified_service_namespaces_for_quotas():
     calls = []
     class RecordingQuotas(Quotas):
         def get_service_quota(self, **kwargs):
@@ -124,7 +124,7 @@ def test_readiness_uses_vpc_service_for_network_quotas_and_ec2_for_vcpus():
         security_group_ids=("sg-standard",),
     )
     service_.check(plan())
-    assert ("vpc", "L-0263D0A3") in calls
+    assert ("ec2", "L-0263D0A3") in calls
     assert ("vpc", "L-F678F1CE") in calls
     assert ("vpc", "L-DF5E4CA3") in calls
     assert ("ec2", "L-1216C47A") in calls

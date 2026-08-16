@@ -85,7 +85,9 @@ def test_launch_uses_client_token_tags_imdsv2_and_explicit_eni():
         "DeviceIndex": 0, "SubnetId": "subnet-123", "Groups": ["sg-123"],
         "AssociatePublicIpAddress": False, "DeleteOnTermination": True,
     }]
-    assert {item["ResourceType"] for item in request["TagSpecifications"]} == {"instance", "volume"}
+    assert {item["ResourceType"] for item in request["TagSpecifications"]} == {
+        "instance", "network-interface", "volume",
+    }
 
 
 def test_launch_reconciles_owned_instance_by_client_token():

@@ -131,7 +131,7 @@ class AwsComputeProvider:
             "NetworkInterfaces": [interface.request() for interface in spec.network_interfaces],
             "TagSpecifications": [
                 {"ResourceType": resource, "Tags": aws_tag_list(spec.tags)}
-                for resource in ("instance", "volume")
+                for resource in ("instance", "network-interface", "volume")
             ],
         }
         if spec.key_name:

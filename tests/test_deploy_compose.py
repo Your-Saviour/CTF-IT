@@ -86,6 +86,30 @@ def test_iam_policy_uses_only_documented_aws_services_and_no_service_wildcards()
     assert "iam:*" not in actions and "ec2:*" not in actions
 
 
+def test_iam_policy_separates_run_instances_dependencies_from_tagged_resources() -> None:
+    policy = json.loads((ROOT / "deploy" / "aws" / "iam-policy.json").read_text())
+    statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+    dependencies = statements["RunInstancesDependencies"]
+    created = statements["RunTaggedCompute"]
+
+    assert dependencies["Action"] == ["ec2:RunInstances"]
+    assert "Condition" not in dependencies
+    assert {
+        "arn:aws:ec2:*::image/*",
+        "arn:aws:ec2:*:*:key-pair/*",
+        "arn:aws:ec2:*:*:security-group/*",
+        "arn:aws:ec2:*:*:subnet/*",
+        "arn:aws:ec2:*:*:snapshot/*",
+    } <= set(dependencies["Resource"])
+    assert created["Action"] == ["ec2:RunInstances"]
+    assert set(created["Resource"]) == {
+        "arn:aws:ec2:*:*:instance/*",
+        "arn:aws:ec2:*:*:network-interface/*",
+        "arn:aws:ec2:*:*:volume/*",
+    }
+    assert created["Condition"]["StringEquals"]["aws:RequestTag/ManagedBy"] == "ctf-it"
+
+
 def test_aws_login_and_acceptance_are_containerized() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
     tools = compose["services"]["aws-tools"]

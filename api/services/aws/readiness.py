@@ -106,7 +106,7 @@ class AwsReadinessService:
                     }],
                     "TagSpecifications": [
                         {"ResourceType": resource, "Tags": tags}
-                        for resource in ("instance", "volume")
+                        for resource in ("instance", "network-interface", "volume")
                     ],
                 }),
                 ("CreateVpc", self.ec2.create_vpc, {
@@ -187,7 +187,7 @@ class AwsReadinessService:
 
         try:
             in_use = len(self._all("describe_addresses", "Addresses"))
-            quota = self._quota("vpc", self.EIP_QUOTA)
+            quota = self._quota("ec2", self.EIP_QUOTA)
             checks["elastic_ips"] = (_passed(f"{quota - in_use} available") if in_use + plan.elastic_ips <= quota
                                       else _failed("quota_exceeded", f"need {plan.elastic_ips}, have {quota - in_use}"))
         except Exception as exc:
