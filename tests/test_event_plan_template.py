@@ -186,6 +186,15 @@ def test_canvas_drag_updates_node_and_attached_links_before_release():
     assert "updateLinks()" in drag_handler
 
 
+def test_zone_drag_uses_a_stationary_coordinate_container():
+    source = CANVAS.read_text()
+    compact = "".join(source.split())
+
+    assert "containers.call(d3.drag()" in compact
+    assert ".filter(event=>event.target.classList.contains('zone-container-header'))" in compact
+    assert "containers.select('.zone-container-header').call(d3.drag()" not in compact
+
+
 def test_canvas_persists_missing_hierarchical_positions_and_reuses_them_for_reset():
     source = CANVAS.read_text()
     compact = "".join(source.split())

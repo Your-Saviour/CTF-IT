@@ -532,7 +532,8 @@ export function createPlannerCanvas(svgElement, callbacks = {}) {
       let dragStartLayout;
       let dragStartPosition;
       let dragChildIds = [];
-      containers.select('.zone-container-header').call(d3.drag()
+      containers.call(d3.drag()
+        .filter(event => event.target.classList.contains('zone-container-header'))
         .on('start', function(event, d) {
           dragStartLayout = structuredClone(currentLayout);
           dragStartPosition = {...dragStartLayout.nodes[d.id]};
