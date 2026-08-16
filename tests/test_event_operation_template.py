@@ -46,6 +46,13 @@ def test_operation_designer_assets_and_route_are_wired():
     assert '"event_operation.html"' in main
 
 
+def test_operation_designer_cache_busts_controller_and_state_module_together():
+    html = (ROOT / "frontend/templates/event_operation.html").read_text()
+    source = (ROOT / "frontend/static/event-operation.js").read_text()
+    assert '/static/event-operation.js?v=4' in html
+    assert "from './event-operation-state.js?v=4'" in source
+
+
 def test_module_assignment_links_forward_to_operation_design():
     html = (ROOT / "frontend/templates/event_modules.html").read_text()
     assert f'/admin/events/{{{{ event_id }}}}/operation' in html

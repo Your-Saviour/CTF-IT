@@ -2,7 +2,7 @@ import {
   addNode, addEdge, connectionError, deleteSelection, autoArrange, moveNode,
   moveNodes, duplicateNodes, insertConnectedNode,
   isTriggerType, replaceTrigger, operationTriggerTemplates, triggerPreviewText,
-} from './event-operation-state.js';
+} from './event-operation-state.js?v=4';
 import {createViewport, graphPoint, zoomAt, fitViewport, createHistory, nodeTargetLabel, nodeLabelLines} from './event-operation-workspace.js';
 
 const app=document.querySelector('.operation-app'),eventId=app.dataset.eventId,readOnly=app.dataset.readOnly==='true';
