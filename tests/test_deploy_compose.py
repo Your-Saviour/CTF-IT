@@ -84,3 +84,32 @@ def test_iam_policy_uses_only_documented_aws_services_and_no_service_wildcards()
     assert all(action.split(":", 1)[0] in {"ec2", "sts", "servicequotas", "pricing"}
                for action in actions)
     assert "iam:*" not in actions and "ec2:*" not in actions
+
+
+def test_aws_login_and_acceptance_are_containerized() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    tools = compose["services"]["aws-tools"]
+    acceptance = compose["services"]["aws-acceptance"]
+
+    assert tools["image"] == "public.ecr.aws/aws-cli/aws-cli:2.36.24"
+    assert tools["profiles"] == ["aws-acceptance"]
+    assert acceptance["profiles"] == ["aws-acceptance"]
+    assert acceptance["build"]["target"] == "acceptance"
+    assert "aws_credentials:/root/.aws" in tools["volumes"]
+    assert "aws_credentials:/root/.aws" in acceptance["volumes"]
+    assert acceptance["network_mode"] == "host"
+    assert "NET_ADMIN" in acceptance["cap_add"]
+    assert "/dev/net/tun:/dev/net/tun" in acceptance["devices"]
+    assert "aws_credentials" in compose["volumes"]
+
+
+def test_aws_containers_expose_no_static_keys_or_host_credential_mounts() -> None:
+    services = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]
+
+    for name in ("aws-tools", "aws-acceptance"):
+        service = services[name]
+        environment = "\n".join(service.get("environment", []))
+        volumes = service.get("volumes", [])
+        assert "AWS_ACCESS_KEY_ID" not in environment
+        assert "AWS_SECRET_ACCESS_KEY" not in environment
+        assert all(volume == "aws_credentials:/root/.aws" for volume in volumes)

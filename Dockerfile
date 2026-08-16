@@ -16,6 +16,14 @@ ENV PYTHONPATH=/app:/app/ai_agent
 
 CMD ["python", "-m", "pytest", "tests/"]
 
+FROM test AS acceptance
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wireguard-tools iproute2 iptables \
+    && rm -rf /var/lib/apt/lists/*
+
+CMD ["python", "-m", "pytest", "-q", "tests/aws_acceptance"]
+
 FROM base AS runtime
 
 RUN apt-get update \

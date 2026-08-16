@@ -73,6 +73,46 @@ services:
       - AGENT_DATABASE_URL=sqlite://
       - COOKIE_SECURE=false
 
+  aws-tools:
+    image: public.ecr.aws/aws-cli/aws-cli:2.36.24
+    profiles: ["aws-acceptance"]
+    volumes:
+      - aws_credentials:/root/.aws
+    environment:
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
+    command: ["--version"]
+
+  aws-acceptance:
+    profiles: ["aws-acceptance"]
+    build:
+      context: .
+      target: acceptance
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - aws_credentials:/root/.aws
+    environment:
+      - SECRET_KEY=aws-acceptance-container-only
+      - AWS_PROFILE=${AWS_PROFILE:-ctf-it-acceptance}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
+      - AWS_ENVIRONMENT=${AWS_ENVIRONMENT:-}
+      - AWS_STANDARD_VPC_ID=${AWS_STANDARD_VPC_ID:-}
+      - AWS_STANDARD_SUBNET_ID=${AWS_STANDARD_SUBNET_ID:-}
+      - AWS_STANDARD_SECURITY_GROUP_IDS=${AWS_STANDARD_SECURITY_GROUP_IDS:-}
+      - AWS_UBUNTU_AMIS=${AWS_UBUNTU_AMIS:-}
+      - AWS_FREEBSD_AMIS=${AWS_FREEBSD_AMIS:-}
+      - AWS_AVAILABILITY_ZONES=${AWS_AVAILABILITY_ZONES:-}
+      - AWS_INSTANCE_TYPES=${AWS_INSTANCE_TYPES:-}
+      - AWS_KEY_PAIR_NAME=${AWS_KEY_PAIR_NAME:-ctf-it}
+      - CTF_CONTROL_PLANE_CIDR=${CTF_CONTROL_PLANE_CIDR:-}
+      - RUN_AWS_ACCEPTANCE=${RUN_AWS_ACCEPTANCE:-}
+      - AWS_ACCEPTANCE_ACCOUNT_ID=${AWS_ACCEPTANCE_ACCOUNT_ID:-}
+      - AWS_ACCEPTANCE_RUN_ID=${AWS_ACCEPTANCE_RUN_ID:-}
+
 volumes:
   api_data:
+  aws_credentials:
   agent_data:
