@@ -412,6 +412,40 @@ def _boot_id(db: Session, host: str) -> str:
     return output.strip()
 
 
+def _reboot_and_wait(db: Session, host: str, previous_boot_id: str) -> None:
+    delayed = "/bin/sh -c " + shlex.quote("sleep 1; /sbin/shutdown -r now")
+    code, _, error = _ssh(
+        db, host, f"nohup {delayed} >/dev/null 2>&1 </dev/null &", timeout=30,
+    )
+    if code:
+        raise ImageWorkflowError(f"golden config reboot request failed: {error[:300]}")
+
+    offline_deadline = time.monotonic() + 120
+    while time.monotonic() < offline_deadline and _guest_ssh_online(host):
+        time.sleep(2)
+    if _guest_ssh_online(host):
+        raise ImageWorkflowError("guest did not close SSH for golden config reboot")
+
+    online_deadline = time.monotonic() + 300
+    last_error = "guest did not return"
+    while time.monotonic() < online_deadline:
+        try:
+            current_boot_id = _boot_id(db, host)
+            if current_boot_id != previous_boot_id:
+                return
+            last_error = "boot identity did not change"
+        except ImageWorkflowError as exc:
+            last_error = str(exc)
+        time.sleep(3)
+    raise ImageWorkflowError(f"golden config reboot did not complete: {last_error}")
+
+
+def _install_golden_config(db: Session, host: str, content: bytes) -> None:
+    previous_boot_id = _boot_id(db, host)
+    _upload_atomic(db, host, "/conf/config.xml", content)
+    _reboot_and_wait(db, host, previous_boot_id)
+
+
 def _fingerprint(db: Session, host: str) -> str:
     command = ("key=$(/usr/local/sbin/sshd -T | awk 'tolower($1)==\"hostkey\" && tolower($2) ~ /ed25519/ {print $2; exit}'); "
                "test -n \"$key\"; ssh-keygen -lf \"$key.pub\" | awk '{print $2}'")

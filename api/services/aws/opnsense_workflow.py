@@ -113,10 +113,6 @@ class AwsOpnsenseWorkflow:
                     script = workflow.make_pkgbase_compatible_bootstrap(script)
                     image.bootstrap_sha256 = digest; db.commit()
                     workflow._upload_atomic(
-                        db, builder.public_ip, "/conf/config.xml",
-                        workflow.render_golden_config(db, image, cidr).encode(),
-                    )
-                    workflow._upload_atomic(
                         db, builder.public_ip, "/root/opnsense-bootstrap.sh", script, 0o700,
                     )
                     workflow._launch_bootstrap_daemon(
@@ -133,6 +129,10 @@ class AwsOpnsenseWorkflow:
                 workflow._wait_for_opnsense(
                     db, builder.public_ip, image.version,
                     diagnostics=serial_console,
+                )
+                workflow._install_golden_config(
+                    db, builder.public_ip,
+                    workflow.render_golden_config(db, image, cidr).encode(),
                 )
                 workflow._validate_builder(
                     db, image, builder.public_ip, cidr, "AWS builder validation",
