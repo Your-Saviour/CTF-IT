@@ -91,14 +91,25 @@ def download_bootstrap(url: str = BOOTSTRAP_SOURCE_URL, *, client: httpx.Client 
     owned = client is None
     http = client or httpx.Client(timeout=60)
     try:
-        response = http.get(url, follow_redirects=False)
-        if response.is_redirect:
-            raise ImageWorkflowError("bootstrap download redirect rejected")
-        response.raise_for_status()
-        content = response.content
-        if not content or len(content) > 1024 * 1024:
-            raise ImageWorkflowError("bootstrap source is empty or unexpectedly large")
-        return content, hashlib.sha256(content).hexdigest()
+        for attempt in range(4):
+            response = http.get(url, follow_redirects=False)
+            if response.is_redirect:
+                raise ImageWorkflowError("bootstrap download redirect rejected")
+            transient = response.status_code == 429 or response.status_code >= 500
+            if transient and attempt < 3:
+                retry_after = response.headers.get("Retry-After", "")
+                try:
+                    delay = min(60, max(1, int(retry_after)))
+                except ValueError:
+                    delay = 2 ** attempt
+                time.sleep(delay)
+                continue
+            response.raise_for_status()
+            content = response.content
+            if not content or len(content) > 1024 * 1024:
+                raise ImageWorkflowError("bootstrap source is empty or unexpectedly large")
+            return content, hashlib.sha256(content).hexdigest()
+        raise AssertionError("bootstrap retry loop exhausted without a response")
     finally:
         if owned:
             http.close()

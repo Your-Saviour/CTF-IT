@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import datetime, timezone
 
@@ -34,6 +35,38 @@ def test_release_and_bootstrap_inputs_are_strict():
     assert not release_matches("27.7", "26.7")
     with pytest.raises(ValueError): validate_release("26.7/../../")
     with pytest.raises(ImageWorkflowError): validate_bootstrap_url("https://example.com/bootstrap.sh")
+
+
+def test_bootstrap_download_retries_github_throttling(monkeypatch):
+    from api.services import opnsense_images
+
+    class Response:
+        is_redirect = False
+        content = b"#!/bin/sh\n"
+
+        def __init__(self, status_code, retry_after=None):
+            self.status_code = status_code
+            self.headers = {"Retry-After": retry_after} if retry_after else {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise AssertionError("throttled response should be retried")
+
+    class Client:
+        def __init__(self):
+            self.responses = iter((Response(429, "2"), Response(200)))
+
+        def get(self, *_args, **_kwargs):
+            return next(self.responses)
+
+    sleeps = []
+    monkeypatch.setattr(opnsense_images.time, "sleep", sleeps.append)
+
+    content, digest = opnsense_images.download_bootstrap(client=Client())
+
+    assert content == b"#!/bin/sh\n"
+    assert digest == hashlib.sha256(content).hexdigest()
+    assert sleeps == [2]
 
 
 def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
