@@ -1,0 +1,46 @@
+id: kernel_hardening_sysctl
+name: Kernel Hardening via sysctl
+description: Kernel hardening parameters have been relaxed in /etc/sysctl.d/99-ctf-training.conf and applied at runtime. Kernel pointers are exposed in /proc, kernel messages are readable by unprivileged users, reverse-path filtering is off, SUID processes may dump core memory, and ptrace is unrestricted. Restore restrictive values durably and apply them.
+type: hardening
+stage: preapplied
+difficulty: medium
+points: 200
+category: configuration
+tags: [kernel, sysctl, hardening, configuration]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: sysctl_value
+      key: kernel.kptr_restrict
+      expected: "2"
+    - type: sysctl_value
+      key: kernel.dmesg_restrict
+      expected: "1"
+    - type: sysctl_value
+      key: net.ipv4.conf.all.rp_filter
+      expected: "1"
+    - type: sysctl_value
+      key: fs.suid_dumpable
+      expected: "0"
+    - type: file_contains
+      path: /etc/sysctl.d/99-ctf-training.conf
+      pattern: "kernel.kptr_restrict = 2"
+hints:
+  - "Review current kernel parameters with sysctl and inspect /etc/sysctl.d/ for training overrides"
+  - "Restrict kernel pointer exposure, kernel message access, ptrace, and SUID core dumps"
+  - "Restore the hardened values in /etc/sysctl.d/99-ctf-training.conf and apply with sysctl --system"
+learning_objectives: [Identify relaxed kernel hardening parameters, Apply durable restrictive sysctl values]
+estimated_minutes: 35
+debrief:
+  root_cause: Kernel hardening parameters were relaxed, exposing kernel pointers, logs, and core dumps to unprivileged users.
+  remediation: Restore restrictive values for kptr_restrict, dmesg_restrict, rp_filter, ptrace_scope, and suid_dumpable, then apply via sysctl --system.
+  attack_mapping: "M1022 — Restrict File and Directory Permissions / M1035 — Limit Hardware Installation (kernel hardening)"
+suggested_fix: "printf 'kernel.kptr_restrict = 2\\nkernel.dmesg_restrict = 1\\nkernel.yama.ptrace_scope = 1\\nnet.ipv4.conf.all.rp_filter = 1\\nnet.ipv4.conf.default.rp_filter = 1\\nfs.suid_dumpable = 0\\n' > /etc/sysctl.d/99-ctf-training.conf && sysctl --system"
+references:
+  - title: "CIS Ubuntu Linux 24.04 Benchmark — Kernel hardening sysctl settings"
+    url: https://www.cisecurity.org/benchmark/ubuntu_linux
+  - title: "Ubuntu Kernel security documentation"
+    url: https://documentation.ubuntu.com/server/explanation/security/kernel-security/

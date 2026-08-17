@@ -1,0 +1,50 @@
+id: ld_preload_backdoor
+name: LD_PRELOAD Library Hijack Backdoor
+description: A hidden shared library has been planted under /opt/.cache/ and referenced from /etc/ld.so.preload. Every process on the system loads it, letting the library intercept standard function calls and drop a persistence beacon marker — a classic rootkit-style dynamic linker hijack. Investigate the loader configuration, remove the library, and prove a clean process still works.
+type: payload
+difficulty: hard
+points: 300
+category: persistence
+tags: [ld-preload, backdoor, persistence, rootkit, incident-response]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_absent
+      path: /etc/ld.so.preload
+    - type: file_absent
+      path: /opt/.cache/.libgcrypt.so
+hints:
+  - "Inspect the dynamic linker configuration: /etc/ld.so.preload is normally empty or absent"
+  - "Check for unexpected entries in /etc/ld.so.preload and resolve the referenced library"
+  - "Remove the preload entry, delete the hidden library under /opt/.cache/, then run ldconfig and verify normal commands still work"
+learning_objectives: [Trace dynamic linker hijacking from loader config to library, Remove rootkit persistence without breaking the system]
+estimated_minutes: 60
+debrief:
+  root_cause: A preloaded shared library injected into every process intercepted standard calls for persistence.
+  remediation: Clear /etc/ld.so.preload, delete the planted library, rebuild the loader cache, and verify applications still function.
+  attack_mapping: "T1574.006 — Hijack Execution Flow: Dynamic Linker Hijacking"
+suggested_fix: rm /etc/ld.so.preload; rm -f /opt/.cache/.libgcrypt.so; ldconfig
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1574.006
+    name: "Hijack Execution Flow: Dynamic Linker Hijacking"
+  recon:
+    description: "Check whether a preload backdoor is active"
+    command: |
+      test -s /etc/ld.so.preload && echo "VULNERABLE: /etc/ld.so.preload is populated" && cat /etc/ld.so.preload || echo "SECURE: no preload entries"
+  exploit:
+    description: "Confirm the planted library loads and the beacon fires"
+    command: |
+      cat /etc/ld.so.preload 2>/dev/null
+      id -u
+      cat /var/lib/.ctf-preload-marker 2>/dev/null && echo "VULNERABLE: preload beacon fired" || echo "no beacon marker yet"
+
+references:
+  - title: "MITRE ATT&CK Dynamic Linker Hijacking"
+    url: https://attack.mitre.org/techniques/T1574/006/
+  - title: "man ld.so — Linux dynamic linker/loader manual"
+    url: https://man7.org/linux/man-pages/man8/ld.so.8.html

@@ -1,0 +1,51 @@
+id: web_shell_guestbook
+name: Webshell in Guestbook Uploads
+description: A PHP webshell has been planted at /opt/guestbook/uploads/backup.php and is served by Apache on port 8080. Anyone who reaches the file gains remote command execution as the www-data user, letting an attacker run arbitrary commands against the web server. The file is disguised as a routine backup script.
+type: payload
+difficulty: medium
+points: 200
+category: web
+tags: [webshell, web, persistence, backdoor, incident-response]
+conflicts: []
+requires: [php_guestbook]
+script: web_shell_guestbook.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_absent
+      path: /opt/guestbook/uploads/backup.php
+    - type: http_response
+      port: 8080
+      path: /uploads/backup.php
+      status_code: 404
+suggested_fix: "Delete the webshell and its uploads directory if not needed: rm /opt/guestbook/uploads/backup.php && rmdir /opt/guestbook/uploads 2>/dev/null || true. Also check /opt/guestbook/ for other unexpected files and review Apache access logs (/var/log/apache2/access.log) for hits on /uploads/backup.php."
+hints:
+  - "Web server files served on port 8080 live under /opt/guestbook/ — hunt for anything an attacker could have placed there"
+  - "Check Apache access logs for requests to unusual paths such as /uploads/"
+  - "Look for PHP files with obfuscated or base64-encoded payloads outside the normal application files"
+learning_objectives: [Hunt for webshell artifacts in a web root, Remove remote code execution access while keeping the app functional]
+estimated_minutes: 30
+debrief:
+  root_cause: An attacker-facing PHP file executed arbitrary commands in the web root.
+  remediation: Delete the planted file, tighten write permissions on the web root, and confirm no equivalent artifacts remain.
+  attack_mapping: "T1505.003 — Server Software Component: Web Shell"
+caldera:
+  tactic: persistence
+  technique:
+    attack_id: T1505.003
+    name: "Server Software Component: Web Shell"
+  recon:
+    description: "Check if the backup.php webshell is present and reachable"
+    command: |
+      test -f /opt/guestbook/uploads/backup.php && curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/uploads/backup.php" || echo "404"
+      test -f /opt/guestbook/uploads/backup.php && echo "VULNERABLE: webshell present" || echo "SECURE: webshell removed"
+  exploit:
+    description: "Execute a command through the planted webshell"
+    command: |
+      curl -s "http://localhost:8080/uploads/backup.php" -d "cmd=id" 2>/dev/null || echo "Webshell not present or removed"
+
+references:
+  - title: "MITRE ATT&CK Web Shell technique"
+    url: https://attack.mitre.org/techniques/T1505/003/
+  - title: "OWASP Web Security Testing Guide"
+    url: https://owasp.org/www-project-web-security-testing-guide/

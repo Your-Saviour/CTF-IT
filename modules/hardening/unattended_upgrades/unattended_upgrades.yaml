@@ -1,0 +1,42 @@
+id: unattended_upgrades
+name: Enable Automatic Security Updates
+description: Automatic security updates are disabled and the unattended-upgrades package is not installed. Security patches are therefore only applied when an administrator manually runs an upgrade, leaving the system exposed to known vulnerabilities. Enable unattended-upgrades and configure it to install security updates automatically.
+type: hardening
+stage: preapplied
+difficulty: easy
+points: 100
+category: services
+tags: [patch-management, apt, updates, hardening]
+conflicts: []
+requires: []
+script: setup.sh
+verification:
+  type: all_of
+  checks:
+    - type: package_installed
+      package: unattended-upgrades
+    - type: file_contains
+      path: /etc/apt/apt.conf.d/20auto-upgrades
+      pattern: 'APT::Periodic::Update-Package-Lists "1"'
+    - type: file_contains
+      path: /etc/apt/apt.conf.d/20auto-upgrades
+      pattern: 'APT::Periodic::Unattended-Upgrade "1"'
+    - type: service_running
+      service: apt-daily-upgrade.timer
+      expected: active
+hints:
+  - "Check whether unattended-upgrades is installed and whether periodic jobs are configured"
+  - "Automatic security patching is configured through /etc/apt/apt.conf.d/20auto-upgrades"
+  - "Install unattended-upgrades, set both APT::Periodic flags to 1, and start the timer/service"
+learning_objectives: [Understand the value of automated patching, Configure unattended-upgrades correctly]
+estimated_minutes: 25
+debrief:
+  root_cause: Automatic security patching was absent, leaving known vulnerabilities unpatched indefinitely.
+  remediation: Install unattended-upgrades, enable the periodic update and unattended-upgrade flags, and confirm the timer is active.
+  attack_mapping: T1190 — Exploit Public-Facing Application (delayed patching widens exposure)
+suggested_fix: "apt-get update && apt-get install -y unattended-upgrades && printf 'APT::Periodic::Update-Package-Lists \"1\";\\nAPT::Periodic::Unattended-Upgrade \"1\";\\n' > /etc/apt/apt.conf.d/20auto-upgrades && systemctl enable --now unattended-upgrades"
+references:
+  - title: "Ubuntu unattended-upgrades documentation"
+    url: https://help.ubuntu.com/community/AutomaticSecurityUpdates
+  - title: "CIS Ubuntu Linux 24.04 Benchmark 1.7 Automatic Updates"
+    url: https://www.cisecurity.org/benchmark/ubuntu_linux

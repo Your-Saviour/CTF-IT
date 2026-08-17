@@ -1,0 +1,47 @@
+id: ssrf_inventory_probe
+name: SSRF in Inventory Probe Endpoint
+description: A public /probe endpoint on the inventory dashboard accepts a fully attacker-controlled target URL and fetches it server-side without any restriction. An attacker can point the probe at internal addresses — including the cloud metadata service (169.254.169.254), the loopback interface, or internal tooling — and read their responses, turning the dashboard into an unauthenticated server-side request forgery primitive.
+type: vulnerability
+difficulty: medium
+points: 200
+category: web
+tags: [ssrf, web, flask, information-disclosure, internal-network]
+conflicts: []
+requires: [inventory_dashboard]
+script: ssrf_inventory_probe.sh
+verification:
+  type: all_of
+  checks:
+    - type: file_contains
+      path: /opt/inventory/app.py
+      pattern: "ALLOWED_PROBE_HOSTS"
+    - type: file_contains
+      path: /opt/inventory/app.py
+      pattern: "parsed.hostname not in ALLOWED_PROBE_HOSTS"
+suggested_fix: "Restrict the /probe endpoint to an allow-list of internal hosts. Add an ALLOWED_PROBE_HOSTS set, parse the target URL, and reject any hostname not in the list, then restart the service: systemctl restart inventory"
+hints:
+  - "Review the /probe route in /opt/inventory/app.py for how the target URL is used"
+  - "The route fetches whatever URL is passed as target — an allow-list of known internal hosts is the right control"
+  - "Add an ALLOWED_PROBE_HOSTS check and reject hosts outside it, then restart the inventory service"
+caldera:
+  tactic: initial-access
+  technique:
+    attack_id: T1190
+    name: "Exploit Public-Facing Application"
+  recon:
+    description: "Check if the probe endpoint performs unauthenticated URL fetching"
+    command: |
+      grep -q "parsed.hostname not in ALLOWED_PROBE_HOSTS" /opt/inventory/app.py && echo "SECURE: probe is host allow-listed" || echo "VULNERABLE: unrestricted SSRF in /probe"
+      curl -s -o /dev/null -w "probe status: %{http_code}\n" "http://localhost:5001/probe?target=http://169.254.169.254/"
+  exploit:
+    description: "Read cloud metadata via the SSRF-prone probe endpoint"
+    command: |
+      curl -s "http://localhost:5001/probe?target=http://169.254.169.254/latest/meta-data/" | head -c 300
+      echo
+      curl -s "http://localhost:5001/probe?target=file:///etc/hostname" | head -c 200
+
+references:
+  - title: "OWASP Server-Side Request Forgery"
+    url: https://owasp.org/www-community/attacks/Server_Side_Request_Forgery
+  - title: "MITRE ATT&CK Enterprise techniques"
+    url: https://attack.mitre.org/techniques/enterprise/
