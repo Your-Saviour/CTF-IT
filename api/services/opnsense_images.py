@@ -310,7 +310,17 @@ def _launch_bootstrap_daemon(db: Session, host: str, version: str) -> None:
         raise ImageWorkflowError(f"OPNsense bootstrap failed: {detail}")
 
 
-def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
+def _wait_for_opnsense(db: Session, host: str, version: str, *, diagnostics=None) -> None:
+    def failure(message: str) -> ImageWorkflowError:
+        if diagnostics is not None:
+            try:
+                detail = diagnostics()
+            except Exception as exc:
+                detail = f"diagnostics unavailable: {redact_error(exc)}"
+            if detail:
+                message = f"{message}\n{detail}"
+        return ImageWorkflowError(message)
+
     deadline = time.monotonic() + POLL_TIMEOUT
     last = "OPNsense has not answered"
     last_progress = None
@@ -333,7 +343,7 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
             last = redact_error(exc)
         else:
             if code == 2:
-                raise ImageWorkflowError(
+                raise failure(
                     f"OPNsense bootstrap exited before conversion completed: {last}"
                 )
             if code:
@@ -344,9 +354,9 @@ def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
                 else:
                     stalled_polls += 1
                     if stalled_polls * POLL_SECONDS >= BOOTSTRAP_STALL_TIMEOUT:
-                        raise ImageWorkflowError(f"OPNsense bootstrap stalled: {last}")
+                        raise failure(f"OPNsense bootstrap stalled: {last}")
         time.sleep(POLL_SECONDS)
-    raise ImageWorkflowError(f"bootstrap reboot did not return the expected OPNsense release: {last}")
+    raise failure(f"bootstrap reboot did not return the expected OPNsense release: {last}")
 
 
 def _provenance(image: OpnsenseImage) -> str:

@@ -226,6 +226,19 @@ def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
     assert "/var/log/opnsense-bootstrap.log" in commands[0]
 
 
+def test_opnsense_wait_captures_serial_console_before_cleanup(monkeypatch):
+    from api.services import opnsense_images
+
+    monkeypatch.setattr(opnsense_images, "_ssh", lambda *_args, **_kwargs: (2, "", ""))
+    monkeypatch.setattr(opnsense_images.time, "monotonic", iter((0, 0)).__next__)
+
+    with pytest.raises(ImageWorkflowError, match="make: executable file not found"):
+        opnsense_images._wait_for_opnsense(
+            object(), "198.51.100.10", "26.7",
+            diagnostics=lambda: "EC2 serial console:\nmake: executable file not found",
+        )
+
+
 def test_opnsense_wait_retries_transient_ssh_banner_failure(monkeypatch):
     from api.services import opnsense_images
 

@@ -124,7 +124,16 @@ class AwsOpnsenseWorkflow:
                     )
                 elif guest_state not in {"converting", "opnsense"}:
                     raise RuntimeError(f"unexpected builder guest state: {guest_state}")
-                workflow._wait_for_opnsense(db, builder.public_ip, image.version)
+                def serial_console():
+                    output = self.ec2.get_console_output(
+                        InstanceId=builder.instance_id, Latest=True,
+                    ).get("Output", "")
+                    return "EC2 serial console:\n" + output[-6000:]
+
+                workflow._wait_for_opnsense(
+                    db, builder.public_ip, image.version,
+                    diagnostics=serial_console,
+                )
                 workflow._validate_builder(
                     db, image, builder.public_ip, cidr, "AWS builder validation",
                 )
