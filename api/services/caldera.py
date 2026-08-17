@@ -132,6 +132,7 @@ class CalderaClient:
         obfuscator: str = "plain-text",
         jitter: str = "2/8",
         visibility: int = 50,
+        allowed_agents: list[str] | None = None,
     ) -> dict:
         payload = {
             "name": name,
@@ -145,6 +146,8 @@ class CalderaClient:
             "jitter": jitter,
             "visibility": visibility,
         }
+        if allowed_agents:
+            payload["allowed_agents"] = allowed_agents
         if state:
             payload["state"] = state
         resp = await self._client.post("/api/v2/operations", json=payload)

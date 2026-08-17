@@ -30,6 +30,23 @@ def _adversary_uuid(name: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, f"adversary_{name}"))
 
 
+def single_ability_adversary_id(ability_id: str) -> str:
+    return _adversary_uuid(f"single_{ability_id}")
+
+
+def build_single_ability_adversaries(abilities: list[dict]) -> list[dict]:
+    profiles = []
+    for a in abilities:
+        profiles.append({
+            "id": single_ability_adversary_id(a["id"]),
+            "name": f"CTF Single: {a['name']}",
+            "description": f"Single ability: {a['name']}",
+            "objective": None,
+            "abilities": [{"id": a["id"], "comment": a["name"]}],
+        })
+    return profiles
+
+
 def ability_uuid(module_id: str, phase: str) -> str:
     """Public alias for deterministic ability UUID generation.
 
@@ -566,7 +583,7 @@ def generate_caldera_export_multi_path(
     )
     legacy_adversaries = _build_adversary_profiles(abilities, combined_objective_id)
 
-    all_adversaries = legacy_adversaries + path_adversaries
+    all_adversaries = legacy_adversaries + path_adversaries + build_single_ability_adversaries(abilities)
 
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
 
@@ -590,7 +607,7 @@ def generate_caldera_export(quota: dict, export_id: str) -> Path:
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
 
     output_dir = CALDERA_EXPORTS_DIR / export_id
-    profiles = _build_adversary_profiles(abilities, combined_objective_id)
+    profiles = _build_adversary_profiles(abilities, combined_objective_id) + build_single_ability_adversaries(abilities)
     _write_plugin(env, output_dir, abilities, profiles, selected, objectives)
 
     return output_dir
@@ -638,7 +655,7 @@ def generate_caldera_event_export(
             build_path_adversaries(tree, vm_abilities, vm_label, goal_objective_map)
         )
 
-    all_adversaries = legacy_adversaries + path_adversaries
+    all_adversaries = legacy_adversaries + path_adversaries + build_single_ability_adversaries(abilities)
 
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
 
