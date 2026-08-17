@@ -462,7 +462,7 @@ def validate_snapshot_wan(vm: VM, expected_version: str) -> None:
     command = "/bin/sh -c " + shlex.quote(
         f"set -eu; set -- $(/usr/local/bin/php -r {shlex.quote(php)}); "
         "wan_if=$1; test \"$2\" = nolAN; test \"$3\" = disk; "
-        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
+        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^ena[0-9]+$'); "
         "test \"$#\" -eq 1; test \"$1\" = \"$wan_if\"; "
         + _opnsense_release_test(expected_version) + "; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
@@ -789,8 +789,8 @@ def _opnsense_release_test(requested: str) -> str:
 
 
 def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
-                           *, temporary_management: bool, wan_interface: str = "vtnet0",
-                           lan_interface: str = "vtnet1") -> str:
+                           *, temporary_management: bool, wan_interface: str = "ena0",
+                           lan_interface: str = "ena1") -> str:
     templates = FileSystemLoader(os.path.join(os.path.dirname(__file__), "..", "..", "templates"))
     environment = Environment(loader=templates, autoescape=False)
     environment.filters["b64encode"] = lambda value: base64.b64encode(str(value).encode()).decode()

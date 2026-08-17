@@ -254,7 +254,7 @@ def render_golden_config(db: Session, image: OpnsenseImage, cidr: str) -> str:
 <nextuid>2000</nextuid><nextgid>2000</nextgid><timezone>UTC</timezone><language>en_US</language>
 <ssh><enabled>1</enabled><port>22</port><permitrootlogin>1</permitrootlogin><interfaces>wan</interfaces><group>admins</group></ssh>
 <ctf_builder_provenance>{provenance}</ctf_builder_provenance></system>
-<interfaces><wan><if>vtnet0</if><descr>WAN</descr><enable>1</enable><ipaddr>dhcp</ipaddr><ipaddrv6>none</ipaddrv6><blockpriv>1</blockpriv><blockbogons>1</blockbogons></wan></interfaces>
+<interfaces><wan><if>ena0</if><descr>WAN</descr><enable>1</enable><ipaddr>dhcp</ipaddr><ipaddrv6>none</ipaddrv6><blockpriv>1</blockpriv><blockbogons>1</blockbogons></wan></interfaces>
 <gateways/><staticroutes/><filter/><OPNsense><Firewall><Filter><general><snat_mode>automatic</snat_mode></general><rules>
 <rule><enabled>1</enabled><statetype>keep</statetype><sequence>1</sequence><action>pass</action><quick>1</quick><interface>wan</interface><direction>in</direction><ipprotocol>inet</ipprotocol><protocol>tcp</protocol><source_net>{cidr}</source_net><destination_net>wanip</destination_net><destination_port>22</destination_port><description>CTF builder SSH</description></rule>
 </rules><snatrules/><npt/><onetoone/></Filter></Firewall></OPNsense><nat><outbound><mode>automatic</mode></outbound></nat><dhcpd/></opnsense>'''
@@ -401,9 +401,9 @@ def builder_validation_command(*, public_ip: str, version: str, cidr: str,
         f"test \"$#\" -eq 3 || {failed('golden config not loaded')}; wan_if=$1; "
         f"test \"$2\" = no || {failed('golden config unexpectedly contains LAN')}; "
         f"test \"$3\" = {shlex.quote(provenance)} || {failed('golden config not loaded')}; "
-        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
-        f"test \"$#\" -eq {nic_count} || {failed('unexpected virtio NIC count')}; "
-        f"test \"$wan_if\" = vtnet0 || {failed('WAN interface mismatch')}; "
+        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^ena[0-9]+$'); "
+        f"test \"$#\" -eq {nic_count} || {failed('unexpected ENA NIC count')}; "
+        f"test \"$wan_if\" = ena0 || {failed('WAN interface mismatch')}; "
         f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null || {failed('WAN address missing')}; "
         f"route -n get default | grep -F \"interface: $wan_if\" >/dev/null || {failed('default route mismatch')}; "
         f"test -s /root/.ssh/authorized_keys || {failed('managed root key missing')}; "

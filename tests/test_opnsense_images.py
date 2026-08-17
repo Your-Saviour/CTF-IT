@@ -84,11 +84,25 @@ def test_builder_validation_command_names_failed_invariants():
 
     for message in (
         "unexpected OPNsense version", "configctl missing", "golden config not loaded",
-        "unexpected virtio NIC count", "WAN interface mismatch", "WAN address missing",
+        "unexpected ENA NIC count", "WAN interface mismatch", "WAN address missing",
         "default route mismatch", "managed root key missing", "root SSH login disabled",
         "builder firewall rule missing",
     ):
         assert message in command
+    assert "grep -E '^ena[0-9]+$'" in command
+    assert 'test "$wan_if" = ena0' in command
+
+
+def test_aws_golden_config_uses_ec2_ena_wan():
+    from api.services.opnsense_images import render_golden_config
+
+    db = session()
+    image = image_row(db)
+
+    config = render_golden_config(db, image, "203.0.113.0/24")
+
+    assert "<wan><if>ena0</if>" in config
+    assert "vtnet0" not in config
 
 
 def test_golden_config_is_installed_after_conversion_and_rebooted(monkeypatch):
