@@ -1,7 +1,9 @@
 # tests/test_operation_compiler.py
 from types import SimpleNamespace
 
-from builder.operation_compiler import compile_operation, edge_activated, next_ready_nodes
+import pytest
+
+from builder.operation_compiler import CompiledNode, compile_operation, edge_activated, next_ready_nodes
 
 
 def module(module_id, caldera):
@@ -18,6 +20,32 @@ NOPASSWD = module("nopasswd_sudo", {
     "recon": {"command": "echo VULNERABLE"},
     "exploit": {"command": "sudo id", "inputs": ["ctf.weak_ssh.shell"]},
 })
+
+MODULES = {"weak_ssh": WEAK_SSH, "nopasswd_sudo": NOPASSWD}
+
+
+def gate_plan(mode):
+    return {
+        "version": 1,
+        "policy": {"time_limit_minutes": 60, "max_concurrency": 1, "default_timeout_seconds": 120,
+                   "default_retries": 0, "default_retry_delay_seconds": 5},
+        "nodes": [
+            {"id": "trigger", "type": "manual_trigger", "label": "Manual", "config": {}},
+            {"id": "x", "type": "ability", "label": "X",
+             "config": {"module_id": "weak_ssh", "ability": "exploit", "target_vm_id": "vm:hq/blue/web"}},
+            {"id": "y", "type": "ability", "label": "Y",
+             "config": {"module_id": "nopasswd_sudo", "ability": "exploit", "target_vm_id": "vm:hq/blue/web"}},
+            {"id": "gate", "type": "gate", "label": "Gate", "config": {"mode": mode}},
+            {"id": "finish", "type": "finish", "label": "Finish", "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "trigger", "target": "x", "condition": "always"},
+            {"id": "e2", "source": "trigger", "target": "y", "condition": "always"},
+            {"id": "e3", "source": "x", "target": "gate", "condition": "success"},
+            {"id": "e4", "source": "y", "target": "gate", "condition": "success"},
+            {"id": "e5", "source": "gate", "target": "finish", "condition": "always"},
+        ],
+    }
 
 
 def plan():
@@ -64,3 +92,31 @@ def test_next_ready_nodes_sequential_chain():
     assert set(next_ready_nodes(compiled.nodes, compiled.edges, {})) == {"a"}
     assert set(next_ready_nodes(compiled.nodes, compiled.edges, {"a": "success"})) == {"b"}
     assert set(next_ready_nodes(compiled.nodes, compiled.edges, {"a": "failure"})) == {"finish"}
+
+
+def test_gate_all_skips_on_failed_predecessor_and_cascades_to_finish():
+    compiled = compile_operation(gate_plan("all"), MODULES)
+    assert set(next_ready_nodes(compiled.nodes, compiled.edges, {"x": "success", "y": "failure"})) == {"finish"}
+    assert set(next_ready_nodes(compiled.nodes, compiled.edges, {"x": "success", "y": "success"})) == {"gate"}
+
+
+@pytest.mark.parametrize("mode", ["any", "first"])
+def test_gate_any_or_first_activates_on_single_success(mode):
+    compiled = compile_operation(gate_plan(mode), MODULES)
+    assert set(next_ready_nodes(compiled.nodes, compiled.edges, {"x": "failure", "y": "success"})) == {"gate"}
+
+
+def test_non_gate_join_activates_on_first_incoming_edge():
+    nodes = {
+        "x": CompiledNode("x", "ability", "X", {}),
+        "y": CompiledNode("y", "ability", "Y", {}),
+        "join": CompiledNode("join", "ability", "Join", {}),
+    }
+    edges = [
+        {"id": "e1", "source": "x", "target": "join", "condition": "success"},
+        {"id": "e2", "source": "y", "target": "join", "condition": "success"},
+    ]
+    assert set(next_ready_nodes(nodes, edges, {"x": "success"})) == {"join"}
+    assert set(next_ready_nodes(nodes, edges, {"x": "failure"})) == set()
+    assert set(next_ready_nodes(nodes, edges, {"x": "failure", "y": "success"})) == {"join"}
+    assert set(next_ready_nodes(nodes, edges, {"x": "failure", "y": "failure"})) == set()
