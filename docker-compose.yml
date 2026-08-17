@@ -96,6 +96,7 @@ services:
       - aws_credentials:/root/.aws
     environment:
       - SECRET_KEY=aws-acceptance-container-only
+      - DATA_ENCRYPTION_KEY=aws-acceptance-data-container-only
       - AWS_PROFILE=${AWS_PROFILE:-ctf-it-acceptance}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
       - AWS_ENVIRONMENT=${AWS_ENVIRONMENT:-}

@@ -142,6 +142,10 @@ def test_aws_login_and_acceptance_are_containerized() -> None:
     assert acceptance["network_mode"] == "host"
     assert "NET_ADMIN" in acceptance["cap_add"]
     assert "/dev/net/tun:/dev/net/tun" in acceptance["devices"]
+    assert any(
+        value.startswith("DATA_ENCRYPTION_KEY=")
+        for value in acceptance["environment"]
+    )
     assert "aws_credentials" in compose["volumes"]
 
 
