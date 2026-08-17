@@ -8,6 +8,7 @@
   .stack-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; }
   .stack-form input, .stack-form textarea { padding: .5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); }
   .stack-form textarea { font-family: monospace; }
+  .repo-error { display: none; padding: .5rem .75rem; margin-bottom: .6rem; background: rgba(248, 113, 113, .1); border: 1px solid var(--red, #f87171); border-radius: 6px; color: var(--red, #f87171); font-size: .85rem; }
 </style>{% endblock %}
 {% block admin_content %}
 <section class="card">
@@ -23,6 +24,7 @@
 
 <section class="card">
   <h2>Repositories</h2>
+  <div id="repo-error" class="repo-error" role="alert"></div>
   <div class="table-wrap"><table class="compact-table">
     <thead><tr><th>Name</th><th>URL</th><th>Branch</th><th>Status</th><th>Last sync</th><th></th></tr></thead>
     <tbody id="repos-body"><tr><td colspan="6" style="color: var(--text-secondary);">Loading…</td></tr></tbody>
@@ -33,32 +35,49 @@
 <script>
 (function () {
   var body = document.getElementById('repos-body');
+  var banner = document.getElementById('repo-error');
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
   function statusClass(s) { return s === 'synced' ? 'status-synced' : (s === 'error' ? 'status-error' : 'status-pending'); }
+  function showError(msg) { banner.textContent = msg; banner.style.display = 'block'; }
+  function hideError() { banner.style.display = 'none'; }
   function load() {
-    fetch('/admin/api/module-repos').then(function (r) { return r.json(); }).then(function (data) {
-      var repos = data.repos || [];
-      if (!repos.length) { body.innerHTML = '<tr><td colspan="6" style="color: var(--text-secondary);">No repositories attached.</td></tr>'; return; }
-      body.innerHTML = repos.map(function (r) {
-        var err = r.last_error ? '<div class="repo-meta status-error">' + esc(r.last_error) + '</div>' : '';
-        return '<tr><td><strong>' + esc(r.name) + '</strong>' + err + '</td>' +
-          '<td><span class="repo-meta">' + esc(r.repo_url) + '</span></td>' +
-          '<td>' + esc(r.branch) + '</td>' +
-          '<td class="' + statusClass(r.status) + '">' + esc(r.status) + '</td>' +
-          '<td>' + esc(r.last_sync_at || '—') + '</td>' +
-          '<td><button class="btn btn-sm" data-sync="' + r.id + '">Sync</button> ' +
-          '<button class="btn-outline danger" data-delete="' + r.id + '">Delete</button></td></tr>';
-      }).join('');
-    });
+    fetch('/admin/api/module-repos')
+      .then(function (r) {
+        if (!r.ok) { throw new Error('Failed to load repositories (HTTP ' + r.status + ')'); }
+        return r.json();
+      })
+      .then(function (data) {
+        hideError();
+        var repos = data.repos || [];
+        if (!repos.length) { body.innerHTML = '<tr><td colspan="6" style="color: var(--text-secondary);">No repositories attached.</td></tr>'; return; }
+        body.innerHTML = repos.map(function (r) {
+          var err = r.last_error ? '<div class="repo-meta status-error">' + esc(r.last_error) + '</div>' : '';
+          return '<tr><td><strong>' + esc(r.name) + '</strong>' + err + '</td>' +
+            '<td><span class="repo-meta">' + esc(r.repo_url) + '</span></td>' +
+            '<td>' + esc(r.branch) + '</td>' +
+            '<td class="' + statusClass(r.status) + '">' + esc(r.status) + '</td>' +
+            '<td>' + esc(r.last_sync_at || '—') + '</td>' +
+            '<td><button class="btn btn-sm" data-sync="' + r.id + '">Sync</button> ' +
+            '<button class="btn-outline danger" data-delete="' + r.id + '">Delete</button></td></tr>';
+        }).join('');
+      })
+      .catch(function (err) {
+        showError(err && err.message ? err.message : 'Failed to load repositories.');
+      });
   }
   body.addEventListener('click', function (e) {
     var syncId = e.target.getAttribute('data-sync');
     var delId = e.target.getAttribute('data-delete');
     if (syncId) {
-      fetch('/admin/api/module-repos/' + syncId + '/sync', { method: 'POST' }).then(function (r) { return r.json(); }).then(load);
+      fetch('/admin/api/module-repos/' + syncId + '/sync', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(load)
+        .catch(function (err) { showError('Sync failed: ' + (err && err.message ? err.message : 'request error')); });
     } else if (delId) {
       if (!confirm('Delete this repository and remove its cloned modules?')) return;
-      fetch('/admin/api/module-repos/' + delId, { method: 'DELETE' }).then(load);
+      fetch('/admin/api/module-repos/' + delId, { method: 'DELETE' })
+        .then(load)
+        .catch(function (err) { showError('Delete failed: ' + (err && err.message ? err.message : 'request error')); });
     }
   });
   document.getElementById('add-repo-form').addEventListener('submit', function (e) {
@@ -72,10 +91,18 @@
         branch: document.getElementById('repo-branch').value || 'main',
         ssh_key: document.getElementById('repo-key').value,
       }),
-    }).then(function (r) { return r.json(); }).then(function () {
-      document.getElementById('add-repo-form').reset();
-      load();
-    });
+    })
+      .then(function (r) {
+        if (!r.ok) { throw new Error('Failed to add repository (HTTP ' + r.status + ')'); }
+        return r.json();
+      })
+      .then(function () {
+        document.getElementById('add-repo-form').reset();
+        load();
+      })
+      .catch(function (err) {
+        showError('Add repository failed: ' + (err && err.message ? err.message : 'request error'));
+      });
   });
   load();
 })();
