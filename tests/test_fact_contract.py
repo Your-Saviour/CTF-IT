@@ -8,7 +8,12 @@ from builder.fact_contract import (
 
 
 def mod(module_id, caldera, type_="vulnerability"):
-    return SimpleNamespace(id=module_id, type=type_, caldera=caldera)
+    return SimpleNamespace(
+        id=module_id, type=type_, caldera=caldera,
+        stage=None, references=[], tags=[],
+        requires=[], prerequisites=[], conflicts=[],
+        verification=None,
+    )
 
 
 def test_recon_auto_derives_vuln_fact():
@@ -77,3 +82,13 @@ def test_validate_rejects_colliding_trait():
         "exploit": {"command": "x", "outputs": [{"trait": "ctf.b.root"}]},
     }))
     assert any("ctf.a." in e for e in errors)
+
+
+from builder.catalogue_validation import validate_catalogue
+
+
+def test_catalogue_validation_reports_bad_inputs():
+    a = mod("a", {"exploit": {"command": "x", "outputs": [{"trait": "ctf.a.shell"}]}})
+    b = mod("b", {"exploit": {"command": "y", "inputs": ["ctf.a.nope"]}})
+    report = validate_catalogue([a, b])
+    assert any("unknown trait" in e for e in report["b"])

@@ -53,9 +53,13 @@ def validate_module(module: Module, known_ids: set[str]) -> list[str]:
 
 
 def validate_catalogue(modules: list[Module]) -> dict[str, list[str]]:
+    from builder.fact_contract import validate_catalogue_facts
     known = {module.id for module in modules}
-    return {
+    result = {
         module.id: errors
         for module in modules
         if (errors := validate_module(module, known))
     }
+    for module_id, fact_errors in validate_catalogue_facts(modules).items():
+        result.setdefault(module_id, []).extend(fact_errors)
+    return result
