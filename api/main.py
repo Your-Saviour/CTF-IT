@@ -525,6 +525,19 @@ async def modules_page(request: Request, db: Session = Depends(get_db)):
     return await _admin_resource_page("modules", request, db)
 
 
+@app.get("/admin/module-repos", response_class=HTMLResponse)
+async def module_repos_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+
+    return templates.TemplateResponse(request, "module_repos.html", {
+        "user": user, "page_title": "Module repositories", "active_nav": "module_repos",
+        "page_description": "Attach private git repositories that contribute additional modules.",
+        "breadcrumbs": [{"label": "Module repositories"}],
+    })
+
+
 @app.get("/admin/module/{module_id}", response_class=HTMLResponse)
 async def module_detail_page(module_id: str, request: Request, db: Session = Depends(get_db)):
     return RedirectResponse(f"/admin/modules/{module_id}", status_code=308)

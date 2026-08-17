@@ -94,3 +94,22 @@ def test_delete_repo(client):
         resp = client.delete(f"/admin/api/module-repos/{repo_id}")
     assert resp.status_code == 204
     assert mock_del.called
+
+
+def test_page_renders_for_admin(admin_user, monkeypatch):
+    from api import main as main_module
+
+    def override_get_db():
+        db = _Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr(main_module, "get_current_user", lambda request, db: admin_user)
+    with TestClient(app, raise_server_exceptions=True) as c:
+        resp = c.get("/admin/module-repos")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert "Module repositories" in resp.text

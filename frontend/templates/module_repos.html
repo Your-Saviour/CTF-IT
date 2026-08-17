@@ -1,0 +1,83 @@
+{% extends "admin_base.html" %}
+{% block admin_style %}<style>
+  .repo-meta { font-size: .8rem; color: var(--text-muted); }
+  .status-synced { color: var(--green, #4ade80); }
+  .status-error { color: var(--red, #f87171); }
+  .status-pending { color: var(--text-muted); }
+  .stack-form { display: flex; flex-direction: column; gap: .6rem; max-width: 640px; }
+  .stack-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; }
+  .stack-form input, .stack-form textarea { padding: .5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); }
+  .stack-form textarea { font-family: monospace; }
+</style>{% endblock %}
+{% block admin_content %}
+<section class="card">
+  <h2>Add repository</h2>
+  <form id="add-repo-form" class="stack-form">
+    <label>Name <input id="repo-name" required placeholder="Private CTF modules"></label>
+    <label>Repository URL <input id="repo-url" required placeholder="git@github.com:org/private-modules.git"></label>
+    <label>Branch <input id="repo-branch" placeholder="main"></label>
+    <label>SSH private key <textarea id="repo-key" required rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></label>
+    <button class="btn btn-primary" type="submit">Add &amp; sync</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Repositories</h2>
+  <div class="table-wrap"><table class="compact-table">
+    <thead><tr><th>Name</th><th>URL</th><th>Branch</th><th>Status</th><th>Last sync</th><th></th></tr></thead>
+    <tbody id="repos-body"><tr><td colspan="6" style="color: var(--text-secondary);">Loading…</td></tr></tbody>
+  </table></div>
+</section>
+{% endblock %}
+{% block admin_script %}
+<script>
+(function () {
+  var body = document.getElementById('repos-body');
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+  function statusClass(s) { return s === 'synced' ? 'status-synced' : (s === 'error' ? 'status-error' : 'status-pending'); }
+  function load() {
+    fetch('/admin/api/module-repos').then(function (r) { return r.json(); }).then(function (data) {
+      var repos = data.repos || [];
+      if (!repos.length) { body.innerHTML = '<tr><td colspan="6" style="color: var(--text-secondary);">No repositories attached.</td></tr>'; return; }
+      body.innerHTML = repos.map(function (r) {
+        var err = r.last_error ? '<div class="repo-meta status-error">' + esc(r.last_error) + '</div>' : '';
+        return '<tr><td><strong>' + esc(r.name) + '</strong>' + err + '</td>' +
+          '<td><span class="repo-meta">' + esc(r.repo_url) + '</span></td>' +
+          '<td>' + esc(r.branch) + '</td>' +
+          '<td class="' + statusClass(r.status) + '">' + esc(r.status) + '</td>' +
+          '<td>' + esc(r.last_sync_at || '—') + '</td>' +
+          '<td><button class="btn btn-sm" data-sync="' + r.id + '">Sync</button> ' +
+          '<button class="btn-outline danger" data-delete="' + r.id + '">Delete</button></td></tr>';
+      }).join('');
+    });
+  }
+  body.addEventListener('click', function (e) {
+    var syncId = e.target.getAttribute('data-sync');
+    var delId = e.target.getAttribute('data-delete');
+    if (syncId) {
+      fetch('/admin/api/module-repos/' + syncId + '/sync', { method: 'POST' }).then(function (r) { return r.json(); }).then(load);
+    } else if (delId) {
+      if (!confirm('Delete this repository and remove its cloned modules?')) return;
+      fetch('/admin/api/module-repos/' + delId, { method: 'DELETE' }).then(load);
+    }
+  });
+  document.getElementById('add-repo-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    fetch('/admin/api/module-repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('repo-name').value,
+        repo_url: document.getElementById('repo-url').value,
+        branch: document.getElementById('repo-branch').value || 'main',
+        ssh_key: document.getElementById('repo-key').value,
+      }),
+    }).then(function (r) { return r.json(); }).then(function () {
+      document.getElementById('add-repo-form').reset();
+      load();
+    });
+  });
+  load();
+})();
+</script>
+{% endblock %}
