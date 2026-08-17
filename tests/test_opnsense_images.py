@@ -113,6 +113,8 @@ def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
     assert "/usr/sbin/daemon -f /bin/sh -c" in command
     assert "/bin/sh /root/opnsense-bootstrap.sh -r 26.7 -y" in command
     assert "/usr/bin/tee -a /var/log/opnsense-bootstrap.log /dev/console" in command
+    assert "kern.boottime" in command
+    assert "/root/ctf-opnsense-bootstrap-boot" in command
     assert not command.rstrip().endswith("&")
     assert opnsense_images.POLL_TIMEOUT >= 3600
 
@@ -403,6 +405,25 @@ def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
     assert "tail" in commands[0]
     assert "/var/log/opnsense-bootstrap.log" in commands[0]
     assert commands[0].index("pgrep -f") < commands[0].index("configctl")
+
+
+def test_opnsense_wait_requires_a_reboot_before_accepting_target_version(monkeypatch):
+    from api.services import opnsense_images
+
+    commands = []
+
+    def ssh(_db, _host, command, **_kwargs):
+        commands.append(command)
+        return 0, "26.7\n", ""
+
+    monkeypatch.setattr(opnsense_images, "_ssh", ssh)
+    monkeypatch.setattr(opnsense_images.time, "monotonic", iter((0, 0)).__next__)
+
+    opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")
+
+    assert "/root/ctf-opnsense-bootstrap-boot" in commands[0]
+    assert "kern.boottime" in commands[0]
+    assert commands[0].index("ctf-opnsense-bootstrap-boot") < commands[0].index("configctl")
 
 
 def test_opnsense_wait_captures_serial_console_before_cleanup(monkeypatch):

@@ -380,6 +380,7 @@ def bootstrap_launch_command(version: str) -> str:
     )
     return (
         "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
+        "sysctl -n kern.boottime > /root/ctf-opnsense-bootstrap-boot && "
         ": > /var/run/ctf-opnsense-bootstrap-launched && "
         f"/usr/sbin/daemon -f /bin/sh -c {shlex.quote(bootstrap)}"
     )
@@ -444,8 +445,11 @@ def _wait_for_opnsense(db: Session, host: str, version: str, *, diagnostics=None
             command = (
                 "if pgrep -f '[o]pnsense-bootstrap' >/dev/null; then "
                 "tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; "
-                "elif test -x /usr/local/sbin/configctl; then opnsense-version -v; "
-                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; fi"
+                "elif test -s /root/ctf-opnsense-bootstrap-boot && "
+                "test \"$(cat /root/ctf-opnsense-bootstrap-boot)\" != \"$(sysctl -n kern.boottime)\"; then "
+                "if test -x /usr/local/sbin/configctl; then opnsense-version -v; "
+                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; fi; "
+                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; fi"
             )
             code, output, error = _ssh(
                 db, host, command, retry=False,
@@ -571,6 +575,7 @@ def _sanitize_and_halt(db: Session, client, image: OpnsenseImage, host: str) -> 
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
         "/var/db/dhclient.leases.* /var/db/dhclient.leases /root/.*history /root/.sh_history "
         "/root/opnsense-bootstrap.sh /root/ctf-golden-config.xml "
+        "/root/ctf-opnsense-bootstrap-boot "
         "/var/log/opnsense-bootstrap.log; "
         "rm -f /var/run/ctf-opnsense-bootstrap-launched; "
         "rm -f /conf/ctf-site-ready /conf/ctf-site-applying /conf/ctf-site-failed "
