@@ -11,9 +11,11 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - api_data:/app/data
+      - module_repos:/app/module_repos
     env_file: .env
     environment:
       - DATABASE_URL=sqlite:///data/ctf.db
+      - MODULE_REPOS_DIR=/app/module_repos
       - COOKIE_SECURE=false
       - AGENT_API_URL=http://ai-agent:8000/api/agent
       - AGENT_API_KEY=${AGENT_API_KEY:-}
@@ -66,3 +68,4 @@ services:
 volumes:
   api_data:
   agent_data:
+  module_repos:

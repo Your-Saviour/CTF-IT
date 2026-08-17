@@ -172,9 +172,12 @@ services:
       - ./caldera/config/local.yml:/caldera-config/local.yml
       # Shared playbooks: API writes playbook files here; Semaphore reads them
       - ctf-shared_playbooks:/shared/playbooks
+      # Persistent module repo clones (External Module Repositories)
+      - ctf-module_repos:/app/module_repos
     env_file: ../.env
     environment:
       - DATABASE_URL=postgresql+psycopg://ctf:${CTF_POSTGRES_PASSWORD}@api-postgres:5432/ctf
+      - MODULE_REPOS_DIR=/app/module_repos
       - DOCKER_HOST=tcp://api-docker-proxy:2375
       - COOKIE_SECURE=true
       - DOMAIN=${DOMAIN}
@@ -365,6 +368,7 @@ volumes:
   ctf-semaphore_postgres_data:
   ctf-semaphore_data:
   ctf-shared_playbooks:
+  ctf-module_repos:
   ctf-ai-agent_data:
 
 networks:

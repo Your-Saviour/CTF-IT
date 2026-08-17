@@ -78,6 +78,10 @@ Verification types: `file_permissions`, `file_contains`, `file_not_contains`, `s
 
 The selector (`builder/selector.py`) runs in ordered phases: (1) application modules, (2) goal modules, (3) vulnerability/payload modules, (4) hardening modules — then (5) category quotas, (6) tag quotas. This ordering ensures goal `requires` dependencies on apps are satisfied. Category/tag counts are inclusive. Respects bidirectional conflict exclusions, auto-resolves dependencies. Quota validation lives in `builder/quota_validation.py`.
 
+### External Module Repositories
+
+Admins can attach private git repositories that contribute additional modules (kept out of the public repo). Configured at `/admin/module-repos` with a repo URL + SSH private key (encrypted at rest via `DATA_ENCRYPTION_KEY`). The platform does a fresh shallow clone → validate → atomic swap into `/app/module_repos/<repo_id>/`; `load_all_modules()` scans these roots in addition to `modules/`. Repos are synced manually or at event start. Private repos mirror the built-in `modules/` layout.
+
 ### Key Design Decisions
 
 - **Admin bootstrap**: the first registration on a fresh database must supply `ADMIN_BOOTSTRAP_TOKEN`; only that account is granted `is_admin = True`.
