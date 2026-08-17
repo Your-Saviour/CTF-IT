@@ -106,6 +106,7 @@ class AwsGameNetProvider:
 
     def create_gateway(self, event, team, vm, *, key_name: str, public_key: str,
                        ingress: tuple[dict, ...], user_data: str):
+        vm.ssh_user = "ubuntu"
         tags = ownership_tags(
             self.config.environment, event_id=event.id, team_id=team.id, vm_id=vm.id,
         )
@@ -197,6 +198,7 @@ class AwsGameNetProvider:
         ))
 
     def create_endpoint(self, site, zone, vm, *, ami_id: str):
+        vm.ssh_user = "ubuntu"
         return self.compute.launch_instance(InstanceSpec(
             ami_id=ami_id,
             instance_type=vm.instance_type or "t3.small",
@@ -345,7 +347,10 @@ def ssh_host_command(db, host: str | None, command: str, *, jump: VM | None = No
         port=ssh_port, sock=sock, connect_timeout=connect_timeout,
     )
     try:
-        _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+        remote_command = command
+        if ssh_user != "root":
+            remote_command = "sudo -n /bin/sh -c " + shlex.quote(command)
+        _stdin, stdout, stderr = client.exec_command(remote_command, timeout=timeout)
         code = stdout.channel.recv_exit_status()
         return code, stdout.read().decode(errors="replace"), stderr.read().decode(errors="replace")
     finally:

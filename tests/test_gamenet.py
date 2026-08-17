@@ -809,6 +809,7 @@ def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     assert compute.spec.network_interfaces[0].security_group_ids == ("sg-gateway",)
     assert result.public_ip == "198.51.100.9"
     assert result.eip_allocation_id == "eipalloc-gw"
+    assert vm.ssh_user == "ubuntu"
     assert compute.calls == [
         "launch", ("wait_running", "i-gw"), ("associate_eip", "eni-gw"),
     ]
