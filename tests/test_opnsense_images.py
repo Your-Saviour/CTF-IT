@@ -52,11 +52,11 @@ def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
 def test_pkgbase_bootstrap_preserves_freebsd_base_packages():
     from api.services import opnsense_images
 
-    upstream = b'''if pkg -N; then
-\tpkg unlock -ya
-\tpkg delete -fa
-fi
-rm -rf /var/db/pkg/*
+    upstream = b'''\tif pkg -N; then
+\t\tpkg unlock -ya
+\t\tpkg delete -fa
+\tfi
+\trm -rf /var/db/pkg/*
 '''
 
     adapted = opnsense_images.make_pkgbase_compatible_bootstrap(upstream).decode()
@@ -64,7 +64,7 @@ rm -rf /var/db/pkg/*
     assert "pkg query '%n' | grep -q '^FreeBSD-'" in adapted
     assert "pkg query '%n' | grep -v '^FreeBSD-'" in adapted
     assert "pkg delete -fy ${PACKAGES}" in adapted
-    assert "else\n\t\tpkg delete -fa" in adapted
+    assert "else\n\t\t\tpkg delete -fa" in adapted
 
 
 def test_pkgbase_bootstrap_rejects_an_unrecognised_upstream_script():
