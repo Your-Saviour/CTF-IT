@@ -69,6 +69,41 @@ def test_bootstrap_download_retries_github_throttling(monkeypatch):
     assert sleeps == [2]
 
 
+def test_bootstrap_download_falls_back_to_official_github_api_after_throttling(monkeypatch):
+    from api.services import opnsense_images
+
+    class Response:
+        is_redirect = False
+        headers = {}
+
+        def __init__(self, status_code, content=b"rate limited"):
+            self.status_code = status_code
+            self.content = content
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise AssertionError("raw throttling should use the official API fallback")
+
+    class Client:
+        def __init__(self):
+            self.urls = []
+            self.responses = iter(
+                [Response(429) for _ in range(4)] + [Response(200, b"#!/bin/sh\n")]
+            )
+
+        def get(self, url, **_kwargs):
+            self.urls.append(url)
+            return next(self.responses)
+
+    client = Client()
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _delay: None)
+
+    content, _digest = opnsense_images.download_bootstrap(client=client)
+
+    assert content == b"#!/bin/sh\n"
+    assert client.urls[-1] == opnsense_images.BOOTSTRAP_API_URL
+
+
 def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
     from api.services import opnsense_images
 

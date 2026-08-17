@@ -35,6 +35,10 @@ BOOTSTRAP_SOURCE_URL = (
     "https://raw.githubusercontent.com/opnsense/update/master/"
     "src/bootstrap/opnsense-bootstrap.sh.in"
 )
+BOOTSTRAP_API_URL = (
+    "https://api.github.com/repos/opnsense/update/contents/"
+    "src/bootstrap/opnsense-bootstrap.sh.in?ref=master"
+)
 BUILD_METHOD = "freebsd-bootstrap"
 RUNNING_STATES = {"creating_builder", "bootstrapping", "validating", "snapshotting"}
 RESUMABLE_STATES = RUNNING_STATES | {"interrupted", "failed"}
@@ -104,12 +108,29 @@ def download_bootstrap(url: str = BOOTSTRAP_SOURCE_URL, *, client: httpx.Client 
                     delay = 2 ** attempt
                 time.sleep(delay)
                 continue
+            if response.status_code == 429:
+                break
             response.raise_for_status()
             content = response.content
             if not content or len(content) > 1024 * 1024:
                 raise ImageWorkflowError("bootstrap source is empty or unexpectedly large")
             return content, hashlib.sha256(content).hexdigest()
-        raise AssertionError("bootstrap retry loop exhausted without a response")
+        response = http.get(
+            BOOTSTRAP_API_URL,
+            follow_redirects=False,
+            headers={
+                "Accept": "application/vnd.github.raw+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "ctf-it-opnsense-image-builder/1.0",
+            },
+        )
+        if response.is_redirect:
+            raise ImageWorkflowError("bootstrap API download redirect rejected")
+        response.raise_for_status()
+        content = response.content
+        if not content or len(content) > 1024 * 1024:
+            raise ImageWorkflowError("bootstrap source is empty or unexpectedly large")
+        return content, hashlib.sha256(content).hexdigest()
     finally:
         if owned:
             http.close()
