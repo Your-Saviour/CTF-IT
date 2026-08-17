@@ -182,6 +182,25 @@ class TestNativeGating:
         parsers = _default_recon_parsers("v1", "echo VULNERABLE: x")
         assert parsers[0]["module"] == "plugins.ctf-exploit.app.parsers.ctf_basic"
 
+    def test_explicit_ctf_extract_parser_produces_mappings(self):
+        """A module declaring the ctf_extract parser flows through verbatim."""
+        m = _mod("v1", caldera=_caldera("initial-access", recon_cmd="echo VULNERABLE port=23"))
+        m.caldera["recon"]["parser"] = [{
+            "module": "plugins.ctf-exploit.app.parsers.ctf_extract",
+            "mappings": [{
+                "source": "ctf.vuln.v1",
+                "custom_parser_vals": {"marker": "VULNERABLE", "pattern": "port=(\\d+)"},
+            }],
+        }]
+        recon = [a for a in _build_abilities([m]) if a["phase"] == "recon"][0]
+        assert recon["parsers"] == [{
+            "module": "plugins.ctf-exploit.app.parsers.ctf_extract",
+            "mappings": [{
+                "source": "ctf.vuln.v1",
+                "custom_parser_vals": {"marker": "VULNERABLE", "pattern": "port=(\\d+)"},
+            }],
+        }]
+
 
 # ── Path adversary naming ──
 
@@ -541,7 +560,7 @@ class TestNativeFactGatingIntegration:
         return vulns, goals
 
     def test_generated_abilities_are_valid_yaml_with_gating(self, export_tmp):
-        """Every generated ability parses as YAML; vulns are gated, goals are not."""
+        """Every generated ability parses as YAML; vulns auto-gate, goals gate only via declared requirements."""
         import yaml
         import builder.caldera as bc
         vulns, goals = self._real_modules()
@@ -581,8 +600,13 @@ class TestNativeFactGatingIntegration:
         assert recon_gated > 0
         # Every gated exploit has both the requirement and the fact variable
         assert exploit_gated == exploit_requirements
-        # Goal exploits (no recon) are ungated
-        assert ungated_goals >= len(goals)
+        # Goal exploits are gated only when they declare a cross-module
+        # requirement; otherwise they run ungated.
+        ungated_goal_count = sum(
+            1 for g in goals
+            if not ((g.caldera or {}).get("exploit", {}).get("requirements"))
+        )
+        assert ungated_goals == ungated_goal_count
 
     def test_gate_references_same_trait_as_requirement(self, export_tmp):
         """Exploit command's #{...} trait matches its requirement's source."""
@@ -619,6 +643,14 @@ class TestNativeFactGatingIntegration:
         assert (plugin / "app" / "requirements" / "fact_present.py").exists()
         # no base_requirement.py (dashed-import hazard)
         assert not (plugin / "app" / "requirements" / "base_requirement.py").exists()
+
+    def test_ctf_extract_parser_staged(self, export_tmp):
+        """The ctf_extract parser is staged under plugin app/parsers/."""
+        import builder.caldera as bc
+        vulns, _ = self._real_modules()
+        out, _ = bc.generate_caldera_event_export({"vm-a": vulns[:2]}, "integration-ctf-extract")
+        plugin = out / "plugins" / PLUGIN_NAME
+        assert (plugin / "app" / "parsers" / "ctf_extract.py").exists()
 
     def test_fact_present_module_has_no_dashed_imports(self):
         """fact_present.py must not import plugins.ctf-exploit.* (invalid syntax)."""

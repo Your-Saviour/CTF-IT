@@ -3,6 +3,7 @@ name: Install C2 Beacon
 description: Install a persistent command-and-control beacon that survives reboots, demonstrating full compromise of the target system.
 type: goal
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 0
 red_points: 500
 defend_points: 350
@@ -18,7 +19,10 @@ caldera:
     name: "Remote Access Software"
   exploit:
     description: "Install a persistent beacon via systemd service"
+    requirements:
+      - source: ctf.vuln.nopasswd_sudo
     command: |
+      [ -n "#{ctf.vuln.nopasswd_sudo}" ] || { echo "SKIPPED: passwordless sudo not confirmed"; exit 0; }
       sudo bash ./install_c2.sh
     payloads:
       - install_c2.sh
