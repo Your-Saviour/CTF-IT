@@ -304,6 +304,7 @@ def test_opnsense_wait_reports_latest_bootstrap_log(monkeypatch):
 
     assert "tail" in commands[0]
     assert "/var/log/opnsense-bootstrap.log" in commands[0]
+    assert commands[0].index("pgrep -f") < commands[0].index("configctl")
 
 
 def test_opnsense_wait_captures_serial_console_before_cleanup(monkeypatch):

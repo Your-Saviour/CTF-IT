@@ -347,9 +347,9 @@ def _wait_for_opnsense(db: Session, host: str, version: str, *, diagnostics=None
     while time.monotonic() < deadline:
         try:
             command = (
-                "if test -x /usr/local/sbin/configctl; then opnsense-version -v; "
-                "elif pgrep -f '[o]pnsense-bootstrap' >/dev/null; then "
+                "if pgrep -f '[o]pnsense-bootstrap' >/dev/null; then "
                 "tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; "
+                "elif test -x /usr/local/sbin/configctl; then opnsense-version -v; "
                 "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; fi"
             )
             code, output, error = _ssh(
