@@ -1219,6 +1219,9 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
             status_code=409,
         )
 
+    from api.routes.module_repos import sync_all_repos
+    sync_all_repos(db)
+
     # A GameNet event is not public until lockdown and connectivity checks pass.
     if event.infrastructure:
         from api.models import Team
