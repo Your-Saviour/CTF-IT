@@ -83,7 +83,7 @@ def test_builder_validation_command_names_failed_invariants():
     from api.services.opnsense_images import builder_validation_command
 
     command = builder_validation_command(
-        public_ip="198.51.100.10", version="26.7",
+        wan_ip="172.31.252.10", version="26.7",
         cidr="203.0.113.0/24", provenance="expected-provenance",
     )
 
@@ -96,6 +96,7 @@ def test_builder_validation_command_names_failed_invariants():
         assert message in command
     assert "grep -E '^ena[0-9]+$'" in command
     assert 'test "$wan_if" = ena0' in command
+    assert "inet 172.31.252.10" in command
 
 
 def test_aws_golden_config_uses_ec2_ena_wan():

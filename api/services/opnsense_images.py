@@ -393,7 +393,7 @@ def _provenance(image: OpnsenseImage) -> str:
     return hashlib.sha256(f"ctf-opnsense:{image.id}:{image.version}".encode()).hexdigest()
 
 
-def builder_validation_command(*, public_ip: str, version: str, cidr: str,
+def builder_validation_command(*, wan_ip: str, version: str, cidr: str,
                                provenance: str, nic_count: int = 1) -> str:
     php = ('require_once("config.inc"); $wan=$config["interfaces"]["wan"]["if"]??""; '
            '$lan=isset($config["interfaces"]["lan"])?"yes":"no"; '
@@ -415,7 +415,7 @@ def builder_validation_command(*, public_ip: str, version: str, cidr: str,
         "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^ena[0-9]+$'); "
         f"test \"$#\" -eq {nic_count} || {failed('unexpected ENA NIC count')}; "
         f"test \"$wan_if\" = ena0 || {failed('WAN interface mismatch')}; "
-        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null || {failed('WAN address missing')}; "
+        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + wan_ip)} >/dev/null || {failed('WAN address missing')}; "
         f"route -n get default | grep -F \"interface: $wan_if\" >/dev/null || {failed('default route mismatch')}; "
         f"test -s /root/.ssh/authorized_keys || {failed('managed root key missing')}; "
         f"/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$' || {failed('root SSH login disabled')}; "
@@ -426,9 +426,10 @@ def builder_validation_command(*, public_ip: str, version: str, cidr: str,
     )
 
 
-def _validate_builder(db: Session, image: OpnsenseImage, host: str, cidr: str, label: str) -> None:
+def _validate_builder(db: Session, image: OpnsenseImage, host: str, wan_ip: str,
+                      cidr: str, label: str) -> None:
     command = builder_validation_command(
-        public_ip=host, version=image.version, cidr=cidr, provenance=_provenance(image),
+        wan_ip=wan_ip, version=image.version, cidr=cidr, provenance=_provenance(image),
     )
     code, output, error = _ssh(db, host, command)
     if code:
@@ -505,15 +506,16 @@ def _record_validation(image: OpnsenseImage, name: str, **data) -> None:
     image.validation_results = json.dumps(results, sort_keys=True)
 
 
-def _validate_clone_one(db: Session, image: OpnsenseImage, host: str, cidr: str) -> str:
-    _validate_builder(db, image, host, cidr, "WAN-only clone validation")
+def _validate_clone_one(db: Session, image: OpnsenseImage, host: str,
+                        wan_ip: str, cidr: str) -> str:
+    _validate_builder(db, image, host, wan_ip, cidr, "WAN-only clone validation")
     fingerprint = _fingerprint(db, host)
     _record_validation(image, "clone_wan", public_ip=host, ssh_host_key=fingerprint)
     db.commit()
     return fingerprint
 
 
-def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment: dict,
+def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, wan_ip: str, attachment: dict,
                         cidr: str, peer_host: str, peer_ip: str) -> str:
     """Use the production snapshot-site configurator, then validate LAN/NAT policy."""
     from api.services.gamenet_provider import configure_snapshot_validation_site
@@ -527,7 +529,7 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment
         f"if ifconfig \"$i\" | grep -qiF {shlex.quote('ether ' + attachment['mac_address'].lower())}; then echo \"$i\"; fi; done); "
         "test -n \"$wan_if\" || { echo 'default WAN interface missing' >&2; exit 1; }; "
         "test -n \"$lan_if\" || { echo 'VPC MAC did not map to a LAN interface' >&2; exit 1; }; "
-        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + host)} >/dev/null || "
+        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + wan_ip)} >/dev/null || "
         "{ echo 'public WAN address missing' >&2; exit 1; }; "
         "ifconfig \"$lan_if\" | grep -F 'inet 172.31.254.1' >/dev/null || "
         "{ echo 'private LAN address missing' >&2; exit 1; }; "

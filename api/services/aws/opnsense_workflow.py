@@ -135,7 +135,8 @@ class AwsOpnsenseWorkflow:
                     diagnostics=serial_console,
                 )
                 workflow._validate_builder(
-                    db, image, builder.public_ip, cidr, "AWS builder validation",
+                    db, image, builder.public_ip, builder.private_ip, cidr,
+                    "AWS builder validation",
                 )
                 builder_key = workflow._fingerprint(db, builder.public_ip)
                 workflow._record_validation(image, "builder", ssh_host_key=builder_key)
@@ -173,7 +174,7 @@ class AwsOpnsenseWorkflow:
         public_key_fingerprint = evidence.get("clone_wan", {}).get("ssh_host_key")
         if not public_key_fingerprint:
             public_key_fingerprint = workflow._validate_clone_one(
-                db, image, public_clone.public_ip, cidr,
+                db, image, public_clone.public_ip, public_clone.private_ip, cidr,
             )
         if public_key_fingerprint == builder_key:
             raise RuntimeError("public clone reused the builder SSH host key")
@@ -197,7 +198,7 @@ class AwsOpnsenseWorkflow:
         private_key_fingerprint = evidence.get("clone_vpc", {}).get("ssh_host_key")
         if not private_key_fingerprint:
             private_key_fingerprint = workflow._validate_clone_two(
-                db, image, private_clone.public_ip,
+                db, image, private_clone.public_ip, private_clone.private_ip,
                 {"ip_address": lan.private_ip, "mac_address": lan.mac_address},
                 cidr, public_clone.public_ip, peer_ip,
             )
