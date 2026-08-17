@@ -537,6 +537,23 @@ class VMGoal(Base):
     vm: Mapped["VM"] = relationship(back_populates="goals")
 
 
+class ModuleRepo(Base):
+    """An external git repository that contributes additional modules."""
+
+    __tablename__ = "module_repos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    repo_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    branch: Mapped[str] = mapped_column(String(128), nullable=False, default="main")
+    ssh_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    last_sync_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class ServiceCredential(Base):
     __tablename__ = "service_credentials"
 
