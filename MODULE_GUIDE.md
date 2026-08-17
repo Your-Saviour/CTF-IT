@@ -58,6 +58,10 @@ modules/
 | `steps` | list | `[]` | Ordered build steps. See [Build Steps](#build-steps). Replaces `script`. |
 | `hints` | list[string] | `[]` | Progressive hints shown to users. Order from vague to specific. |
 | `suggested_fix` | string | `null` | The command(s) that fix the issue. Used for admin reference/testing. |
+| `stage` | string | `null` | For vulnerability/payload: `preapplied` (blue team sees + fixes) or `caldera` (hidden, red team exploits). |
+| `supported_bases` | list[string] | `[]` | Base type IDs this module is compatible with (e.g. `[ubuntu_24_server]`). |
+| `min_ram_mb` | integer | `0` | Minimum RAM the module requires (plan sizing). |
+| `min_vcpu` | integer | `0` | Minimum vCPUs the module requires (plan sizing). |
 
 ### Authoritative references
 
@@ -111,6 +115,80 @@ steps:
 ### Legacy `script` field
 
 Modules using `script: some_file.sh` continue to work — it is automatically converted to `steps: [{run: some_file.sh}]` during loading. New modules should use `steps` instead.
+
+## Caldera Metadata
+
+A vulnerability, payload, or goal module may declare a `caldera` block so it participates in red team operations. The block maps an ATT&CK tactic/technique to `recon` and `exploit` command phases.
+
+```yaml
+caldera:
+  tactic: privilege-escalation          # ATT&CK tactic (see kill-chain mapping)
+  phase_override: 3                      # optional: override tactic→phase ordering
+  technique:
+    attack_id: T1548.001
+    name: "Abuse Elevation Control Mechanism: Setuid and Setgid"
+  recon:
+    description: "Check if find has the SUID bit"
+    command: |
+      test -u /usr/bin/find && echo "VULNERABLE: SUID find detected" || echo "SECURE"
+  exploit:
+    description: "Escalate via SUID find -exec"
+    command: |
+      /usr/bin/find /tmp -maxdepth 0 -exec whoami \;
+```
+
+- `tactic` maps to a kill-chain phase: `initial-access` (0), `execution` (1), `persistence` (2), `privilege-escalation` (3), `credential-access` (4), `collection` (5), `impact` (6), `command-and-control` (7), and goals always sit at phase 8. A tactic not in this list must declare `phase_override`.
+- `recon` and `exploit` each support `description`, `command`, `cleanup`, `payloads` (`.sh`/files in the module dir), and `uploads`.
+- Application modules do not declare `caldera`.
+
+## Caldera Facts & Gating
+
+Recon and exploit abilities communicate through Caldera facts. A fact has a trait and a value; commands reference a fact's value with `#{<trait>}`.
+
+**Seeded facts** are injected into every operation source from VM metadata and need no recon step:
+
+- `ctf.hostname`, `ctf.ip`, `ctf.os`, `host.id`
+
+**Recon facts** — a recon command that echoes the `VULNERABLE` marker automatically emits a `ctf.vuln.<module_id>` fact (via the `ctf_basic` parser), and the exploit ability automatically gains a `fact_present` requirement plus a `[ -n "#{ctf.vuln.<id>}" ] || ...` guard, so it only runs after recon confirms the vulnerability.
+
+**Goal facts** — a goal exploit that echoes `GOAL_ACHIEVED` emits a `ctf.goal.<goal_id>` fact that drives objective completion.
+
+**Valued facts** — to capture a clean token (port, path, username) and inject it into a later command, declare the `ctf_extract` parser in recon:
+
+```yaml
+recon:
+  parser:
+    - module: plugins.ctf-exploit.app.parsers.ctf_extract
+      mappings:
+        - source: ctf.vuln.open_telnet
+          custom_parser_vals:
+            marker: VULNERABLE          # optional line filter
+            pattern: "port=(\\d+)"      # regex; capture group becomes the value
+            # group: 1                  # optional capture-group index (default 1)
+  command: |
+    PORT=$(ss -tlnp | grep -oP ':(\d+)\b' | head -1 | tr -d ':')
+    [ -n "$PORT" ] && echo "VULNERABLE port=$PORT" || echo "SECURE"
+```
+
+Then the exploit injects the value:
+
+```yaml
+exploit:
+  command: |
+    PORT="#{ctf.vuln.open_telnet}"
+    nc #{ctf.ip} "${PORT}"
+```
+
+**Cross-module gating** — an exploit can gate on another module's fact by declaring a `requirements` entry and referencing the fact in the command:
+
+```yaml
+exploit:
+  requirements:
+    - source: ctf.vuln.nopasswd_sudo
+  command: |
+    [ -n "#{ctf.vuln.nopasswd_sudo}" ] || { echo "SKIPPED: sudo not confirmed"; exit 0; }
+    sudo id
+```
 
 ## Verification Types
 
@@ -472,6 +550,18 @@ verification:
   expected: running
 ```
 
+## Goal Modules
+
+A `type: goal` module is a terminal red team objective. It adds three fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `red_points` | integer | Awarded to the red team each time the goal is achieved. |
+| `defend_points` | integer | Awarded to the blue team each time the goal is reverted. |
+| `revert_verification` | object | Detects that the blue team reverted the goal. |
+
+Goals declare a `caldera.exploit` whose command echoes `GOAL_ACHIEVED`; its `verification`/`revert_verification` drive the VMGoal state machine. See `modules/goals/install_c2/install_c2.yaml`.
+
 ## Module Selection
 
 The platform selects modules based on an event quota like:
@@ -487,7 +577,7 @@ The platform selects modules based on an event quota like:
 }
 ```
 
-Valid module type keys: `vulnerability`, `hardening`, `payload`, `application_external`, `application_internal`.
+Valid module type keys: `vulnerability`, `hardening`, `payload`, `application_external`, `application_internal`, `goal`.
 
 The selector (`builder/selector.py`) runs three phases:
 1. **Type/difficulty** — pick modules matching each type/difficulty slot
