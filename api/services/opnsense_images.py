@@ -427,9 +427,10 @@ def builder_validation_command(*, wan_ip: str, version: str, cidr: str,
 
 
 def _validate_builder(db: Session, image: OpnsenseImage, host: str, wan_ip: str,
-                      cidr: str, label: str) -> None:
+                      cidr: str, label: str, *, nic_count: int = 1) -> None:
     command = builder_validation_command(
         wan_ip=wan_ip, version=image.version, cidr=cidr, provenance=_provenance(image),
+        nic_count=nic_count,
     )
     code, output, error = _ssh(db, host, command)
     if code:
@@ -508,7 +509,11 @@ def _record_validation(image: OpnsenseImage, name: str, **data) -> None:
 
 def _validate_clone_one(db: Session, image: OpnsenseImage, host: str,
                         wan_ip: str, cidr: str) -> str:
-    _validate_builder(db, image, host, wan_ip, cidr, "WAN-only clone validation")
+    # The validation ENI is pre-attached at device index 1 so this clone can
+    # become the private-network peer after its pristine golden config passes.
+    _validate_builder(
+        db, image, host, wan_ip, cidr, "WAN-only clone validation", nic_count=2,
+    )
     fingerprint = _fingerprint(db, host)
     _record_validation(image, "clone_wan", public_ip=host, ssh_host_key=fingerprint)
     db.commit()

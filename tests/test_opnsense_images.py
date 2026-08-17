@@ -99,6 +99,26 @@ def test_builder_validation_command_names_failed_invariants():
     assert "inet 172.31.252.10" in command
 
 
+def test_wan_clone_validation_allows_pre_attached_validation_eni(monkeypatch):
+    from api.services import opnsense_images
+
+    captured = {}
+    monkeypatch.setattr(
+        opnsense_images,
+        "_ssh",
+        lambda _db, _host, command: (captured.setdefault("command", command) and 0, "", ""),
+    )
+    monkeypatch.setattr(opnsense_images, "_fingerprint", lambda *_args: "SHA256:test")
+    db = session()
+    image = image_row(db)
+
+    opnsense_images._validate_clone_one(
+        db, image, "198.51.100.10", "172.31.252.10", "203.0.113.0/24",
+    )
+
+    assert 'test "$#" -eq 2' in captured["command"]
+
+
 def test_aws_golden_config_uses_ec2_ena_wan():
     from api.services.opnsense_images import render_golden_config
 
