@@ -280,16 +280,59 @@ def _posix_command(command: str) -> str:
     return "/bin/sh -c " + shlex.quote(command)
 
 
+def _ssh_stream(db: Session, host: str, command: str, content: bytes, *,
+                timeout: int = 180) -> tuple[int, str, str]:
+    """Execute a short command while streaming binary content to its stdin."""
+    private_key, _ = get_or_create_platform_keypair(db)
+    key = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key))
+    deadline = time.monotonic() + POLL_TIMEOUT
+    last_error = None
+    while time.monotonic() < deadline:
+        for username in ("root", "freebsd", "ec2-user"):
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                client.connect(host, username=username, pkey=key, allow_agent=False,
+                               look_for_keys=False, timeout=15, banner_timeout=15,
+                               auth_timeout=15)
+                shell = _posix_command(command)
+                if username != "root":
+                    privileged = (
+                        "if test -x /usr/local/bin/doas; then "
+                        f"exec /usr/local/bin/doas /bin/sh -c {shlex.quote(command)}; "
+                        "elif test -x /usr/local/bin/sudo; then "
+                        f"exec /usr/local/bin/sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "elif command -v sudo >/dev/null 2>&1; then "
+                        f"exec sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "else echo 'no supported privilege escalation tool' >&2; exit 127; fi"
+                    )
+                    shell = _posix_command(privileged)
+                stdin, stdout, stderr = client.exec_command(shell, timeout=timeout)
+                stdin.channel.sendall(content)
+                stdin.channel.shutdown_write()
+                return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
+                        stderr.read().decode(errors="replace"))
+            except paramiko.AuthenticationException as exc:
+                last_error = exc
+                continue
+            except Exception as exc:
+                last_error = exc
+                break
+            finally:
+                client.close()
+        time.sleep(POLL_SECONDS)
+    raise ImageWorkflowError(f"SSH upload did not become ready: {last_error}")
+
+
 def _upload_atomic(db: Session, host: str, path: str, content: bytes, mode: int = 0o600) -> None:
-    encoded = base64.b64encode(content).decode()
     temporary = path + ".part"
     directory = path.rsplit("/", 1)[0] or "/"
     command = (
         f"umask 077; install -d -m 700 {shlex.quote(directory)}; "
-        f"printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(temporary)} && "
+        f"cat > {shlex.quote(temporary)} && "
         f"chmod {mode:o} {shlex.quote(temporary)} && mv -f {shlex.quote(temporary)} {shlex.quote(path)}"
     )
-    code, _, error = _ssh(db, host, command)
+    code, _, error = _ssh_stream(db, host, command, content)
     if code:
         raise ImageWorkflowError(f"atomic upload of {path} failed: {error[:300]}")
 

@@ -10,7 +10,7 @@ from api.database import Base
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import (
     BOOTSTRAP_SOURCE_URL, ImageWorkflowError, active_image, elapsed_seconds,
-    _ssh, interrupt_running_jobs, new_image, release_matches, run_image_build,
+    _ssh, _upload_atomic, interrupt_running_jobs, new_image, release_matches, run_image_build,
     validate_bootstrap_url, validate_control_plane_cidr, validate_release,
 )
 
@@ -150,6 +150,27 @@ def test_pkgbase_bootstrap_rejects_an_unrecognised_upstream_script():
 
     with pytest.raises(ImageWorkflowError, match="upstream bootstrap package block changed"):
         opnsense_images.make_pkgbase_compatible_bootstrap(b"#!/bin/sh\nexit 0\n")
+
+
+def test_atomic_upload_streams_large_content_over_stdin(monkeypatch):
+    from api.services import opnsense_images
+
+    captured = {}
+
+    def stream(_db, host, command, content, *, timeout=180):
+        captured.update(host=host, command=command, content=content, timeout=timeout)
+        return 0, "", ""
+
+    monkeypatch.setattr(opnsense_images, "_ssh_stream", stream)
+    payload = b"x" * (12 * 1024 * 1024)
+
+    _upload_atomic(object(), "198.51.100.10", "/root/core.tar.gz", payload)
+
+    assert captured["host"] == "198.51.100.10"
+    assert captured["content"] is payload
+    assert "core.tar.gz.part" in captured["command"]
+    assert "base64" not in captured["command"]
+    assert len(captured["command"]) < 512
 
 
 def test_builder_validation_command_names_failed_invariants():
