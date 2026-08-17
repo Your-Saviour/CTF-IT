@@ -1,6 +1,7 @@
 import pytest
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -41,6 +42,12 @@ def aws_opnsense_image(aws_context):
     ec2 = aws_context.ec2()
     version = "26.7"
     bootstrap, bootstrap_digest = download_bootstrap()
+    core_commit_path = Path(os.environ.get("OPNSENSE_CORE_COMMIT_FILE", ""))
+    if not core_commit_path.is_file():
+        raise RuntimeError("OPNSENSE_CORE_COMMIT_FILE must name the containerized source cache")
+    core_commit = core_commit_path.read_text().strip()
+    if len(core_commit) != 40 or any(value not in "0123456789abcdef" for value in core_commit):
+        raise RuntimeError("cached OPNsense core commit is invalid")
     base_ami = aws_context.config.freebsd_ami(aws_context.region)
     base_image = ec2.describe_images(ImageIds=[base_ami])["Images"][0]
     identity = CacheIdentity(
@@ -48,6 +55,7 @@ def aws_opnsense_image(aws_context):
         architecture=base_image["Architecture"],
         opnsense_version=version,
         bootstrap_sha256=bootstrap_digest,
+        core_commit=core_commit,
         golden_config_revision=GOLDEN_CONFIG_REVISION,
         image_build_revision=IMAGE_BUILD_REVISION,
     )

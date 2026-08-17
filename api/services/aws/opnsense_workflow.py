@@ -1,5 +1,7 @@
 import json
+import os
 from dataclasses import replace
+from pathlib import Path
 
 from api.services.ssh_keys import get_or_create_platform_keypair
 
@@ -116,6 +118,17 @@ class AwsOpnsenseWorkflow:
                         db, builder.public_ip, "/root/ctf-golden-config.xml",
                         workflow.render_golden_config(db, image, cidr).encode(),
                     )
+                    core_archive_path = os.environ.get("OPNSENSE_CORE_ARCHIVE", "").strip()
+                    if core_archive_path:
+                        archive = Path(core_archive_path).read_bytes()
+                        if len(archive) < 1024 or len(archive) > 100 * 1024 * 1024:
+                            raise RuntimeError("cached OPNsense core archive has an invalid size")
+                        if not archive.startswith(b"\x1f\x8b"):
+                            raise RuntimeError("cached OPNsense core archive is not gzip data")
+                        workflow._upload_atomic(
+                            db, builder.public_ip, "/root/opnsense-core.tar.gz", archive,
+                            0o600,
+                        )
                     workflow._upload_atomic(
                         db, builder.public_ip, "/root/opnsense-bootstrap.sh", script, 0o700,
                     )

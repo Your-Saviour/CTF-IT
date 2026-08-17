@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 CACHE_ROLE = "opnsense-acceptance-cache"
 GOLDEN_CONFIG_REVISION = "aws-ena-golden-v1"
-IMAGE_BUILD_REVISION = "pkgbase-sanitized-clone-v1"
+IMAGE_BUILD_REVISION = "pkgbase-sanitized-clone-v2"
 CACHE_OWNERSHIP = {
     "Application": "ctf-it",
     "ManagedBy": "ctf-it",
@@ -27,6 +27,7 @@ class CacheIdentity:
     architecture: str
     opnsense_version: str
     bootstrap_sha256: str
+    core_commit: str
     golden_config_revision: str
     image_build_revision: str
 
@@ -43,6 +44,7 @@ def cache_key(identity: CacheIdentity) -> str:
     payload = {
         "architecture": identity.architecture,
         "bootstrap_sha256": identity.bootstrap_sha256,
+        "core_commit": identity.core_commit,
         "golden_config_revision": identity.golden_config_revision,
         "image_build_revision": identity.image_build_revision,
         "opnsense_version": identity.opnsense_version,

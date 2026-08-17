@@ -18,6 +18,7 @@ def identity(**changes):
         "architecture": "x86_64",
         "opnsense_version": "26.7",
         "bootstrap_sha256": "a" * 64,
+        "core_commit": "577631a60816a938adb7c1dc8abf624ff132ad56",
         "golden_config_revision": "ena-v1",
         "image_build_revision": "pkgbase-v1",
     }
@@ -125,9 +126,10 @@ def test_cache_key_changes_for_every_image_input():
         cache_key(identity(architecture="arm64")),
         cache_key(identity(opnsense_version="27.1")),
         cache_key(identity(bootstrap_sha256="b" * 64)),
+        cache_key(identity(core_commit="1" * 40)),
         cache_key(identity(golden_config_revision="ena-v2")),
         cache_key(identity(image_build_revision="pkgbase-v2")),
-    }) == 7
+    }) == 8
 
 
 def test_discovery_returns_one_available_owned_unexpired_ami():

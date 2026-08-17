@@ -126,6 +126,8 @@ def test_pkgbase_bootstrap_preserves_freebsd_base_packages():
 \tfi
 \trm -rf /var/db/pkg/*
 
+fetch -o ${WORKDIR}/${REPOSITORY}.tar.gz "${URL}/${SUBFILE}.tar.gz"
+
 \topnsense-update ${DO_VERBOSE} -bkf
 \treboot
 '''
@@ -138,6 +140,9 @@ def test_pkgbase_bootstrap_preserves_freebsd_base_packages():
     assert "else\n\t\t\tpkg delete -fa" in adapted
     assert "install -m 600 /root/ctf-golden-config.xml /conf/config.xml" in adapted
     assert adapted.index("install -m 600") < adapted.index("\treboot")
+    assert "if [ -s /root/opnsense-core.tar.gz ]" in adapted
+    assert "cp /root/opnsense-core.tar.gz ${WORKDIR}/${REPOSITORY}.tar.gz" in adapted
+    assert adapted.index("opnsense-core.tar.gz") < adapted.index('fetch -o ${WORKDIR}/${REPOSITORY}.tar.gz')
 
 
 def test_pkgbase_bootstrap_rejects_an_unrecognised_upstream_script():

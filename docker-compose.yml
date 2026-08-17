@@ -94,6 +94,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - aws_credentials:/root/.aws
+      - opnsense_source_cache:/var/cache/opnsense:ro
     environment:
       - SECRET_KEY=aws-acceptance-container-only
       - DATA_ENCRYPTION_KEY=aws-acceptance-data-container-only
@@ -113,6 +114,27 @@ services:
       - AWS_ACCEPTANCE_ACCOUNT_ID=${AWS_ACCEPTANCE_ACCOUNT_ID:-}
       - AWS_ACCEPTANCE_RUN_ID=${AWS_ACCEPTANCE_RUN_ID:-}
       - AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD=${AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD:-}
+      - OPNSENSE_CORE_ARCHIVE=/var/cache/opnsense/core-26.7.tar.gz
+      - OPNSENSE_CORE_COMMIT_FILE=/var/cache/opnsense/core-26.7.commit
+    depends_on:
+      opnsense-source-cache:
+        condition: service_completed_successfully
+
+  opnsense-source-cache:
+    profiles: ["aws-acceptance"]
+    image: alpine/git:2.49.1
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ ! -s /cache/core-26.7.tar.gz ] || [ ! -s /cache/core-26.7.commit ]; then
+          rm -rf /cache/core-repository /cache/core-26.7.tar.gz /cache/core-26.7.commit
+          git clone --depth 1 --branch stable/26.7 https://github.com/opnsense/core.git /cache/core-repository
+          git -C /cache/core-repository archive --format=tar.gz --prefix=core-stable-26.7/ -o /cache/core-26.7.tar.gz HEAD
+          git -C /cache/core-repository rev-parse HEAD > /cache/core-26.7.commit
+          rm -rf /cache/core-repository
+        fi
+    volumes:
+      - opnsense_source_cache:/cache
 
   aws-opnsense-cache:
     profiles: ["aws-acceptance"]
@@ -134,3 +156,4 @@ volumes:
   api_data:
   aws_credentials:
   agent_data:
+  opnsense_source_cache:

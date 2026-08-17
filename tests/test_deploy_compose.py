@@ -172,6 +172,18 @@ def test_opnsense_cache_operator_commands_run_in_acceptance_container() -> None:
     assert "aws_credentials:/root/.aws" in cache["volumes"]
 
 
+def test_opnsense_source_archive_is_built_and_consumed_in_containers() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    source = compose["services"]["opnsense-source-cache"]
+    acceptance = compose["services"]["aws-acceptance"]
+
+    assert source["image"].startswith("alpine/git:")
+    assert "opnsense_source_cache:/cache" in source["volumes"]
+    assert "opnsense_source_cache:/var/cache/opnsense:ro" in acceptance["volumes"]
+    assert "OPNSENSE_CORE_ARCHIVE=/var/cache/opnsense/core-26.7.tar.gz" in acceptance["environment"]
+    assert "OPNSENSE_CORE_COMMIT_FILE=/var/cache/opnsense/core-26.7.commit" in acceptance["environment"]
+
+
 def test_aws_containers_expose_no_static_keys_or_host_credential_mounts() -> None:
     services = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]
 
@@ -181,4 +193,6 @@ def test_aws_containers_expose_no_static_keys_or_host_credential_mounts() -> Non
         volumes = service.get("volumes", [])
         assert "AWS_ACCESS_KEY_ID" not in environment
         assert "AWS_SECRET_ACCESS_KEY" not in environment
-        assert all(volume == "aws_credentials:/root/.aws" for volume in volumes)
+        assert "aws_credentials:/root/.aws" in volumes
+        assert all(volume.startswith(("aws_credentials:", "opnsense_source_cache:"))
+                   for volume in volumes)

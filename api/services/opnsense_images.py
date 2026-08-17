@@ -168,7 +168,16 @@ def make_pkgbase_compatible_bootstrap(content: bytes) -> bytes:
 \treboot"""
     if content.count(upstream_finish) != 1:
         raise ImageWorkflowError("upstream bootstrap final block changed")
-    return content.replace(upstream_finish, replacement_finish, 1)
+    content = content.replace(upstream_finish, replacement_finish, 1)
+    upstream_fetch = b'fetch -o ${WORKDIR}/${REPOSITORY}.tar.gz "${URL}/${SUBFILE}.tar.gz"'
+    cached_fetch = b'''if [ -s /root/opnsense-core.tar.gz ]; then
+\tcp /root/opnsense-core.tar.gz ${WORKDIR}/${REPOSITORY}.tar.gz
+else
+\tfetch -o ${WORKDIR}/${REPOSITORY}.tar.gz "${URL}/${SUBFILE}.tar.gz"
+fi'''
+    if content.count(upstream_fetch) != 1:
+        raise ImageWorkflowError("upstream bootstrap source fetch changed")
+    return content.replace(upstream_fetch, cached_fetch, 1)
 
 
 def active_image(db: Session) -> OpnsenseImage | None:
