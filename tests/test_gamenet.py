@@ -600,8 +600,11 @@ def test_endpoint_stage_one_selects_nic_by_attachment_mac_and_jumps_gateway(monk
     endpoint = VM(hostname="endpoint", team_id=team.id, event_id=event.id, site_id=site.id,
                   role="blue_endpoint", vpc_ip="10.128.0.8", private_ip="10.128.1.10",
                   vpc_mac="5A:00:00:00:00:08")
+    firewall = VM(hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id,
+                  role="site_firewall", private_ip="10.128.0.4")
     gateway = VM(hostname="gateway", team_id=team.id, event_id=event.id, public_ip="198.51.100.10")
-    db_session.add_all([endpoint, gateway]); db_session.flush()
+    db_session.add_all([endpoint, firewall, gateway]); db_session.flush()
+    site.firewall_vm_id = firewall.id
     calls = []
     responses = iter([(0, "", ""), (0, "boot-one\n", "")])
     monkeypatch.setattr("api.services.gamenet_provider.ssh_command",

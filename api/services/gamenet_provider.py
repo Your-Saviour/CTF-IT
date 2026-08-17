@@ -806,7 +806,7 @@ def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
     template = environment.get_template("opnsense_config.xml.j2")
     network = ip_network(site.allocated_cidr)
     return template.render(
-        opnsense_hostname=vm.hostname, opnsense_lan_ip=str(network.network_address + 1),
+        opnsense_hostname=vm.hostname, opnsense_lan_ip=vm.private_ip,
         opnsense_lan_subnet=network.prefixlen,
         opnsense_wan_interface=wan_interface, opnsense_lan_interface=lan_interface,
         opnsense_admin_password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode(),
@@ -819,7 +819,8 @@ def _site_unbound_config(site: Site) -> str:
     """Build a resolver bound only to this site's private interfaces."""
     from api.services.gamenet import site_dns_zone, vm_dns_name
     db = object_session(site)
-    lan_address = str(ip_network(site.allocated_cidr).network_address + 1)
+    firewall = db.get(VM, site.firewall_vm_id)
+    lan_address = firewall.private_ip
     records = []
     for endpoint in db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all():
         name = vm_dns_name(endpoint)
@@ -1018,7 +1019,7 @@ def add_deterministic_endpoint_address(vm: VM, site: Site, gateway_vm: VM) -> No
     if not vm.vpc_ip or not vm.vpc_mac:
         raise GameNetProviderError("missing VPC attachment metadata for endpoint network conversion")
     network = ip_network(site.allocated_cidr)
-    router = str(network.network_address + 1)
+    router = object_session(site).get(VM, site.firewall_vm_id).private_ip
     mac = vm.vpc_mac.lower()
     command = (
         "set -eu; iface=''; "
@@ -1047,7 +1048,7 @@ def add_deterministic_endpoint_address(vm: VM, site: Site, gateway_vm: VM) -> No
 def finalize_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:
     """Stage two: persist MAC-matched netplan, remove the boot address, and reboot."""
     network = ip_network(site.allocated_cidr)
-    router = str(network.network_address + 1)
+    router = object_session(site).get(VM, site.firewall_vm_id).private_ip
     mac = vm.vpc_mac.lower()
     netplan = f"""network:
   version: 2

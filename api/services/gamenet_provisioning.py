@@ -281,7 +281,9 @@ def create_site_firewalls(db, event, infrastructure):
         if not vm.cloud_instance_id or not vm.public_ip:
             if not image:
                 raise RuntimeError("No active validated OPNsense image. Open /admin/settings to build and activate one.")
-            vm.private_ip = str(ip_network(site.infrastructure_subnet).network_address + 1)
+            # AWS reserves the first four addresses in every subnet; use the
+            # first assignable address as the OPNsense LAN gateway.
+            vm.private_ip = str(ip_network(site.infrastructure_subnet).network_address + 4)
             vm.opnsense_image_id, vm.opnsense_release = image.id, image.version
             provider = _provider()
             try:
@@ -718,12 +720,13 @@ def _run_connectivity_and_exposure_checks(event, infrastructure):
         gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
         public_exposure &= _wait_ports_closed(gateway_vm.public_ip, (22, 80, 443, 8080))
         for site in team.sites:
-            vpn_routes &= _tcp_probe(str(ip_network(site.allocated_cidr).network_address + 1), 443)
+            firewall = db.get(VM, site.firewall_vm_id)
+            vpn_routes &= _tcp_probe(firewall.private_ip, 443)
         other = next((candidate for candidate in teams if candidate.id != team.id and candidate.sites), None)
         if other:
             source = db.query(VM).filter(VM.team_id == team.id, VM.role.like("%_endpoint")).first()
             if source:
-                destination = str(ip_network(other.sites[0].allocated_cidr).network_address + 1)
+                destination = db.get(VM, other.sites[0].firewall_vm_id).private_ip
                 code, _, _ = ssh_command(
                     source, f"ping -c 1 -W 3 {destination}", jump=gateway_vm,
                 )
