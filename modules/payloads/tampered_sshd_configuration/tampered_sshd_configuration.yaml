@@ -3,6 +3,7 @@ name: Tampered SSH Configuration
 description: Investigate an unauthorized SSH configuration drop-in that enables TCP forwarding, remove it, and prove the effective daemon configuration is contained.
 type: payload
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: incident-response
 tags: [ssh, tampering, persistence, investigation]

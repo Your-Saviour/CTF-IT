@@ -3,6 +3,7 @@ name: Vulnerable Flask Application
 description: A small Flask web app running as a systemd service on port 5000.
 type: application_external
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: web
 tags: [web, flask, python]

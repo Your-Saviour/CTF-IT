@@ -3,6 +3,7 @@ name: Node.js Notes API
 description: A Node.js Express REST API for storing and searching notes, backed by a SQLite database. Runs on port 3000 as a systemd service.
 type: application_external
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: web
 tags: [web, nodejs, express, sqlite, api]

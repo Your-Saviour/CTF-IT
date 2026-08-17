@@ -3,6 +3,7 @@ name: Flask Debug Mode Enabled
 description: The inventory dashboard is running with Flask debug mode enabled, exposing the Werkzeug interactive debugger which allows remote code execution. Disable debug mode.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [web, debug, flask, remote-code-execution]

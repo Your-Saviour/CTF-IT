@@ -3,6 +3,7 @@ name: Path Traversal in File Server
 description: The file server does not sanitise path components, allowing requests like /files/../../../../etc/passwd to read files outside the intended serve root.
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: web
 tags: [path-traversal, web, go, lfi]

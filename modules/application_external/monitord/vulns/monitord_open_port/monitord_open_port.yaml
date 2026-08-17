@@ -3,6 +3,7 @@ name: Unauthenticated Metrics Endpoint
 description: The monitoring daemon listens on port 9000 with no authentication, allowing any network-reachable host to query system metrics including CPU usage, memory, running processes, and disk layout.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: network
 tags: [network, information-disclosure, unauthenticated, services]

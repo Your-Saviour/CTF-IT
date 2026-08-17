@@ -3,6 +3,7 @@ name: Stored XSS in Guestbook
 description: The guestbook accepts and stores user-supplied HTML without sanitisation. Messages containing <script> tags are stored in messages.txt and executed in any visitor's browser.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [xss, web, php, input-validation]

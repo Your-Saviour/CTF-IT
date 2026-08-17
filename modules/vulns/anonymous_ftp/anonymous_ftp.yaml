@@ -3,6 +3,7 @@ name: Anonymous FTP Access
 description: The vsftpd FTP server is configured with anonymous_enable=YES, allowing unauthenticated read access to the FTP root directory. Sensitive files left in the FTP root are exposed to any network client.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: network
 tags: [network, ftp, anonymous, unauthenticated, services]

@@ -3,6 +3,7 @@ name: Malicious Cron Job (C2 Beacon)
 description: A cron entry runs /opt/.hidden/beacon.sh every 5 minutes from root's crontab. The script simulates a C2 beacon — in a real attack this would exfiltrate data or maintain persistence by phoning home.
 type: payload
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: persistence
 tags: [persistence, cron, c2, beacon, malware]

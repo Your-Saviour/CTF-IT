@@ -3,6 +3,7 @@ name: Anonymous Upload Enabled
 description: The file server allows unauthenticated HTTP PUT requests to upload arbitrary files into the served directory, enabling remote code staging or data injection.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [misconfiguration, web, go, file-upload, unauthenticated]

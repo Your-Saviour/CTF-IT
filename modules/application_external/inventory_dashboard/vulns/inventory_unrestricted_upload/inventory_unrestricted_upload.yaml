@@ -3,6 +3,7 @@ name: Unrestricted File Upload
 description: The inventory dashboard accepts any file type with no restrictions. A PHP web shell has been uploaded. Remove the shell and restore upload restrictions.
 type: payload
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [web, upload, webshell]

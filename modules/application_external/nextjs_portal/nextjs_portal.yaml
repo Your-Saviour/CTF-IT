@@ -3,6 +3,7 @@ name: Next.js Employee Portal
 description: A Next.js 14.1.0 employee portal with authentication middleware and an admin API. Deployed to /opt/portal/ and runs on port 3001 as a systemd service.
 type: application_external
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 0
 category: web
 tags: [web, nodejs, nextjs, react, employee-portal]

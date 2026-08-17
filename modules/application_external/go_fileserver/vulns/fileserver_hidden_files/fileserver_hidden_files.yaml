@@ -3,6 +3,7 @@ name: Directory Listing Exposes Hidden Files
 description: The file server is configured with show_hidden = true, causing dotfiles and hidden directories (e.g. .git, .env, .ssh) to appear in directory listings and be downloadable.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [information-disclosure, web, go, configuration]

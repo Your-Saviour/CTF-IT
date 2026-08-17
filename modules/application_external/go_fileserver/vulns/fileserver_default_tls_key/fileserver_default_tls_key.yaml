@@ -3,6 +3,7 @@ name: World-Readable TLS Private Key
 description: The TLS private key file server.key is readable by all users on the system. An attacker who can read it can decrypt captured HTTPS traffic or impersonate the server.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: filesystem
 tags: [tls, permissions, filesystem, cryptography]

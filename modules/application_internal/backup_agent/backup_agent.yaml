@@ -3,6 +3,7 @@ name: Backup Automation Agent
 description: Internal backup and automation foundation used by logging, permissions, and credential-handling exercises.
 type: application_internal
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: automation
 tags: [backup, automation, foundation]

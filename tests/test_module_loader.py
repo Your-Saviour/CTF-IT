@@ -117,3 +117,27 @@ class TestRepositoryDefinitions:
                     raise AssertionError(f"Unsupported base step: {step!r}")
                 source = base.source_dir / relative
                 assert source.exists(), f"{base.id} references missing source {source}"
+
+    def test_all_modules_declare_supported_bases(self):
+        bases = {base.id for base in load_all_bases()}
+        for module in load_all_modules():
+            assert module.supported_bases, f"{module.id} must declare supported_bases"
+            unknown = set(module.supported_bases) - bases
+            assert not unknown, f"{module.id} declares unknown base types: {sorted(unknown)}"
+
+    def test_unmapped_tactics_declare_phase_override(self):
+        from builder.attack_tree import TACTIC_PHASE
+        for module in load_all_modules():
+            cal = module.caldera or {}
+            tactic = cal.get("tactic")
+            if not tactic or module.type == "goal":
+                continue
+            assert tactic in TACTIC_PHASE or "phase_override" in cal, (
+                f"{module.id} uses unmapped tactic '{tactic}' and must declare phase_override"
+            )
+
+    def test_known_phase_overrides_resolve(self):
+        from builder.attack_tree import build_attack_tree
+        tree = build_attack_tree(load_all_modules())
+        assert tree.nodes["monitord_writable_logdir"].phase == 3
+        assert tree.nodes["ip_forwarding_enabled"].phase == 4

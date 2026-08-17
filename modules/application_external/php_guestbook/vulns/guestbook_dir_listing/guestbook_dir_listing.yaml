@@ -3,6 +3,7 @@ name: Apache Directory Listing Enabled
 description: The Apache vhost configuration enables directory listing (Options +Indexes), exposing all files in /opt/guestbook/ to unauthenticated requests.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: web
 tags: [misconfiguration, apache, information-disclosure, directory-listing]

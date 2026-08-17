@@ -3,6 +3,7 @@ name: Middleware Auth Bypass (CVE-2025-29927)
 description: Next.js 14.1.0 is affected by CVE-2025-29927. The middleware authentication check can be bypassed by setting the x-middleware-subrequest header, granting unauthenticated access to all protected routes. The fix is to upgrade to a patched Next.js version (>=14.2.25 or >=15.2.3).
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: web
 tags: [cve, nextjs, authentication-bypass, middleware, web]

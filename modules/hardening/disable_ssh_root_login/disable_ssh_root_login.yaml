@@ -4,6 +4,7 @@ description: SSH is configured to allow direct root login. This should be disabl
 type: hardening
 stage: preapplied
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: network
 tags: [ssh, authentication, access-control]

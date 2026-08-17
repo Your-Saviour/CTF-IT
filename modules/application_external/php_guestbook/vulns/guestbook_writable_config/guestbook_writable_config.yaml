@@ -3,6 +3,7 @@ name: World-Writable Guestbook Config
 description: The config.php file containing database credentials and application secrets is world-writable, allowing any local user to overwrite it.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: filesystem
 tags: [permissions, filesystem, php, configuration]

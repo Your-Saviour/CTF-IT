@@ -3,6 +3,7 @@ name: Log App Running as Root
 description: The logapp systemd service unit does not specify a User directive, causing the JVM process to run with full root privileges. Combined with Log4Shell or other deserialization bugs, this enables instant full system compromise.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: services
 tags: [privilege-escalation, services, systemd, java, misconfiguration]

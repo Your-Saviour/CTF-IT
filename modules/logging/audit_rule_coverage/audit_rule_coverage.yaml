@@ -4,6 +4,7 @@ description: Add durable audit coverage for identity and privilege configuration
 type: hardening
 stage: preapplied
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: logging
 tags: [auditd, logging, detection]

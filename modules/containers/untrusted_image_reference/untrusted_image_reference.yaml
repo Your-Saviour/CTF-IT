@@ -4,6 +4,7 @@ description: Replace a mutable, untrusted image reference with the event-approve
 type: hardening
 stage: preapplied
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: containers
 tags: [docker, supply-chain, images]

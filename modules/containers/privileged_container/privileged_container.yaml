@@ -3,6 +3,7 @@ name: Privileged Container
 description: Identify and remove a privileged training container, then replace it with a non-privileged equivalent.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: containers
 tags: [docker, privileged, runtime]

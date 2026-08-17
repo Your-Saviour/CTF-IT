@@ -3,6 +3,7 @@ name: Exposed phpinfo() Page
 description: A phpinfo.php file exists in the web root that calls phpinfo(), exposing the full PHP configuration, loaded extensions, environment variables, and server paths.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: web
 tags: [information-disclosure, php, misconfiguration]

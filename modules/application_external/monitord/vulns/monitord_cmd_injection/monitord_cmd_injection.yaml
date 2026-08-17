@@ -3,6 +3,7 @@ name: Command Injection in Monitord
 description: The monitoring daemon uses eval to process query parameters received over the network, allowing an attacker to inject arbitrary shell commands via the metrics endpoint.
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: services
 tags: [command-injection, bash, services, rce]

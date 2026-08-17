@@ -3,6 +3,7 @@ name: IP Forwarding Enabled
 description: Kernel IP forwarding is enabled via net.ipv4.ip_forward = 1 in /etc/sysctl.conf. This allows the machine to act as a router, forwarding packets between network interfaces — enabling network pivoting attacks if the host is compromised.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: configuration
 tags: [network, configuration, kernel, pivoting]
@@ -25,6 +26,7 @@ hints:
   - "Remove or comment out 'net.ipv4.ip_forward = 1' from /etc/sysctl.conf and apply with sysctl -p"
 caldera:
   tactic: lateral-movement
+  phase_override: 4
   technique:
     attack_id: T1599
     name: "Network Boundary Bridging"

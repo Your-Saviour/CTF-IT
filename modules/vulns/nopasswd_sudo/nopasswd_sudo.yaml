@@ -3,6 +3,7 @@ name: NOPASSWD sudo entry
 description: A sudoers drop-in file grants a user unrestricted passwordless sudo access, allowing full privilege escalation without authentication.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: authentication
 tags: [sudo, privilege-escalation, misconfiguration]

@@ -4,6 +4,7 @@ description: Configure persistent systemd journal storage with bounded retention
 type: hardening
 stage: preapplied
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: logging
 tags: [journald, retention, logging]

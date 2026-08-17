@@ -3,6 +3,7 @@ name: Admin API Route Unprotected
 description: The admin API route at /api/admin/users returns all user records without verifying the caller's session. Any unauthenticated request receives the full user list including usernames, emails, and password hashes.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [authentication, api, nextjs, web, information-disclosure]

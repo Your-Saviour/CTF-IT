@@ -3,6 +3,7 @@ name: World-Writable Monitord Log Directory
 description: The daemon's log directory at /var/log/monitord is world-writable, allowing any local user to delete, overwrite, or plant log entries.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: filesystem
 tags: [permissions, filesystem, logging]
@@ -20,6 +21,7 @@ hints:
   - "Use chmod 750 to restrict the log directory to the service owner and group"
 caldera:
   tactic: defense-evasion
+  phase_override: 3
   technique:
     attack_id: T1070.002
     name: "Indicator Removal: Clear Linux or Mac System Logs"

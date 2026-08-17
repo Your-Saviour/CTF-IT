@@ -3,6 +3,7 @@ name: SQL Injection in Notes Search
 description: The /search endpoint builds SQL queries by concatenating user input directly, enabling classic SQL injection attacks.
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: web
 tags: [sqli, web, nodejs, injection]
