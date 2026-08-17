@@ -195,7 +195,10 @@ def module_from_yaml(yaml_path: Path) -> Module:
 def _module_roots() -> list[Path]:
     roots = [MODULES_DIR]
     if MODULE_REPOS_DIR.is_dir():
-        roots.extend(sorted(p for p in MODULE_REPOS_DIR.iterdir() if p.is_dir()))
+        roots.extend(sorted(
+            p for p in MODULE_REPOS_DIR.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        ))
     return roots
 
 

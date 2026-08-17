@@ -1,5 +1,7 @@
 """Admin CRUD and sync for external module repositories."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -78,7 +80,7 @@ async def create_repo(request: Request, db: Session = Depends(get_db)):
     db.add(repo)
     db.commit()
     db.refresh(repo)
-    return _run_sync(repo, db)
+    return await asyncio.to_thread(_run_sync, repo, db)
 
 
 @router.post("/module-repos/{repo_id}/sync")
@@ -88,7 +90,7 @@ async def sync_repo_endpoint(repo_id: int, request: Request, db: Session = Depen
     repo = db.get(ModuleRepo, repo_id)
     if not repo:
         return JSONResponse({"error": "Module repository not found"}, status_code=404)
-    return _run_sync(repo, db)
+    return await asyncio.to_thread(_run_sync, repo, db)
 
 
 @router.delete("/module-repos/{repo_id}", status_code=204)

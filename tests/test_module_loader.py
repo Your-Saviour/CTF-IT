@@ -187,3 +187,15 @@ class TestExternalRepos:
         monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
         ids = {m.id for m in ml.load_all_modules()}
         assert "should_not_load" not in ids
+
+    def test_skips_dot_sync_dirs(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        repo = tmp_path / "repo"
+        (repo / ".sync-deadbeef" / "vulns" / "secret_backdoor").mkdir(parents=True)
+        (repo / ".sync-deadbeef" / "vulns" / "secret_backdoor" / "secret_backdoor.yaml").write_text(
+            "id: secret_backdoor\nname: Secret Backdoor\ndescription: d\n"
+            "type: vulnerability\ndifficulty: hard\npoints: 200\ncategory: persistence\n"
+        )
+        monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
+        ids = {m.id for m in ml.load_all_modules()}
+        assert "secret_backdoor" not in ids

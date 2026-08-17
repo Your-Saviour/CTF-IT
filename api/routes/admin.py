@@ -1220,7 +1220,7 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
         )
 
     from api.routes.module_repos import sync_all_repos
-    sync_all_repos(db)
+    await asyncio.to_thread(sync_all_repos, db)
 
     # A GameNet event is not public until lockdown and connectivity checks pass.
     if event.infrastructure:

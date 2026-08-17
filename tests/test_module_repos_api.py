@@ -83,6 +83,27 @@ def test_sync_failure_sets_error(client):
     assert "boom" in resp.json()["last_error"]
 
 
+def test_sync_runs_off_event_loop_thread(client):
+    db = _Session()
+    repo = ModuleRepo(name="Thread", repo_url="git@x", branch="main",
+                      ssh_key_encrypted="enc:v1:abc")
+    db.add(repo); db.commit(); db.refresh(repo)
+    repo_id = repo.id
+    db.close()
+    to_thread_calls = []
+
+    def fake_to_thread(fn, *args, **kwargs):
+        to_thread_calls.append(fn)
+        return fn(*args, **kwargs)
+
+    with patch("api.routes.module_repos.sync_repo"), \
+         patch("asyncio.to_thread", side_effect=fake_to_thread):
+        resp = client.post(f"/admin/api/module-repos/{repo_id}/sync")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "synced"
+    assert to_thread_calls
+
+
 def test_delete_repo(client):
     db = _Session()
     repo = ModuleRepo(name="Gone", repo_url="git@x", branch="main",
