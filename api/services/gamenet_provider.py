@@ -121,6 +121,7 @@ class AwsGameNetProvider:
             ),),
             tags=tags, key_name=key_name, user_data=user_data,
         ))
+        self.compute.wait_running(result.instance_id)
         allocation = self.compute.ensure_eip(tags)
         self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
         return replace(

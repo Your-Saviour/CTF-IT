@@ -782,10 +782,15 @@ def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     class Network:
         def ensure_security_group(self, spec): self.spec = spec; return "sg-gateway"
     class Compute:
+        def __init__(self): self.calls = []
         def ensure_key_pair(self, name, public_key, tags): self.key = (name, public_key); return "key-1"
-        def launch_instance(self, spec): self.spec = spec; return InstanceResult("i-gw", "pending", "eni-gw")
+        def launch_instance(self, spec):
+            self.spec = spec; self.calls.append("launch")
+            return InstanceResult("i-gw", "pending", "eni-gw")
+        def wait_running(self, instance_id): self.calls.append(("wait_running", instance_id))
         def ensure_eip(self, tags): return ElasticIpResult("eipalloc-gw", "198.51.100.9")
-        def associate_eip(self, allocation_id, eni_id): return "eipassoc-gw"
+        def associate_eip(self, allocation_id, eni_id):
+            self.calls.append(("associate_eip", eni_id)); return "eipassoc-gw"
     compute, network = Compute(), Network()
     config = SimpleNamespace(
         environment="test", standard_vpc_id="vpc-standard", standard_subnet_id="subnet-standard",
@@ -804,6 +809,9 @@ def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     assert compute.spec.network_interfaces[0].security_group_ids == ("sg-gateway",)
     assert result.public_ip == "198.51.100.9"
     assert result.eip_allocation_id == "eipalloc-gw"
+    assert compute.calls == [
+        "launch", ("wait_running", "i-gw"), ("associate_eip", "eni-gw"),
+    ]
 
 
 def test_aws_gamenet_cleanup_removes_gateway_security_group_after_instance():
