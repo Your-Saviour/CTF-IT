@@ -159,11 +159,16 @@ class AwsComputeProvider:
         self._call("terminate_instances", InstanceIds=[instance_id])
 
     def set_source_dest_check(self, instance_id: str, *, enabled: bool) -> None:
-        self._call(
-            "modify_instance_attribute",
-            InstanceId=instance_id,
-            SourceDestCheck={"Value": enabled},
-        )
+        response = self._call("describe_instances", InstanceIds=[instance_id])
+        interfaces = response["Reservations"][0]["Instances"][0].get("NetworkInterfaces", [])
+        if not interfaces:
+            raise AwsRetryableError(f"instance {instance_id} interfaces are not visible yet")
+        for interface in interfaces:
+            self._call(
+                "modify_network_interface_attribute",
+                NetworkInterfaceId=interface["NetworkInterfaceId"],
+                SourceDestCheck={"Value": enabled},
+            )
 
     def allocate_eip(self, tags: Mapping[str, str]) -> ElasticIpResult:
         response = self._call(

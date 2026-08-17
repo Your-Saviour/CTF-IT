@@ -35,6 +35,10 @@ class FakeEc2:
         self.calls.append(("modify_instance_attribute", kwargs))
         return {}
 
+    def modify_network_interface_attribute(self, **kwargs):
+        self.calls.append(("modify_network_interface_attribute", kwargs))
+        return {}
+
     def allocate_address(self, **kwargs):
         self.calls.append(("allocate_address", kwargs))
         return {"AllocationId": "eipalloc-123", "PublicIp": "198.51.100.20"}
@@ -139,10 +143,21 @@ def test_terminate_refuses_foreign_instance():
 
 def test_source_destination_check_is_explicitly_disabled():
     ec2 = FakeEc2()
+    ec2.instances = [{
+        "InstanceId": "i-fw", "State": {"Name": "running"},
+        "NetworkInterfaces": [
+            {"NetworkInterfaceId": "eni-wan"}, {"NetworkInterfaceId": "eni-lan"},
+        ],
+    }]
     AwsComputeProvider(ec2).set_source_dest_check("i-fw", enabled=False)
-    assert ec2.calls == [("modify_instance_attribute", {
-        "InstanceId": "i-fw", "SourceDestCheck": {"Value": False},
-    })]
+    assert ec2.calls[-2:] == [
+        ("modify_network_interface_attribute", {
+            "NetworkInterfaceId": "eni-wan", "SourceDestCheck": {"Value": False},
+        }),
+        ("modify_network_interface_attribute", {
+            "NetworkInterfaceId": "eni-lan", "SourceDestCheck": {"Value": False},
+        }),
+    ]
 
 
 def test_allocate_associate_and_release_owned_eip():
