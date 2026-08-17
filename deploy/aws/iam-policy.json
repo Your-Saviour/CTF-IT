@@ -79,6 +79,17 @@
       }
     },
     {
+      "Sid": "RunWithOwnedNetworkInterfaces",
+      "Effect": "Allow",
+      "Action": ["ec2:RunInstances"],
+      "Resource": "arn:aws:ec2:*:*:network-interface/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/ManagedBy": "ctf-it"
+        }
+      }
+    },
+    {
       "Sid": "OperateOwnedInfrastructure",
       "Effect": "Allow",
       "Action": [

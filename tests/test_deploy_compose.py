@@ -91,6 +91,7 @@ def test_iam_policy_separates_run_instances_dependencies_from_tagged_resources()
     statements = {statement["Sid"]: statement for statement in policy["Statement"]}
     dependencies = statements["RunInstancesDependencies"]
     created = statements["RunTaggedCompute"]
+    existing_interfaces = statements["RunWithOwnedNetworkInterfaces"]
 
     assert dependencies["Action"] == ["ec2:RunInstances"]
     assert "Condition" not in dependencies
@@ -108,6 +109,9 @@ def test_iam_policy_separates_run_instances_dependencies_from_tagged_resources()
         "arn:aws:ec2:*:*:volume/*",
     }
     assert created["Condition"]["StringEquals"]["aws:RequestTag/ManagedBy"] == "ctf-it"
+    assert existing_interfaces["Action"] == ["ec2:RunInstances"]
+    assert existing_interfaces["Resource"] == "arn:aws:ec2:*:*:network-interface/*"
+    assert existing_interfaces["Condition"]["StringEquals"]["aws:ResourceTag/ManagedBy"] == "ctf-it"
 
 
 def test_iam_policy_allows_explicit_create_actions_that_reference_existing_resources() -> None:
