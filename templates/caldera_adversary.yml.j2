@@ -1,6 +1,9 @@
 id: {{ adversary_id }}
-name: {{ adversary_name }}
-description: {{ adversary_description }}
+name: "{{ adversary_name }}"
+description: "{{ adversary_description }}"
+{%- if objective %}
+objective: {{ objective }}
+{%- endif %}
 atomic_ordering:
 {%- for ability in abilities %}
   - {{ ability.id }}  # {{ ability.comment }}

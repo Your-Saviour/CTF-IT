@@ -7,6 +7,7 @@ from builder.attack_tree import (
     INFRASTRUCTURE_PHASE,
     TACTIC_PHASE,
     AttackTree,
+    annotate_tree_statuses,
     build_attack_tree,
     extract_paths,
     serialize_tree,
@@ -592,3 +593,85 @@ class TestGoalNodes:
         goal_node = next(n for n in data["nodes"] if n["id"] == "g1")
         assert goal_node["is_goal"] is True
         assert goal_node["phase"] == GOAL_PHASE
+
+
+# ── Operation result annotation (native fact gating) ──
+
+class TestAnnotateTreeStatuses:
+    def _tree(self, *ids):
+        return serialize_tree(build_attack_tree([
+            _mod(mid, caldera=_caldera("initial-access")) for mid in ids
+        ]))
+
+    def test_exploit_success(self):
+        tree = self._tree("v1")
+        links = [{
+            "module_id": "v1", "phase": "exploit",
+            "status": 0, "finish": "2026-01-01T00:00:00Z", "output": "",
+        }]
+        annotated = annotate_tree_statuses(tree, links)
+        assert annotated["nodes"][0]["status"] == "succeeded"
+
+    def test_exploit_failure(self):
+        tree = self._tree("v1")
+        links = [{
+            "module_id": "v1", "phase": "exploit",
+            "status": 1, "finish": "2026-01-01T00:00:00Z", "output": "error",
+        }]
+        annotated = annotate_tree_statuses(tree, links)
+        assert annotated["nodes"][0]["status"] == "failed"
+
+    def test_exploit_skip_by_output(self):
+        tree = self._tree("v1")
+        links = [{
+            "module_id": "v1", "phase": "exploit",
+            "status": 0, "finish": "2026-01-01T00:00:00Z", "output": "SKIPPED: recon did not confirm",
+        }]
+        annotated = annotate_tree_statuses(tree, links)
+        assert annotated["nodes"][0]["status"] == "skipped"
+
+    def test_recon_secure_infers_skipped(self):
+        """Recon that found no vuln (no marker) + missing exploit → skipped."""
+        tree = self._tree("v1")
+        links = [{
+            "module_id": "v1", "phase": "recon",
+            "status": 0, "finish": "2026-01-01T00:00:00Z", "output": "SECURE: anonymous upload disabled",
+        }]
+        annotated = annotate_tree_statuses(tree, links)
+        assert annotated["nodes"][0]["status"] == "skipped"
+
+    def test_recon_marker_no_exploit_stays_pending(self):
+        """Recon found the vuln (marker present) but no exploit yet → pending."""
+        tree = self._tree("v1")
+        links = [{
+            "module_id": "v1", "phase": "recon",
+            "status": 0, "finish": "2026-01-01T00:00:00Z", "output": "VULNERABLE: anonymous upload enabled",
+        }]
+        annotated = annotate_tree_statuses(tree, links)
+        assert annotated["nodes"][0]["status"] == "pending"
+
+    def test_no_links_leave_status_none(self):
+        tree = self._tree("v1")
+        annotated = annotate_tree_statuses(tree, [])
+        assert annotated["nodes"][0]["status"] is None
+
+    def test_exploit_wins_over_recon(self):
+        """When both recon and exploit links exist, exploit status wins."""
+        tree = self._tree("v1")
+        links = [
+            {"module_id": "v1", "phase": "recon", "status": 0,
+             "finish": "2026-01-01T00:00:00Z", "output": "VULNERABLE: yes"},
+            {"module_id": "v1", "phase": "exploit", "status": 1,
+             "finish": "2026-01-01T00:00:00Z", "output": "boom"},
+        ]
+        annotated = annotate_tree_statuses(tree, links)
+        assert annotated["nodes"][0]["status"] == "failed"
+
+    def test_does_not_mutate_input(self):
+        tree = self._tree("v1")
+        links = [{
+            "module_id": "v1", "phase": "exploit", "status": 0,
+            "finish": "2026-01-01T00:00:00Z", "output": "",
+        }]
+        annotate_tree_statuses(tree, links)
+        assert tree["nodes"][0]["status"] is None

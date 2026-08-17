@@ -1,0 +1,10 @@
+id: {{ objective_id }}
+name: "{{ objective_name }}"
+description: "{{ objective_description }}"
+goals:
+{%- for goal in goals %}
+  - target: {{ goal.target }}
+    value: {{ goal.value | tojson }}
+    count: {{ goal.count }}
+    operator: {{ goal.operator | tojson }}
+{%- endfor %}

@@ -203,6 +203,7 @@
     <a href="/admin/red-team/operations" class="back-link">Back to operations</a>
     <h1 class="page-title" id="op-name">Loading...</h1>
     <span id="op-state-badge"></span>
+    <span id="op-controls" style="display:flex;gap:0.4rem;"></span>
 </div>
 
 <!-- Operation metadata -->
@@ -215,6 +216,14 @@
         <div class="detail-meta-item">
             <span class="detail-meta-label">Group</span>
             <span class="detail-meta-value"><code id="dm-group">—</code></span>
+        </div>
+        <div class="detail-meta-item">
+            <span class="detail-meta-label">Planner</span>
+            <span class="detail-meta-value" id="dm-planner">—</span>
+        </div>
+        <div class="detail-meta-item">
+            <span class="detail-meta-label">Autonomous</span>
+            <span class="detail-meta-value" id="dm-autonomous">—</span>
         </div>
         <div class="detail-meta-item">
             <span class="detail-meta-label">Started</span>
@@ -242,6 +251,22 @@
         <tbody id="agents-body">
             <tr><td colspan="4" style="color: var(--text-muted); text-align: center;">Loading...</td></tr>
         </tbody>
+    </table></div>
+</div>
+
+<!-- Pending approvals (manual operations) -->
+<div class="card" id="approvals-card" style="display:none;">
+    <h3>Pending Approvals</h3>
+    <div class="table-wrap"><table id="approvals-table">
+        <thead>
+            <tr>
+                <th>VM</th>
+                <th>Module</th>
+                <th>Phase</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="approvals-body"></tbody>
     </table></div>
 </div>
 
@@ -273,6 +298,23 @@
         <span style="color: var(--text-muted); font-size: 0.85rem;">Loading attack tree...</span>
     </div>
     <div class="attack-tree-wrap" id="op-attack-tree-container" style="display: none;"></div>
+</div>
+
+<!-- Debrief report -->
+<div class="card" id="debrief-card" style="display:none;">
+    <h3>Debrief Report</h3>
+    <div class="detail-meta" id="debrief-meta"></div>
+    <div class="table-wrap"><table id="debrief-table">
+        <thead>
+            <tr>
+                <th>VM</th>
+                <th>Ability</th>
+                <th>Status</th>
+                <th>Run</th>
+            </tr>
+        </thead>
+        <tbody id="debrief-body"></tbody>
+    </table></div>
 </div>
 
 {% include "attack_tree_partial.html" %}
@@ -347,6 +389,25 @@
             <label>Adversary Name</label>
             <input type="text" id="adversary-name-input" value="CTF Full Exploit Chain">
         </div>
+        <div class="form-group">
+            <label>Planner</label>
+            <select id="planner-select">
+                <option value="atomic">atomic</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Obfuscator</label>
+            <select id="obfuscator-select">
+                <option value="plain-text">plain-text</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                <input type="checkbox" id="autonomous-input" checked>
+                Autonomous (run immediately)
+            </label>
+            <span style="font-size:0.7rem;color:var(--text-muted);">Uncheck for manual approval of each link</span>
+        </div>
         <div class="modal-footer">
             <button class="btn-outline" onclick="closeCreateModal()">Cancel</button>
             <button class="btn btn-primary btn-sm" onclick="submitCreateOp()">Create</button>
@@ -392,6 +453,7 @@
         if (finish && status === 0) return '<span style="color:#f85149">&#x2717; Exploited</span>';
         if (finish && status !== 0) return '<span style="color:#3fb950">&#x2713; Defended</span>';
         if (status === -3) return '<span style="color:#8b949e">&#x25B6; Running</span>';
+        if (status === -1) return '<span style="color:#d29922">&#x23F8; Awaiting approval</span>';
         return '<span style="color:#8b949e">&#x23F3; Pending</span>';
     }
 
@@ -421,10 +483,14 @@
                 document.getElementById('op-state-badge').innerHTML = stateBadgeHtml(op.state);
                 document.getElementById('dm-adversary').textContent = op.adversary || '—';
                 document.getElementById('dm-group').textContent = op.group || '—';
+                document.getElementById('dm-planner').textContent = op.planner || '—';
+                document.getElementById('dm-autonomous').textContent = op.autonomous ? 'yes' : 'no (manual)';
                 document.getElementById('dm-start').textContent = fmtTime(op.start);
                 document.getElementById('dm-finish').textContent = fmtTime(op.finish) || '—';
 
+                renderControls(op);
                 renderAgents(op.agents || []);
+                renderApprovals(op.chain || []);
                 renderChain(op.chain || []);
 
                 // Render attack tree from operation response
@@ -454,6 +520,130 @@
                 console.error('Failed to load operation detail:', e);
             });
     }
+
+    function renderControls(op) {
+        var el = document.getElementById('op-controls');
+        if (!el) return;
+        var html = '';
+        if (op.state === 'running') {
+            html += '<button class="btn-outline" onclick="setOpState(\'paused\')">Pause</button>';
+            html += '<button class="btn-outline" onclick="setOpState(\'run_one_link\')">Step</button>';
+        } else if (op.state === 'paused') {
+            html += '<button class="btn-outline" onclick="setOpState(\'running\')">Resume</button>';
+            html += '<button class="btn-outline" onclick="setOpState(\'run_one_link\')">Step</button>';
+        }
+        if (op.state === 'running' || op.state === 'paused') {
+            var autonLabel = op.autonomous ? 'Disable Auto' : 'Enable Auto';
+            html += '<button class="btn-outline" onclick="toggleAutonomous(' + (op.autonomous ? 'false' : 'true') + ')">' + autonLabel + '</button>';
+        }
+        if (op.state === 'finished') {
+            html += '<button class="btn-outline" onclick="loadDebrief()">Debrief</button>';
+        }
+        el.innerHTML = html;
+    }
+    window.renderControls = renderControls;
+
+    function setOpState(state) {
+        fetch('/admin/api/caldera/operations/' + OP_ID, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: state })
+        })
+        .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+            showToast('Operation state → ' + state);
+            loadOpDetail();
+        })
+        .catch(function (e) { showToast('Failed: ' + e.message); });
+    }
+    window.setOpState = setOpState;
+
+    function toggleAutonomous(autonomous) {
+        fetch('/admin/api/caldera/operations/' + OP_ID, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ autonomous: autonomous })
+        })
+        .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+            showToast('Autonomous mode updated');
+            loadOpDetail();
+        })
+        .catch(function (e) { showToast('Failed: ' + e.message); });
+    }
+    window.toggleAutonomous = toggleAutonomous;
+
+    function loadDebrief() {
+        apiFetch('/admin/api/caldera/operations/' + OP_ID + '/report')
+            .then(function (report) {
+                var card = document.getElementById('debrief-card');
+                card.style.display = 'block';
+                var meta = document.getElementById('debrief-meta');
+                var planner = report.planner || '—';
+                var objectives = report.objectives ? report.objectives.name : '—';
+                meta.innerHTML =
+                    '<div class="detail-meta-item"><span class="detail-meta-label">Planner</span><span class="detail-meta-value">' + escHtml(planner) + '</span></div>' +
+                    '<div class="detail-meta-item"><span class="detail-meta-label">Objective</span><span class="detail-meta-value">' + escHtml(objectives) + '</span></div>' +
+                    '<div class="detail-meta-item"><span class="detail-meta-label">Jitter</span><span class="detail-meta-value">' + escHtml(report.jitter || '—') + '</span></div>';
+
+                var tbody = document.getElementById('debrief-body');
+                var rows = [];
+                var steps = report.steps || {};
+                Object.keys(steps).forEach(function (paw) {
+                    var agentSteps = steps[paw].steps || [];
+                    agentSteps.forEach(function (s) {
+                        var status = s.status === 0 ? '<span style="color:var(--green)">success</span>'
+                            : (s.status != null ? '<span style="color:var(--red)">' + escHtml(String(s.status)) + '</span>' : '<span style="color:var(--text-muted)">pending</span>');
+                        rows.push('<tr><td>' + escHtml(paw) + '</td><td>' + escHtml(s.name || s.ability_id) + '</td><td>' + status + '</td><td>' + fmtTime(s.run) + '</td></tr>');
+                    });
+                });
+                tbody.innerHTML = rows.length
+                    ? rows.join('')
+                    : '<tr><td colspan="4" style="color:var(--text-muted);text-align:center;">No steps recorded</td></tr>';
+            })
+            .catch(function (e) { showToast('Debrief failed: ' + e.message); });
+    }
+    window.loadDebrief = loadDebrief;
+
+    function renderApprovals(chain) {
+        var card = document.getElementById('approvals-card');
+        if (!card) return;
+        var pending = chain.filter(function (c) { return c.status === -1; });
+        if (!pending.length) {
+            card.style.display = 'none';
+            return;
+        }
+        card.style.display = 'block';
+        var tbody = document.getElementById('approvals-body');
+        tbody.innerHTML = pending.map(function (c) {
+            var vm = c.vm_hostname || c.paw || '—';
+            var mod = c.module_name || c.ability_name || '—';
+            var phase = c.phase != null ? c.phase : '—';
+            return '<tr>' +
+                '<td>' + escHtml(vm) + '</td>' +
+                '<td>' + escHtml(mod) + '</td>' +
+                '<td><span class="phase-badge">' + escHtml(phase) + '</span></td>' +
+                '<td>' +
+                '<button class="btn-outline" onclick="approveLink(\'' + c.id + '\', true)">Approve</button> ' +
+                '<button class="btn-outline danger" onclick="approveLink(\'' + c.id + '\', false)">Reject</button>' +
+                '</td></tr>';
+        }).join('');
+    }
+
+    function approveLink(linkId, approve) {
+        fetch('/admin/api/caldera/operations/' + OP_ID + '/links/' + linkId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: approve ? 'approve' : 'reject' })
+        })
+        .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+            showToast(approve ? 'Link approved' : 'Link rejected');
+            loadOpDetail();
+        })
+        .catch(function (e) { showToast('Failed: ' + e.message); });
+    }
+    window.approveLink = approveLink;
 
     function renderAgents(agents) {
         var tbody = document.getElementById('agents-body');
@@ -622,6 +812,8 @@
 
     function openCreateModal() {
         document.getElementById('create-modal').classList.add('active');
+        loadPlanners();
+        loadObfuscators();
     }
     window.openCreateModal = openCreateModal;
 
@@ -640,8 +832,14 @@
     function submitCreateOp() {
         var scope = document.getElementById('scope-select').value;
         var adversary = document.getElementById('adversary-name-input').value.trim();
+        var planner = document.getElementById('planner-select').value;
+        var obfuscator = document.getElementById('obfuscator-select').value;
+        var autonomous = document.getElementById('autonomous-input').checked;
         var body = {};
         if (adversary) body.adversary_name = adversary;
+        if (planner) body.planner_name = planner;
+        if (obfuscator) body.obfuscator = obfuscator;
+        body.autonomous = autonomous;
 
         if (scope === 'event') {
             var eid = parseInt(document.getElementById('event-id-input').value, 10);
@@ -676,6 +874,38 @@
         });
     }
     window.submitCreateOp = submitCreateOp;
+
+    function loadPlanners() {
+        apiFetch('/admin/api/caldera/planners')
+            .then(function (planners) {
+                var select = document.getElementById('planner-select');
+                if (!select) return;
+                var current = select.value;
+                select.innerHTML = planners.map(function (p) {
+                    return '<option value="' + escHtml(p.name) + '">' + escHtml(p.name) + '</option>';
+                }).join('');
+                select.value = current;
+            })
+            .catch(function (e) {
+                console.error('Failed to load planners:', e);
+            });
+    }
+
+    function loadObfuscators() {
+        apiFetch('/admin/api/caldera/obfuscators')
+            .then(function (obfuscators) {
+                var select = document.getElementById('obfuscator-select');
+                if (!select) return;
+                var current = select.value;
+                select.innerHTML = obfuscators.map(function (o) {
+                    return '<option value="' + escHtml(o.name) + '">' + escHtml(o.name) + '</option>';
+                }).join('');
+                select.value = current;
+            })
+            .catch(function (e) {
+                console.error('Failed to load obfuscators:', e);
+            });
+    }
 
     // ── Close modal on overlay click ─────────────────────────────────────────
 

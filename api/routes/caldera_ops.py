@@ -53,6 +53,10 @@ async def create_operation(request: Request, db: Session = Depends(get_db)):
     Body (one of):
       {"event_id": N, "adversary_name": "..."}   → targets all agents in event-N group
       {"vm_id": N, "adversary_name": "..."}       → targets the agent on that VM
+
+    Optional controls:
+      {"planner_name": "atomic", "autonomous": false, "state": "running",
+       "obfuscator": "plain-text", "jitter": "2/8", "visibility": 50}
     """
     admin = require_admin(request, db)
     if not admin:
@@ -60,6 +64,12 @@ async def create_operation(request: Request, db: Session = Depends(get_db)):
 
     body = await request.json()
     adversary_name = body.get("adversary_name", "CTF Full Exploit Chain")
+    planner_name = body.get("planner_name", "atomic")
+    autonomous = body.get("autonomous", True)
+    state = body.get("state")
+    obfuscator = body.get("obfuscator", "plain-text")
+    jitter = body.get("jitter", "2/8")
+    visibility = body.get("visibility", 50)
 
     async with _make_client() as caldera:
         # Ensure basic source exists
@@ -68,11 +78,31 @@ async def create_operation(request: Request, db: Session = Depends(get_db)):
         except Exception as e:
             return JSONResponse({"error": f"Could not ensure fact source: {e}"}, status_code=502)
 
+        # Seed known facts (VM/event metadata) so abilities don't need recon
+        # to learn things the platform already knows.
+        try:
+            from api.services.caldera import vm_source_facts
+            if "vm_id" in body:
+                vm = db.query(VM).filter(VM.id == body["vm_id"]).first()
+                facts = vm_source_facts(vm) if vm else []
+                if facts:
+                    await caldera.seed_facts(facts)
+            elif "event_id" in body:
+                event_vms = db.query(VM).filter(VM.event_id == body["event_id"]).all()
+                all_facts: list[dict] = []
+                for ev_vm in event_vms:
+                    all_facts.extend(vm_source_facts(ev_vm))
+                if all_facts:
+                    await caldera.seed_facts(all_facts)
+        except Exception as e:
+            return JSONResponse({"error": f"Could not seed facts: {e}"}, status_code=502)
+
         # Get planner
         try:
-            planner_id = await caldera.get_atomic_planner_id()
+            planner = await caldera.get_planner_by_name(planner_name)
+            planner_id = planner["id"]
         except Exception as e:
-            return JSONResponse({"error": f"Could not find atomic planner: {e}"}, status_code=502)
+            return JSONResponse({"error": f"Could not find planner '{planner_name}': {e}"}, status_code=502)
 
         # Resolve adversary
         try:
@@ -111,6 +141,11 @@ async def create_operation(request: Request, db: Session = Depends(get_db)):
                 adversary_id=adversary["adversary_id"],
                 planner_id=planner_id,
                 group=group,
+                autonomous=autonomous,
+                state=state,
+                obfuscator=obfuscator,
+                jitter=jitter,
+                visibility=visibility,
             )
         except Exception as e:
             return JSONResponse({"error": f"Failed to create operation: {e}"}, status_code=502)
@@ -121,6 +156,126 @@ async def create_operation(request: Request, db: Session = Depends(get_db)):
         "state": operation.get("state"),
         "group": operation.get("group"),
     }
+
+
+# ── Planners ────────────────────────────────────────────────────────────────────
+
+@router.get("/planners")
+async def list_planners(request: Request, db: Session = Depends(get_db)):
+    """List available Caldera planners."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    async with _make_client() as caldera:
+        try:
+            planners = await caldera.list_planners()
+        except Exception as e:
+            return JSONResponse({"error": f"Caldera unavailable: {e}"}, status_code=502)
+
+    return [
+        {
+            "id": p.get("planner_id") or p.get("id"),
+            "name": p.get("name"),
+            "description": (p.get("description") or "")[:200],
+        }
+        for p in planners
+    ]
+
+
+@router.get("/obfuscators")
+async def list_obfuscators(request: Request, db: Session = Depends(get_db)):
+    """List available Caldera obfuscators (stealth options)."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    async with _make_client() as caldera:
+        try:
+            obfuscators = await caldera.list_obfuscators()
+        except Exception as e:
+            return JSONResponse({"error": f"Caldera unavailable: {e}"}, status_code=502)
+
+    return [
+        {
+            "name": o.get("name"),
+            "description": (o.get("description") or "")[:200],
+        }
+        for o in obfuscators
+    ]
+
+
+# ── Operation Control (human-in-loop) ───────────────────────────────────────────
+
+@router.patch("/operations/{op_id}")
+async def update_operation(op_id: str, request: Request, db: Session = Depends(get_db)):
+    """Update an operation: pause/resume, step (run_one_link), or toggle autonomous.
+
+    Body (any subset):
+      {"state": "paused" | "running" | "run_one_link" | "finished"}
+      {"autonomous": false}
+      {"jitter": "2/8", "obfuscator": "plain-text", "visibility": 50}
+    """
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    body = await request.json()
+    allowed = {"state", "autonomous", "jitter", "obfuscator", "visibility", "name"}
+    fields = {k: v for k, v in body.items() if k in allowed}
+    if not fields:
+        return JSONResponse({"error": "No updatable fields provided"}, status_code=400)
+
+    async with _make_client() as caldera:
+        try:
+            op = await caldera.update_operation(op_id, **fields)
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to update operation: {e}"}, status_code=502)
+
+    return {
+        "id": op.get("id"),
+        "name": op.get("name"),
+        "state": op.get("state"),
+    }
+
+
+@router.patch("/operations/{op_id}/links/{link_id}")
+async def update_operation_link(
+    op_id: str, link_id: str, request: Request, db: Session = Depends(get_db)
+):
+    """Approve or reject a pending (untrusted) link in a manual operation.
+
+    Body:
+      {"action": "approve"}  → set status EXECUTE
+      {"action": "reject"}   → set status DISCARD
+      {"status": -3}         → raw status override (any valid link status)
+    """
+    from api.services.caldera import LINK_STATUS_DISCARD, LINK_STATUS_EXECUTE
+
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    body = await request.json()
+    action = body.get("action")
+    status = body.get("status")
+    if action == "approve":
+        status = LINK_STATUS_EXECUTE
+    elif action == "reject":
+        status = LINK_STATUS_DISCARD
+    if status is None:
+        return JSONResponse(
+            {"error": "Provide 'action' (approve/reject) or 'status'"},
+            status_code=400,
+        )
+
+    async with _make_client() as caldera:
+        try:
+            link = await caldera.update_operation_link(op_id, link_id, status=status)
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to update link: {e}"}, status_code=502)
+
+    return {"link_id": link_id, "status": status}
 
 
 # ── Operation Detail ───────────────────────────────────────────────────────────
@@ -224,35 +379,12 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
             tree = build_attack_tree(vm_module_objects)
             tree_data = serialize_tree(tree)
 
-            # Annotate node statuses from chain results
-            # Build module_id -> best status from this operation's chain
-            module_status = {}
-            for link in annotated_chain:
-                if link.get("vm_id") != vid or not link.get("module_id"):
-                    continue
-                mid = link["module_id"]
-                status = link["status"]
-                output = link.get("output", "")
-                # Classify: check if output indicates skip
-                finish = link.get("finish")
-                if output and output.startswith("SKIPPED:"):
-                    classified = "skipped"
-                elif finish and status == 0:
-                    classified = "succeeded"
-                elif finish and status != 0:
-                    classified = "failed"
-                elif status == -3:
-                    classified = "pending"  # collecting/in-progress
-                else:
-                    classified = "pending"
-                # For a module, prefer exploit status over recon status
-                phase = link.get("phase", "")
-                if mid not in module_status or phase == "exploit":
-                    module_status[mid] = classified
-
-            for node in tree_data["nodes"]:
-                node["status"] = module_status.get(node["id"])
-
+            # Annotate node statuses from chain results. Exploit links whose
+            # recon fact was absent are trimmed at planning time and never enter
+            # the chain, so a missing exploit with a non-confirming recon output
+            # is inferred as "skipped" (native fact gating).
+            from builder.attack_tree import annotate_tree_statuses
+            tree_data = annotate_tree_statuses(tree_data, annotated_chain)
             attack_trees[vid] = tree_data
 
     response = {
@@ -263,6 +395,11 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
         "start": op.get("start"),
         "finish": op.get("finish"),
         "adversary": op.get("adversary", {}).get("name"),
+        "planner": op.get("planner", {}).get("name"),
+        "autonomous": bool(op.get("autonomous")),
+        "obfuscator": op.get("obfuscator"),
+        "jitter": op.get("jitter"),
+        "visibility": op.get("visibility"),
         "chain": annotated_chain,
         "agents": list(agent_summary.values()),
     }
@@ -270,6 +407,26 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
         response["attack_trees"] = attack_trees
 
     return response
+
+
+# ── Debrief Report ──────────────────────────────────────────────────────────────
+
+@router.get("/operations/{op_id}/report")
+async def get_operation_report(op_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return a finished operation's debrief report (steps, facts, objectives)."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    include_output = request.query_params.get("output", "").lower() == "true"
+
+    async with _make_client() as caldera:
+        try:
+            report = await caldera.get_operation_report(op_id, include_output=include_output)
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to fetch report: {e}"}, status_code=502)
+
+    return report
 
 
 # ── Delete Operation ───────────────────────────────────────────────────────────
@@ -609,6 +766,8 @@ async def cleanup_orphaned_operations(request: Request, db: Session = Depends(ge
                         "state": op.get("state"),
                     })
                     try:
+                        if op.get("state") in ("running", "paused"):
+                            await caldera.update_operation(op["id"], state="finished")
                         await caldera.delete_operation(op["id"])
                         deleted += 1
                     except Exception as e:

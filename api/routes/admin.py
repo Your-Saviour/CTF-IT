@@ -1637,24 +1637,37 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
 
 
 async def _cleanup_caldera_operations_for_event(event_id: int) -> dict:
-    """Delete all Caldera operations belonging to an event group. Returns summary."""
+    """Stop and delete all Caldera operations belonging to an event group.
+
+    Running/paused operations are first transitioned to ``finished`` so their
+    background planner loops exit cleanly before the operation is removed.
+    Returns a summary dict.
+    """
     from api.services.caldera import CalderaClient
     group = f"event-{event_id}"
     deleted = 0
+    stopped = 0
     errors = []
     try:
         async with CalderaClient() as caldera:
             operations = await caldera.list_operations()
             for op in operations:
-                if op.get("group") == group:
-                    try:
-                        await caldera.delete_operation(op["id"])
-                        deleted += 1
-                    except Exception as e:
-                        errors.append(f"Failed to delete operation {op.get('id')}: {e}")
+                if op.get("group") != group:
+                    continue
+                try:
+                    if op.get("state") in ("running", "paused"):
+                        await caldera.update_operation(op["id"], state="finished")
+                        stopped += 1
+                except Exception as e:
+                    errors.append(f"Failed to stop operation {op.get('id')}: {e}")
+                try:
+                    await caldera.delete_operation(op["id"])
+                    deleted += 1
+                except Exception as e:
+                    errors.append(f"Failed to delete operation {op.get('id')}: {e}")
     except Exception as e:
         errors.append(f"Caldera unavailable: {e}")
-    return {"deleted": deleted, "errors": errors}
+    return {"deleted": deleted, "stopped": stopped, "errors": errors}
 
 
 @router.post("/events/{event_id}/stop")
