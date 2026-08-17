@@ -369,22 +369,30 @@ def builder_validation_command(*, public_ip: str, version: str, cidr: str,
            '$lan=isset($config["interfaces"]["lan"])?"yes":"no"; '
            '$p=$config["system"]["ctf_builder_provenance"]??""; echo "$wan $lan $p";')
     source = str(ip_network(cidr).network_address)
+    def failed(message: str) -> str:
+        return f"{{ echo {shlex.quote(message)} >&2; exit 1; }}"
+
     return (
         f"set -eu; actual_version=$(opnsense-version -v); case \"$actual_version\" in "
-        f"{shlex.quote(version)}|{shlex.quote(version)}.*|{shlex.quote(version)}_*) ;; *) exit 1;; esac; "
-        "test -x /usr/local/sbin/configctl; test -w /conf/config.xml; "
-        f"set -- $(/usr/local/bin/php -r {shlex.quote(php)}); wan_if=$1; test \"$2\" = no; "
-        f"test \"$3\" = {shlex.quote(provenance)}; "
+        f"{shlex.quote(version)}|{shlex.quote(version)}.*|{shlex.quote(version)}_*) ;; "
+        f"*) {failed('unexpected OPNsense version')};; esac; "
+        f"test -x /usr/local/sbin/configctl || {failed('configctl missing')}; "
+        f"test -w /conf/config.xml || {failed('golden config not writable')}; "
+        f"set -- $(/usr/local/bin/php -r {shlex.quote(php)}); "
+        f"test \"$#\" -eq 3 || {failed('golden config not loaded')}; wan_if=$1; "
+        f"test \"$2\" = no || {failed('golden config unexpectedly contains LAN')}; "
+        f"test \"$3\" = {shlex.quote(provenance)} || {failed('golden config not loaded')}; "
         "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
-        f"test \"$#\" -eq {nic_count}; test \"$wan_if\" = vtnet0; "
-        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null; "
-        "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
-        "test -s /root/.ssh/authorized_keys; "
-        "/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$'; "
-        "/usr/local/sbin/sshd -T | grep -qi '^pubkeyauthentication yes$'; "
-        "/usr/local/sbin/sshd -T | grep -qi '^passwordauthentication no$'; "
-        "/usr/local/sbin/sshd -T | grep -qi '^kbdinteractiveauthentication no$'; "
-        f"pfctl -sr | grep -F {shlex.quote('from ' + source + ' to')} | grep -E 'port = (ssh|22)' >/dev/null"
+        f"test \"$#\" -eq {nic_count} || {failed('unexpected virtio NIC count')}; "
+        f"test \"$wan_if\" = vtnet0 || {failed('WAN interface mismatch')}; "
+        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null || {failed('WAN address missing')}; "
+        f"route -n get default | grep -F \"interface: $wan_if\" >/dev/null || {failed('default route mismatch')}; "
+        f"test -s /root/.ssh/authorized_keys || {failed('managed root key missing')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$' || {failed('root SSH login disabled')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^pubkeyauthentication yes$' || {failed('SSH public key authentication disabled')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^passwordauthentication no$' || {failed('SSH password authentication enabled')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^kbdinteractiveauthentication no$' || {failed('SSH keyboard authentication enabled')}; "
+        f"pfctl -sr | grep -F {shlex.quote('from ' + source + ' to')} | grep -E 'port = (ssh|22)' >/dev/null || {failed('builder firewall rule missing')}"
     )
 
 

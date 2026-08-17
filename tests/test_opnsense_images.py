@@ -74,6 +74,23 @@ def test_pkgbase_bootstrap_rejects_an_unrecognised_upstream_script():
         opnsense_images.make_pkgbase_compatible_bootstrap(b"#!/bin/sh\nexit 0\n")
 
 
+def test_builder_validation_command_names_failed_invariants():
+    from api.services.opnsense_images import builder_validation_command
+
+    command = builder_validation_command(
+        public_ip="198.51.100.10", version="26.7",
+        cidr="203.0.113.0/24", provenance="expected-provenance",
+    )
+
+    for message in (
+        "unexpected OPNsense version", "configctl missing", "golden config not loaded",
+        "unexpected virtio NIC count", "WAN interface mismatch", "WAN address missing",
+        "default route mismatch", "managed root key missing", "root SSH login disabled",
+        "builder firewall rule missing",
+    ):
+        assert message in command
+
+
 def test_bootstrap_launcher_returns_after_daemon_is_started(monkeypatch):
     from api.services import opnsense_images
 
