@@ -519,8 +519,9 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, wan_ip: st
                         cidr: str, peer_host: str, peer_ip: str) -> str:
     """Use the production snapshot-site configurator, then validate LAN/NAT policy."""
     from api.services.gamenet_provider import configure_snapshot_validation_site
+    private_ip = attachment["ip_address"]
     configure_snapshot_validation_site(
-        db, host=host, private_ip="172.31.254.1", lan_mac=attachment["mac_address"],
+        db, host=host, private_ip=private_ip, lan_mac=attachment["mac_address"],
         expected_version=image.version, control_plane_cidr=cidr,
     )
     command = (
@@ -531,7 +532,7 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, wan_ip: st
         "test -n \"$lan_if\" || { echo 'VPC MAC did not map to a LAN interface' >&2; exit 1; }; "
         f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + wan_ip)} >/dev/null || "
         "{ echo 'public WAN address missing' >&2; exit 1; }; "
-        "ifconfig \"$lan_if\" | grep -F 'inet 172.31.254.1' >/dev/null || "
+        f"ifconfig \"$lan_if\" | grep -F {shlex.quote('inet ' + private_ip)} >/dev/null || "
         "{ echo 'private LAN address missing' >&2; exit 1; }; "
         "pfctl -sr | grep -F \"pass in quick on $lan_if inet from ($lan_if:network) to any\" >/dev/null || "
         "{ echo 'effective LAN pass rule missing' >&2; exit 1; }; "
@@ -545,13 +546,13 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, wan_ip: st
     # where the production site policy permits private traffic.
     peer_command = (
         f"ifconfig -a | grep -F {shlex.quote('inet ' + peer_ip)} >/dev/null; "
-        "ping -c 1 -t 3 172.31.254.1"
+        f"ping -c 1 -t 3 {shlex.quote(private_ip)}"
     )
     code, output, error = _ssh(db, peer_host, peer_command)
     if code:
         raise ImageWorkflowError(f"VPC private connectivity failed: {(error or output)[:300]}")
     fingerprint = _fingerprint(db, host)
-    _record_validation(image, "clone_vpc", public_ip=host, private_ip="172.31.254.1",
+    _record_validation(image, "clone_vpc", public_ip=host, private_ip=private_ip,
                        ssh_host_key=fingerprint)
     db.commit()
     return fingerprint
@@ -559,7 +560,7 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, wan_ip: st
 
 def _configure_validation_peer(db: Session, host: str, attachment: dict) -> str:
     """Give clone one a temporary VPC address after its WAN-only gate passes."""
-    peer_ip = "172.31.254.2"
+    peer_ip = attachment["ip_address"]
     mac = attachment["mac_address"].lower()
     command = (
         "set -eu; iface=''; for candidate in $(ifconfig -l); do "

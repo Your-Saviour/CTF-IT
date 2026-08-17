@@ -740,8 +740,9 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
     script_path = f"/tmp/ctf-apply-{token}.sh"
     _, public_key = get_or_create_platform_keypair(db)
     password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
-    # The /28 network and .1 gateway exactly mirror a minimal GameNet site.
-    site = SimpleNamespace(allocated_cidr="172.31.254.0/28")
+    # Use the /28 containing the ENI address so network+1 is both the
+    # OPNsense LAN address and an address AWS permits on the ENI.
+    site = SimpleNamespace(allocated_cidr=str(ip_network(f"{private_ip}/28", strict=False)))
     vm = SimpleNamespace(hostname="opnsense-validation-site")
     previous_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR")
     os.environ["CTF_CONTROL_PLANE_CIDR"] = control_plane_cidr

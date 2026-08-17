@@ -159,7 +159,7 @@ class AwsOpnsenseWorkflow:
             db.commit()
 
         peer_lan = self.network.ensure_eni(
-            network.subnet_ids["validation"], "172.31.254.2", [validation_sg],
+            network.subnet_ids["validation"], "172.31.254.18", [validation_sg],
             {**tags, "NetworkRole": "public-clone-validation"},
         )
         public_clone = self._launch(
@@ -184,7 +184,7 @@ class AwsOpnsenseWorkflow:
         )
 
         lan = self.network.ensure_eni(
-            network.subnet_ids["validation"], "172.31.254.3", [validation_sg],
+            network.subnet_ids["validation"], "172.31.254.17", [validation_sg],
             {**tags, "NetworkRole": "private-clone-validation"},
         )
         private_clone = self._launch(
