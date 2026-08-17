@@ -164,3 +164,26 @@ class TestRepositoryDefinitions:
         tree = build_attack_tree(load_all_modules())
         assert tree.nodes["monitord_writable_logdir"].phase == 3
         assert tree.nodes["ip_forwarding_enabled"].phase == 4
+
+
+class TestExternalRepos:
+    def test_loads_modules_from_extra_roots(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        repo = tmp_path / "repo"
+        (repo / "vulns" / "secret_backdoor").mkdir(parents=True)
+        (repo / "vulns" / "secret_backdoor" / "secret_backdoor.yaml").write_text(
+            "id: secret_backdoor\nname: Secret Backdoor\ndescription: d\n"
+            "type: vulnerability\ndifficulty: hard\npoints: 200\ncategory: persistence\n"
+        )
+        monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
+        ids = {m.id for m in ml.load_all_modules()}
+        assert "secret_backdoor" in ids
+
+    def test_skips_dot_git(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        repo = tmp_path / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "config.yaml").write_text("id: should_not_load\n")
+        monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
+        ids = {m.id for m in ml.load_all_modules()}
+        assert "should_not_load" not in ids
