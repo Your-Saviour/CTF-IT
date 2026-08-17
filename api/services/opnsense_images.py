@@ -285,29 +285,48 @@ def bootstrap_launch_command(version: str) -> str:
     )
     return (
         "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
+        ": > /var/run/ctf-opnsense-bootstrap-launched && "
         f"/usr/sbin/daemon -f /bin/sh -c {shlex.quote(bootstrap)}"
     )
 
 
 def _launch_bootstrap_daemon(db: Session, host: str, version: str) -> None:
-    try:
-        code, output, error = _ssh(
-            db, host, bootstrap_launch_command(version),
-            timeout=POLL_TIMEOUT, retry=False,
-        )
-    except ImageWorkflowError as exc:
-        detail = str(exc).lower()
-        expected_disconnects = (
-            "socket is closed", "eof", "ssh session not active",
-            "error reading ssh protocol banner",
-        )
-        if any(marker in detail for marker in expected_disconnects):
-            logger.info("OPNsense bootstrap disconnected for reboot: %s", exc)
-            return
-        raise
-    if code not in {0, -1}:
-        detail = (error or output or f"exit {code}")[-1000:]
-        raise ImageWorkflowError(f"OPNsense bootstrap failed: {detail}")
+    deadline = time.monotonic() + 300
+    while True:
+        try:
+            code, output, error = _ssh(
+                db, host, bootstrap_launch_command(version),
+                timeout=POLL_TIMEOUT, retry=False,
+            )
+        except ImageWorkflowError as exc:
+            detail = str(exc).lower()
+            expected_disconnects = (
+                "socket is closed", "eof", "ssh session not active",
+                "error reading ssh protocol banner",
+            )
+            if not any(marker in detail for marker in expected_disconnects):
+                raise
+            try:
+                marker_code, _, _ = _ssh(
+                    db, host, "test -f /var/run/ctf-opnsense-bootstrap-launched",
+                    retry=False,
+                )
+            except ImageWorkflowError:
+                marker_code = 1
+            if marker_code == 0:
+                logger.info("OPNsense bootstrap disconnected after launch: %s", exc)
+                return
+            if time.monotonic() >= deadline:
+                raise ImageWorkflowError(
+                    f"could not launch OPNsense bootstrap before SSH deadline: {exc}"
+                ) from exc
+            logger.info("OPNsense bootstrap SSH unavailable before launch; retrying")
+            time.sleep(POLL_SECONDS)
+            continue
+        if code not in {0, -1}:
+            detail = (error or output or f"exit {code}")[-1000:]
+            raise ImageWorkflowError(f"OPNsense bootstrap failed: {detail}")
+        return
 
 
 def _wait_for_opnsense(db: Session, host: str, version: str, *, diagnostics=None) -> None:
@@ -496,6 +515,7 @@ def _sanitize_and_halt(db: Session, client, image: OpnsenseImage, host: str) -> 
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
         "/var/db/dhclient.leases.* /var/db/dhclient.leases /root/.*history /root/.sh_history "
         "/root/opnsense-bootstrap.sh /var/log/opnsense-bootstrap.log; "
+        "rm -f /var/run/ctf-opnsense-bootstrap-launched; "
         "rm -f /conf/ctf-site-ready /conf/ctf-site-applying /conf/ctf-site-failed "
         "/conf/ctf-site-apply.lock /var/log/ctf-site-apply.log "
         "/usr/local/etc/inc/plugins.inc.d/gamenet.inc; "

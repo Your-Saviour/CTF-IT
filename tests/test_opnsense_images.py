@@ -124,6 +124,33 @@ def test_bootstrap_launcher_returns_after_daemon_is_started(monkeypatch):
     opnsense_images._launch_bootstrap_daemon(object(), "198.51.100.10", "26.7")
 
 
+def test_bootstrap_launcher_retries_connection_failure_before_launch(monkeypatch):
+    from api.services import opnsense_images
+
+    calls = []
+    responses = iter([
+        ImageWorkflowError("Error reading SSH protocol banner"),
+        (1, "", "marker absent"),
+        (0, "", ""),
+    ])
+
+    def fake_ssh(*_args, **_kwargs):
+        calls.append(_args[2])
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(opnsense_images, "_ssh", fake_ssh)
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
+
+    opnsense_images._launch_bootstrap_daemon(object(), "198.51.100.10", "26.7")
+
+    assert len(calls) == 3
+    assert "ctf-opnsense-bootstrap-launched" in calls[0]
+    assert calls[1] == "test -f /var/run/ctf-opnsense-bootstrap-launched"
+
+
 def test_bootstrap_launcher_rejects_command_failure(monkeypatch):
     from api.services import opnsense_images
 
