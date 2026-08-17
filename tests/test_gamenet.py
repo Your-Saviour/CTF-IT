@@ -942,9 +942,9 @@ def test_aws_gamenet_site_network_uses_secondary_wan_cidr():
     )
     result = provider.create_vpc(site)
     assert network.spec.vpc_cidr == "10.128.0.0/20"
-    assert network.spec.secondary_cidrs == ("172.31.255.0/28",)
+    assert network.spec.secondary_cidrs == ()
     assert network.spec.subnets == {
-        "wan": "172.31.255.0/28", "infra": "10.128.0.0/24", "blue": "10.128.1.0/24",
+        "wan": "10.128.15.240/28", "infra": "10.128.0.0/24", "blue": "10.128.1.0/24",
     }
     assert result.vpc_id == "vpc-1"
 

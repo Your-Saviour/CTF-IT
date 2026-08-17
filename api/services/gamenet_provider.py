@@ -55,7 +55,9 @@ class AwsGameNetProvider:
             team_id=site.team_id,
             site_id=site.id,
         )
-        subnets = {"wan": "172.31.255.0/28", "infra": site.infrastructure_subnet}
+        site_network = ip_network(site.allocated_cidr)
+        wan_subnet = str(ip_network((int(site_network.broadcast_address) - 15, 28)))
+        subnets = {"wan": wan_subnet, "infra": site.infrastructure_subnet}
         subnets.update({zone.key: zone.subnet for zone in site.zones})
         return self.network.ensure_site_network(SiteNetworkSpec(
             region=site.region,
@@ -63,7 +65,7 @@ class AwsGameNetProvider:
             vpc_cidr=site.allocated_cidr,
             subnets=subnets,
             tags=tags,
-            secondary_cidrs=("172.31.255.0/28",),
+            secondary_cidrs=(),
         ))
 
     def ensure_site_security_groups(self, site):
