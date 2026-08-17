@@ -134,6 +134,45 @@ class EventOperation(Base):
     event: Mapped["Event"] = relationship(back_populates="operations")
 
 
+class OperationRun(Base):
+    __tablename__ = "operation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    operation_id: Mapped[int] = mapped_column(ForeignKey("event_operations.id"), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued", nullable=False)
+    plan_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    fact_store: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    trigger: Mapped[str] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
+
+    steps: Mapped[list["OperationRunStep"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class OperationRunStep(Base):
+    __tablename__ = "operation_run_steps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("operation_runs.id", ondelete="CASCADE"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    node_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="queued", nullable=False)
+    result: Mapped[str] = mapped_column(String(16), nullable=True)
+    output: Mapped[str] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    caldera_operation_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    run: Mapped["OperationRun"] = relationship(back_populates="steps")
+
+
 class Scenario(Base):
     __tablename__ = "scenarios"
 
