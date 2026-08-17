@@ -90,6 +90,23 @@ def test_launch_uses_client_token_tags_imdsv2_and_explicit_eni():
     }
 
 
+def test_launch_does_not_tag_network_interfaces_when_all_are_precreated():
+    ec2 = FakeEc2()
+    existing_eni_spec = InstanceSpec(
+        ami_id="ami-opnsense", instance_type="t3.medium", client_token="ctf-it-fw-7",
+        network_interfaces=(NetworkInterfaceSpec(0, eni_id="eni-wan"),
+                            NetworkInterfaceSpec(1, eni_id="eni-lan")),
+        tags={"ManagedBy": "ctf-it", "VmId": "7"},
+    )
+
+    AwsComputeProvider(ec2).launch_instance(existing_eni_spec)
+
+    request = next(payload for name, payload in ec2.calls if name == "run_instances")
+    assert {item["ResourceType"] for item in request["TagSpecifications"]} == {
+        "instance", "volume",
+    }
+
+
 def test_launch_reconciles_owned_instance_by_client_token():
     ec2 = FakeEc2()
     ec2.instances = [{

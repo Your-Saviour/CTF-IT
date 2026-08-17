@@ -121,6 +121,9 @@ class AwsComputeProvider:
         existing = self._find_by_client_token(spec.client_token)
         if existing:
             return self._owned_result(existing, spec.tags)
+        tagged_resources = ["instance", "volume"]
+        if any(not interface.eni_id for interface in spec.network_interfaces):
+            tagged_resources.append("network-interface")
         request = {
             "ImageId": spec.ami_id,
             "InstanceType": spec.instance_type,
@@ -131,7 +134,7 @@ class AwsComputeProvider:
             "NetworkInterfaces": [interface.request() for interface in spec.network_interfaces],
             "TagSpecifications": [
                 {"ResourceType": resource, "Tags": aws_tag_list(spec.tags)}
-                for resource in ("instance", "network-interface", "volume")
+                for resource in tagged_resources
             ],
         }
         if spec.key_name:
