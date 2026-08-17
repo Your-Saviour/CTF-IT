@@ -125,7 +125,18 @@ def make_pkgbase_compatible_bootstrap(content: bytes) -> bytes:
 \trm -rf /var/db/pkg/*"""
     if content.count(upstream) != 1:
         raise ImageWorkflowError("upstream bootstrap package block changed")
-    return content.replace(upstream, replacement, 1)
+    content = content.replace(upstream, replacement, 1)
+    upstream_finish = b"\topnsense-update ${DO_VERBOSE} -bkf\n\treboot"
+    replacement_finish = b"""\topnsense-update ${DO_VERBOSE} -bkf
+\tif [ -f /root/ctf-golden-config.xml ]; then
+\t\tinstall -d -m 700 /conf
+\t\tinstall -m 600 /root/ctf-golden-config.xml /conf/config.xml
+\t\tsync
+\tfi
+\treboot"""
+    if content.count(upstream_finish) != 1:
+        raise ImageWorkflowError("upstream bootstrap final block changed")
+    return content.replace(upstream_finish, replacement_finish, 1)
 
 
 def active_image(db: Session) -> OpnsenseImage | None:
@@ -424,47 +435,6 @@ def _validate_builder(db: Session, image: OpnsenseImage, host: str, cidr: str, l
         raise ImageWorkflowError(f"{label} failed: {(error or output)[:300]}")
 
 
-def _boot_id(db: Session, host: str) -> str:
-    code, output, error = _ssh(db, host, "sysctl -n kern.boottime")
-    if code or not output.strip():
-        raise ImageWorkflowError(f"could not read boot identity: {error[:300]}")
-    return output.strip()
-
-
-def _reboot_and_wait(db: Session, host: str, previous_boot_id: str) -> None:
-    delayed = "/bin/sh -c " + shlex.quote("sleep 1; /sbin/shutdown -r now")
-    code, _, error = _ssh(
-        db, host, f"nohup {delayed} >/dev/null 2>&1 </dev/null &", timeout=30,
-    )
-    if code:
-        raise ImageWorkflowError(f"golden config reboot request failed: {error[:300]}")
-
-    offline_deadline = time.monotonic() + 120
-    while time.monotonic() < offline_deadline and _guest_ssh_online(host):
-        time.sleep(2)
-    if _guest_ssh_online(host):
-        raise ImageWorkflowError("guest did not close SSH for golden config reboot")
-
-    online_deadline = time.monotonic() + 300
-    last_error = "guest did not return"
-    while time.monotonic() < online_deadline:
-        try:
-            current_boot_id = _boot_id(db, host)
-            if current_boot_id != previous_boot_id:
-                return
-            last_error = "boot identity did not change"
-        except ImageWorkflowError as exc:
-            last_error = str(exc)
-        time.sleep(3)
-    raise ImageWorkflowError(f"golden config reboot did not complete: {last_error}")
-
-
-def _install_golden_config(db: Session, host: str, content: bytes) -> None:
-    previous_boot_id = _boot_id(db, host)
-    _upload_atomic(db, host, "/conf/config.xml", content)
-    _reboot_and_wait(db, host, previous_boot_id)
-
-
 def _fingerprint(db: Session, host: str) -> str:
     command = ("key=$(/usr/local/sbin/sshd -T | awk 'tolower($1)==\"hostkey\" && tolower($2) ~ /ed25519/ {print $2; exit}'); "
                "test -n \"$key\"; ssh-keygen -lf \"$key.pub\" | awk '{print $2}'")
@@ -514,7 +484,8 @@ def _sanitize_and_halt(db: Session, client, image: OpnsenseImage, host: str) -> 
     sanitize = (
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
         "/var/db/dhclient.leases.* /var/db/dhclient.leases /root/.*history /root/.sh_history "
-        "/root/opnsense-bootstrap.sh /var/log/opnsense-bootstrap.log; "
+        "/root/opnsense-bootstrap.sh /root/ctf-golden-config.xml "
+        "/var/log/opnsense-bootstrap.log; "
         "rm -f /var/run/ctf-opnsense-bootstrap-launched; "
         "rm -f /conf/ctf-site-ready /conf/ctf-site-applying /conf/ctf-site-failed "
         "/conf/ctf-site-apply.lock /var/log/ctf-site-apply.log "

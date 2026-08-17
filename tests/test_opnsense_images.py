@@ -57,6 +57,9 @@ def test_pkgbase_bootstrap_preserves_freebsd_base_packages():
 \t\tpkg delete -fa
 \tfi
 \trm -rf /var/db/pkg/*
+
+\topnsense-update ${DO_VERBOSE} -bkf
+\treboot
 '''
 
     adapted = opnsense_images.make_pkgbase_compatible_bootstrap(upstream).decode()
@@ -65,6 +68,8 @@ def test_pkgbase_bootstrap_preserves_freebsd_base_packages():
     assert "pkg query '%n' | grep -v '^FreeBSD-'" in adapted
     assert "pkg delete -fy ${PACKAGES}" in adapted
     assert "else\n\t\t\tpkg delete -fa" in adapted
+    assert "install -m 600 /root/ctf-golden-config.xml /conf/config.xml" in adapted
+    assert adapted.index("install -m 600") < adapted.index("\treboot")
 
 
 def test_pkgbase_bootstrap_rejects_an_unrecognised_upstream_script():
@@ -103,28 +108,6 @@ def test_aws_golden_config_uses_ec2_ena_wan():
 
     assert "<wan><if>ena0</if>" in config
     assert "vtnet0" not in config
-
-
-def test_golden_config_is_installed_after_conversion_and_rebooted(monkeypatch):
-    from api.services import opnsense_images
-
-    calls = []
-    monkeypatch.setattr(opnsense_images, "_boot_id", lambda *_args: "old-boot")
-    monkeypatch.setattr(
-        opnsense_images, "_upload_atomic",
-        lambda _db, _host, path, content: calls.append(("upload", path, content)),
-    )
-    monkeypatch.setattr(
-        opnsense_images, "_reboot_and_wait",
-        lambda _db, _host, previous: calls.append(("reboot", previous)),
-    )
-
-    opnsense_images._install_golden_config(object(), "198.51.100.10", b"golden")
-
-    assert calls == [
-        ("upload", "/conf/config.xml", b"golden"),
-        ("reboot", "old-boot"),
-    ]
 
 
 def test_bootstrap_launcher_returns_after_daemon_is_started(monkeypatch):
