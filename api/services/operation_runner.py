@@ -79,7 +79,7 @@ async def _run_node(db, run, node, compiled, fact_store, driver, source_id) -> s
     step.started_at = utcnow()
     db.commit()
 
-    if node.node_type in ("trigger", "target", "finish"):
+    if node.node_type in ("trigger", "target", "finish", "gate"):
         return _finish_step(db, step, "success")
 
     if node.node_type == "delay":
@@ -160,6 +160,10 @@ def _platform_facts(db, run) -> dict[str, str]:
 
 def _finalize_run(db, run_id, completed, compiled):
     run = db.query(OperationRun).get(run_id)
+    if run.status == "cancelled":
+        run.finished_at = utcnow()
+        db.commit()
+        return
     finish_node = next((n for n in compiled.nodes.values() if n.node_type == "finish"), None)
     run.status = "completed" if (finish_node and completed.get(finish_node.node_id) == "success") else "failed"
     run.finished_at = utcnow()
