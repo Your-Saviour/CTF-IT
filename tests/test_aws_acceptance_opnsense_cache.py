@@ -1,9 +1,10 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from scripts.aws_acceptance_opnsense_cache import (
-    CacheIdentity, cache_key, discover_cache,
+    CacheIdentity, CachedAmi, cache_key, discover_cache, promote_cache,
 )
 
 
@@ -44,6 +45,26 @@ class Ec2:
 
     def describe_snapshots(self, SnapshotIds):
         return {"Snapshots": [self.snapshots[value] for value in SnapshotIds]}
+
+    def create_tags(self, Resources, Tags):
+        additions = {row["Key"]: row["Value"] for row in Tags}
+        for resource_id in Resources:
+            if resource_id.startswith("ami-"):
+                row = next(item for item in self.images if item["ImageId"] == resource_id)
+            else:
+                row = self.snapshots[resource_id]
+            current = {item["Key"]: item["Value"] for item in row.get("Tags", [])}
+            current.update(additions)
+            row["Tags"] = [{"Key": key, "Value": value} for key, value in current.items()]
+
+    def delete_tags(self, Resources, Tags):
+        removed = {row["Key"] for row in Tags}
+        for resource_id in Resources:
+            if resource_id.startswith("ami-"):
+                row = next(item for item in self.images if item["ImageId"] == resource_id)
+            else:
+                row = self.snapshots[resource_id]
+            row["Tags"] = [item for item in row.get("Tags", []) if item["Key"] not in removed]
 
 
 def image_row(key, *, expires_at=None, state="available", snapshot_id="snap-1"):
@@ -128,3 +149,82 @@ def test_discovery_refuses_snapshot_without_matching_cache_ownership():
 
     with pytest.raises(RuntimeError, match="snapshot snap-1.*ownership"):
         discover_cache(Ec2([image_row(key)], [snapshot]), item, now=NOW)
+
+
+def test_promotion_replaces_run_identity_only_after_owned_image_and_snapshots_validate():
+    item = identity()
+    run_tags = {
+        "Application": "ctf-it", "ManagedBy": "ctf-it", "Environment": "acceptance",
+        "AcceptanceRunId": "aws260817cache01", "SiteId": "7",
+    }
+    source_tags = [{"Key": key, "Value": value} for key, value in run_tags.items()]
+    image = image_row("unused")
+    image["Tags"] = list(source_tags)
+    snapshot = snapshot_row("unused")
+    snapshot["Tags"] = list(source_tags)
+    ec2 = Ec2([image], [snapshot])
+
+    cached = promote_cache(
+        ec2, "ami-1", ("snap-1",), item,
+        expected_run_tags=run_tags, now=NOW, retention_days=7,
+    )
+
+    assert cached.expires_at == NOW + timedelta(days=7)
+    for row in (image, snapshot):
+        actual = {tag["Key"]: tag["Value"] for tag in row["Tags"]}
+        assert actual["ArtifactRole"] == "opnsense-acceptance-cache"
+        assert actual["CacheKey"] == cache_key(item)
+        assert "AcceptanceRunId" not in actual
+        assert "SiteId" not in actual
+
+
+def test_promotion_does_not_retag_anything_when_snapshot_run_ownership_is_wrong():
+    item = identity()
+    run_tags = {
+        "Application": "ctf-it", "ManagedBy": "ctf-it", "Environment": "acceptance",
+        "AcceptanceRunId": "aws260817cache01", "SiteId": "7",
+    }
+    source_tags = [{"Key": key, "Value": value} for key, value in run_tags.items()]
+    image = image_row("unused")
+    image["Tags"] = list(source_tags)
+    snapshot = snapshot_row("unused")
+    snapshot["Tags"] = [tag for tag in source_tags if tag["Key"] != "ManagedBy"]
+    ec2 = Ec2([image], [snapshot])
+
+    with pytest.raises(RuntimeError, match="snapshot snap-1.*run ownership"):
+        promote_cache(
+            ec2, "ami-1", ("snap-1",), item,
+            expected_run_tags=run_tags, now=NOW,
+        )
+
+    assert {tag["Key"] for tag in image["Tags"]} == set(run_tags)
+
+
+def test_cached_artifact_materializes_the_active_database_image_contract():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from api.database import Base
+    from api.models import PlatformSettings
+    from tests.aws_acceptance.cache_fixture import materialize_cached_image
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    item = identity()
+    cached = CachedAmi(
+        "ami-cached", ("snap-a", "snap-b"), cache_key(item), NOW + timedelta(days=7),
+    )
+
+    image = materialize_cached_image(
+        db, cached, item, availability_zone="ap-southeast-2a",
+    )
+
+    assert image.status == image.phase == "active"
+    assert image.ami_id == "ami-cached"
+    assert image.bootstrap_sha256 == "a" * 64
+    assert image.region == "ap-southeast-2"
+    assert image.availability_zone == "ap-southeast-2a"
+    assert image.backing_snapshot_ids_json == '["snap-a", "snap-b"]'
+    assert json.loads(image.validation_results)["cache_hit"]["passed"] is True
+    assert db.query(PlatformSettings).filter_by(key="active_opnsense_image_id").one().value == str(image.id)

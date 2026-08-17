@@ -6,10 +6,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 CACHE_ROLE = "opnsense-acceptance-cache"
+GOLDEN_CONFIG_REVISION = "aws-ena-golden-v1"
+IMAGE_BUILD_REVISION = "pkgbase-sanitized-clone-v1"
 CACHE_OWNERSHIP = {
     "Application": "ctf-it",
     "ManagedBy": "ctf-it",
@@ -118,3 +120,53 @@ def discover_cache(ec2, identity: CacheIdentity, *,
             raise RuntimeError(f"cached OPNsense snapshot {snapshot_id} is missing") from exc
         _assert_cache_owned("snapshot", snapshot_id, snapshot.get("Tags"), key)
     return CachedAmi(image["ImageId"], snapshot_ids, key, expiry)
+
+
+def _assert_run_owned(resource_type: str, resource_id: str, tags,
+                      expected: dict[str, str]) -> None:
+    actual = _tag_dict(tags)
+    if any(actual.get(name) != value for name, value in expected.items()):
+        raise RuntimeError(f"{resource_type} {resource_id} run ownership tags do not match")
+
+
+def promote_cache(ec2, ami_id: str, snapshot_ids: tuple[str, ...],
+                  identity: CacheIdentity, *, expected_run_tags: dict[str, str],
+                  now: datetime | None = None, retention_days: int = 7) -> CachedAmi:
+    if retention_days < 1:
+        raise ValueError("cache retention must be at least one day")
+    image_rows = ec2.describe_images(ImageIds=[ami_id]).get("Images", [])
+    if len(image_rows) != 1:
+        raise RuntimeError(f"AMI {ami_id} is missing or ambiguous during cache promotion")
+    image = image_rows[0]
+    _assert_run_owned("AMI", ami_id, image.get("Tags"), expected_run_tags)
+    mapped_snapshots = tuple(
+        mapping["Ebs"]["SnapshotId"]
+        for mapping in image.get("BlockDeviceMappings", [])
+        if mapping.get("Ebs", {}).get("SnapshotId")
+    )
+    if mapped_snapshots != tuple(snapshot_ids):
+        raise RuntimeError(f"AMI {ami_id} snapshot set does not match the validated build")
+    rows = ec2.describe_snapshots(SnapshotIds=list(snapshot_ids)).get("Snapshots", [])
+    by_id = {row["SnapshotId"]: row for row in rows}
+    for snapshot_id in snapshot_ids:
+        if snapshot_id not in by_id:
+            raise RuntimeError(f"snapshot {snapshot_id} is missing during cache promotion")
+        _assert_run_owned(
+            "snapshot", snapshot_id, by_id[snapshot_id].get("Tags"), expected_run_tags,
+        )
+
+    created = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expires = created + timedelta(days=retention_days)
+    promoted_tags = cache_tags(identity, created_at=created, expires_at=expires)
+    resources = [ami_id, *snapshot_ids]
+    ec2.create_tags(
+        Resources=resources,
+        Tags=[{"Key": name, "Value": value} for name, value in promoted_tags.items()],
+    )
+    run_only = [
+        {"Key": name} for name in expected_run_tags
+        if name not in {"Application", "ManagedBy", "Environment"}
+    ]
+    if run_only:
+        ec2.delete_tags(Resources=resources, Tags=run_only)
+    return CachedAmi(ami_id, tuple(snapshot_ids), cache_key(identity), expires)
