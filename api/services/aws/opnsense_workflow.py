@@ -110,6 +110,7 @@ class AwsOpnsenseWorkflow:
                 if guest_state == "freebsd":
                     workflow._verify_freebsd_base(db, builder.public_ip)
                     script, digest = bootstrap_downloader(image.bootstrap_source_url)
+                    script = workflow.make_pkgbase_compatible_bootstrap(script)
                     image.bootstrap_sha256 = digest; db.commit()
                     workflow._upload_atomic(
                         db, builder.public_ip, "/conf/config.xml",

@@ -49,6 +49,31 @@ def test_aws_bootstrap_launch_detaches_from_the_ssh_session():
     assert opnsense_images.POLL_TIMEOUT >= 3600
 
 
+def test_pkgbase_bootstrap_preserves_freebsd_base_packages():
+    from api.services import opnsense_images
+
+    upstream = b'''if pkg -N; then
+\tpkg unlock -ya
+\tpkg delete -fa
+fi
+rm -rf /var/db/pkg/*
+'''
+
+    adapted = opnsense_images.make_pkgbase_compatible_bootstrap(upstream).decode()
+
+    assert "pkg query '%n' | grep -q '^FreeBSD-'" in adapted
+    assert "pkg query '%n' | grep -v '^FreeBSD-'" in adapted
+    assert "pkg delete -fy ${PACKAGES}" in adapted
+    assert "else\n\t\tpkg delete -fa" in adapted
+
+
+def test_pkgbase_bootstrap_rejects_an_unrecognised_upstream_script():
+    from api.services import opnsense_images
+
+    with pytest.raises(ImageWorkflowError, match="upstream bootstrap package block changed"):
+        opnsense_images.make_pkgbase_compatible_bootstrap(b"#!/bin/sh\nexit 0\n")
+
+
 def test_bootstrap_launcher_returns_after_daemon_is_started(monkeypatch):
     from api.services import opnsense_images
 

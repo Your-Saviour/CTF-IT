@@ -104,6 +104,30 @@ def download_bootstrap(url: str = BOOTSTRAP_SOURCE_URL, *, client: httpx.Client 
             http.close()
 
 
+def make_pkgbase_compatible_bootstrap(content: bytes) -> bytes:
+    """Keep pkgbase OS files available until OPNsense replaces base and kernel."""
+    upstream = b"""if pkg -N; then
+\tpkg unlock -ya
+\tpkg delete -fa
+fi
+rm -rf /var/db/pkg/*"""
+    replacement = b"""if pkg -N; then
+\tpkg unlock -ya
+\tif pkg query '%n' | grep -q '^FreeBSD-'; then
+\t\tPACKAGES=\"$(pkg query '%n' | grep -v '^FreeBSD-' || true)\"
+\t\tif [ -n \"${PACKAGES}\" ]; then
+\t\t\tpkg delete -fy ${PACKAGES}
+\t\tfi
+\telse
+\t\tpkg delete -fa
+\tfi
+fi
+rm -rf /var/db/pkg/*"""
+    if content.count(upstream) != 1:
+        raise ImageWorkflowError("upstream bootstrap package block changed")
+    return content.replace(upstream, replacement, 1)
+
+
 def active_image(db: Session) -> OpnsenseImage | None:
     setting = db.query(PlatformSettings).filter_by(key=ACTIVE_SETTING).first()
     if not setting or not setting.value.isdigit():
