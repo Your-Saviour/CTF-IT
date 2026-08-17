@@ -112,6 +112,23 @@ services:
       - RUN_AWS_ACCEPTANCE=${RUN_AWS_ACCEPTANCE:-}
       - AWS_ACCEPTANCE_ACCOUNT_ID=${AWS_ACCEPTANCE_ACCOUNT_ID:-}
       - AWS_ACCEPTANCE_RUN_ID=${AWS_ACCEPTANCE_RUN_ID:-}
+      - AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD=${AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD:-}
+
+  aws-opnsense-cache:
+    profiles: ["aws-acceptance"]
+    build:
+      context: .
+      target: acceptance
+    volumes:
+      - aws_credentials:/root/.aws
+    environment:
+      - AWS_PROFILE=${AWS_PROFILE:-ctf-it-acceptance}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-southeast-2}
+    entrypoint: ["python", "-m", "scripts.aws_acceptance_opnsense_cache"]
+    command:
+      - --expected-account-id
+      - ${AWS_ACCEPTANCE_ACCOUNT_ID:-}
+      - --inventory-only
 
 volumes:
   api_data:

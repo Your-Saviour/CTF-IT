@@ -128,6 +128,15 @@ def test_iam_policy_allows_explicit_create_actions_that_reference_existing_resou
     }
 
 
+def test_iam_policy_allows_removing_run_tags_only_from_owned_resources() -> None:
+    policy = json.loads((ROOT / "deploy" / "aws" / "iam-policy.json").read_text())
+    statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+    operated = statements["OperateOwnedInfrastructure"]
+
+    assert "ec2:DeleteTags" in operated["Action"]
+    assert operated["Condition"]["StringEquals"]["aws:ResourceTag/ManagedBy"] == "ctf-it"
+
+
 def test_aws_login_and_acceptance_are_containerized() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
     tools = compose["services"]["aws-tools"]
@@ -146,7 +155,21 @@ def test_aws_login_and_acceptance_are_containerized() -> None:
         value.startswith("DATA_ENCRYPTION_KEY=")
         for value in acceptance["environment"]
     )
+    assert "AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD=${AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD:-}" in acceptance["environment"]
     assert "aws_credentials" in compose["volumes"]
+
+
+def test_opnsense_cache_operator_commands_run_in_acceptance_container() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    cache = compose["services"]["aws-opnsense-cache"]
+
+    assert cache["profiles"] == ["aws-acceptance"]
+    assert cache["build"]["target"] == "acceptance"
+    assert cache["entrypoint"] == [
+        "python", "-m", "scripts.aws_acceptance_opnsense_cache",
+    ]
+    assert cache["command"][-1] == "--inventory-only"
+    assert "aws_credentials:/root/.aws" in cache["volumes"]
 
 
 def test_aws_containers_expose_no_static_keys_or_host_credential_mounts() -> None:

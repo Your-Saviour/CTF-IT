@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from scripts.aws_acceptance_opnsense_cache import (
-    CacheIdentity, CachedAmi, cache_key, discover_cache, promote_cache,
+    CacheIdentity, CachedAmi, cache_key, cleanup_cache, discover_cache, promote_cache,
+    validate_account,
 )
 
 
@@ -40,8 +41,23 @@ class Ec2:
         self.images = list(images)
         self.snapshots = {row["SnapshotId"]: row for row in snapshots}
 
-    def describe_images(self, **_kwargs):
-        return {"Images": self.images}
+        self.deregistered = []
+        self.deleted_snapshots = []
+
+    def describe_images(self, ImageIds=None, Filters=None, **_kwargs):
+        rows = self.images
+        if ImageIds is not None:
+            rows = [row for row in rows if row["ImageId"] in ImageIds]
+        for item in Filters or []:
+            if item["Name"].startswith("tag:"):
+                name = item["Name"].split(":", 1)[1]
+                values = set(item["Values"])
+                rows = [
+                    row for row in rows
+                    if {tag["Key"]: tag["Value"] for tag in row.get("Tags", [])}.get(name)
+                    in values
+                ]
+        return {"Images": rows}
 
     def describe_snapshots(self, SnapshotIds):
         return {"Snapshots": [self.snapshots[value] for value in SnapshotIds]}
@@ -65,6 +81,14 @@ class Ec2:
             else:
                 row = self.snapshots[resource_id]
             row["Tags"] = [item for item in row.get("Tags", []) if item["Key"] not in removed]
+
+    def deregister_image(self, ImageId):
+        self.deregistered.append(ImageId)
+        self.images = [row for row in self.images if row["ImageId"] != ImageId]
+
+    def delete_snapshot(self, SnapshotId):
+        self.deleted_snapshots.append(SnapshotId)
+        self.snapshots.pop(SnapshotId)
 
 
 def image_row(key, *, expires_at=None, state="available", snapshot_id="snap-1"):
@@ -228,3 +252,61 @@ def test_cached_artifact_materializes_the_active_database_image_contract():
     assert image.backing_snapshot_ids_json == '["snap-a", "snap-b"]'
     assert json.loads(image.validation_results)["cache_hit"]["passed"] is True
     assert db.query(PlatformSettings).filter_by(key="active_opnsense_image_id").one().value == str(image.id)
+
+
+def test_cache_cleanup_removes_only_expired_artifacts_by_default():
+    item = identity()
+    key = cache_key(item)
+    expired = image_row(key, expires_at=NOW - timedelta(seconds=1), snapshot_id="snap-old")
+    expired["ImageId"] = "ami-old"
+    current = image_row(key, expires_at=NOW + timedelta(days=1), snapshot_id="snap-current")
+    current["ImageId"] = "ami-current"
+    ec2 = Ec2(
+        [expired, current],
+        [
+            snapshot_row(key, snapshot_id="snap-old", expires_at=NOW - timedelta(seconds=1)),
+            snapshot_row(key, snapshot_id="snap-current", expires_at=NOW + timedelta(days=1)),
+        ],
+    )
+
+    removed = cleanup_cache(ec2, now=NOW)
+
+    assert removed == {"images": ["ami-old"], "snapshots": ["snap-old"]}
+    assert [row["ImageId"] for row in ec2.images] == ["ami-current"]
+    assert set(ec2.snapshots) == {"snap-current"}
+
+
+def test_cache_cleanup_all_removes_unexpired_owned_artifacts():
+    item = identity()
+    key = cache_key(item)
+    ec2 = Ec2([image_row(key)], [snapshot_row(key)])
+
+    removed = cleanup_cache(ec2, all_artifacts=True, now=NOW)
+
+    assert removed == {"images": ["ami-1"], "snapshots": ["snap-1"]}
+
+
+def test_cache_cleanup_refuses_a_snapshot_referenced_by_a_remaining_ami():
+    item = identity()
+    key = cache_key(item)
+    expired = image_row(key, expires_at=NOW - timedelta(seconds=1))
+    other = {
+        **image_row(key),
+        "ImageId": "ami-production",
+        "Tags": [{"Key": "Application", "Value": "different-app"}],
+    }
+    ec2 = Ec2(
+        [expired, other],
+        [snapshot_row(key, expires_at=NOW - timedelta(seconds=1))],
+    )
+
+    with pytest.raises(RuntimeError, match="snapshot snap-1 is referenced by remaining AMI"):
+        cleanup_cache(ec2, now=NOW)
+
+    assert ec2.deregistered == []
+    assert ec2.deleted_snapshots == []
+
+
+def test_cache_cleanup_refuses_account_mismatch_before_mutation():
+    with pytest.raises(RuntimeError, match="refusing AWS account 111122223333"):
+        validate_account("512349491663", "111122223333")

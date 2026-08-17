@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from dataclasses import dataclass
@@ -170,3 +171,114 @@ def promote_cache(ec2, ami_id: str, snapshot_ids: tuple[str, ...],
     if run_only:
         ec2.delete_tags(Resources=resources, Tags=run_only)
     return CachedAmi(ami_id, tuple(snapshot_ids), cache_key(identity), expires)
+
+
+def validate_account(expected_account_id: str, actual_account_id: str) -> None:
+    if not expected_account_id or not expected_account_id.isdigit():
+        raise ValueError("the expected AWS account ID is required")
+    if actual_account_id != expected_account_id:
+        raise RuntimeError(
+            f"refusing AWS account {actual_account_id}; expected {expected_account_id}"
+        )
+
+
+def _cache_images(ec2) -> list[dict]:
+    filters = [
+        {"Name": f"tag:{name}", "Values": [value]}
+        for name, value in CACHE_OWNERSHIP.items()
+    ]
+    return ec2.describe_images(Owners=["self"], Filters=filters).get("Images", [])
+
+
+def cache_inventory(ec2) -> dict[str, list[str]]:
+    images = _cache_images(ec2)
+    return {
+        "images": [row["ImageId"] for row in images],
+        "snapshots": sorted({
+            mapping["Ebs"]["SnapshotId"]
+            for row in images
+            for mapping in row.get("BlockDeviceMappings", [])
+            if mapping.get("Ebs", {}).get("SnapshotId")
+        }),
+    }
+
+
+def cleanup_cache(ec2, *, all_artifacts: bool = False,
+                  now: datetime | None = None) -> dict[str, list[str]]:
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    candidates = _cache_images(ec2)
+    selected: list[dict] = []
+    selected_ids: set[str] = set()
+    snapshot_keys: dict[str, str] = {}
+    for image in candidates:
+        tags = _tag_dict(image.get("Tags"))
+        key = tags.get("CacheKey", "")
+        _assert_cache_owned("AMI", image["ImageId"], image.get("Tags"), key)
+        expiry = _parse_expiry(tags.get("ExpiresAt", ""))
+        if not all_artifacts and expiry > current:
+            continue
+        selected.append(image)
+        selected_ids.add(image["ImageId"])
+        for mapping in image.get("BlockDeviceMappings", []):
+            snapshot_id = mapping.get("Ebs", {}).get("SnapshotId")
+            if snapshot_id:
+                previous = snapshot_keys.setdefault(snapshot_id, key)
+                if previous != key:
+                    raise RuntimeError(
+                        f"snapshot {snapshot_id} belongs to multiple cache identities"
+                    )
+
+    snapshot_ids = sorted(snapshot_keys)
+    if snapshot_ids:
+        rows = ec2.describe_snapshots(SnapshotIds=snapshot_ids).get("Snapshots", [])
+        by_id = {row["SnapshotId"]: row for row in rows}
+        for snapshot_id, key in snapshot_keys.items():
+            if snapshot_id not in by_id:
+                raise RuntimeError(f"cached OPNsense snapshot {snapshot_id} is missing")
+            _assert_cache_owned(
+                "snapshot", snapshot_id, by_id[snapshot_id].get("Tags"), key,
+            )
+
+    all_images = ec2.describe_images(Owners=["self"]).get("Images", [])
+    for image in all_images:
+        if image["ImageId"] in selected_ids:
+            continue
+        for mapping in image.get("BlockDeviceMappings", []):
+            snapshot_id = mapping.get("Ebs", {}).get("SnapshotId")
+            if snapshot_id in snapshot_keys:
+                raise RuntimeError(
+                    f"snapshot {snapshot_id} is referenced by remaining AMI {image['ImageId']}"
+                )
+
+    removed = {"images": [], "snapshots": []}
+    for image in selected:
+        ec2.deregister_image(ImageId=image["ImageId"])
+        removed["images"].append(image["ImageId"])
+    for snapshot_id in snapshot_ids:
+        ec2.delete_snapshot(SnapshotId=snapshot_id)
+        removed["snapshots"].append(snapshot_id)
+    return removed
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Inspect or clean owned OPNsense cache AMIs")
+    parser.add_argument("--expected-account-id", required=True)
+    parser.add_argument("--all", action="store_true", dest="all_artifacts")
+    parser.add_argument("--inventory-only", action="store_true")
+    args = parser.parse_args()
+
+    import boto3
+
+    session = boto3.Session()
+    actual_account_id = session.client("sts").get_caller_identity()["Account"]
+    validate_account(args.expected_account_id, actual_account_id)
+    ec2 = session.client("ec2")
+    if not args.inventory_only:
+        print(json.dumps({"removed": cleanup_cache(
+            ec2, all_artifacts=args.all_artifacts,
+        )}, sort_keys=True))
+    print(json.dumps({"remaining": cache_inventory(ec2)}, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
