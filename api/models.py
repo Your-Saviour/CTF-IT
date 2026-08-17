@@ -78,6 +78,10 @@ class Event(Base):
     infrastructure_layout: Mapped[str] = mapped_column(Text, nullable=True)
     module_plan: Mapped[str] = mapped_column(Text, nullable=True)
     operation_plan: Mapped[str] = mapped_column(Text, nullable=True)
+    timeline: Mapped[str] = mapped_column(Text, nullable=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("scenarios.id"), nullable=True)
+    scenario_version: Mapped[int] = mapped_column(Integer, nullable=True)
+    scenario_fingerprint: Mapped[str] = mapped_column(String(64), nullable=True)
     open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
     status: Mapped[str] = mapped_column(String(16), default="draft")
     description: Mapped[str] = mapped_column(Text, nullable=True)
@@ -128,6 +132,26 @@ class EventOperation(Base):
     )
 
     event: Mapped["Event"] = relationship(back_populates="operations")
+
+
+class Scenario(Base):
+    __tablename__ = "scenarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    quota: Mapped[str] = mapped_column(Text, nullable=False)
+    infrastructure: Mapped[str] = mapped_column(Text, nullable=True)
+    infrastructure_layout: Mapped[str] = mapped_column(Text, nullable=True)
+    module_plan: Mapped[str] = mapped_column(Text, nullable=True)
+    operations_json: Mapped[str] = mapped_column(Text, nullable=True)
+    timeline: Mapped[str] = mapped_column(Text, nullable=True)
+    content_fingerprint: Mapped[str] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
 
 
 class Team(Base):

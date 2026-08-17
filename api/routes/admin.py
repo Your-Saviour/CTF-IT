@@ -731,9 +731,10 @@ async def get_module_plan(event_id: int, request: Request, db: Session = Depends
                          "difficulty": m.difficulty, "category": m.category, "tags": m.tags,
                          "stage": m.stage, "points": m.points, "requires": m.requires,
                          "conflicts": m.conflicts, "supported_bases": m.supported_bases,
-                         "disabled": m.disabled, "learning_objectives": m.learning_objectives,
-                         "estimated_minutes": m.estimated_minutes, "prerequisites": m.prerequisites,
-                         "verification_type": (m.verification or {}).get("type")} for m in modules]}
+                          "disabled": m.disabled, "learning_objectives": m.learning_objectives,
+                          "estimated_minutes": m.estimated_minutes, "prerequisites": m.prerequisites,
+                          "phases": m.phases, "narrative": m.narrative,
+                          "verification_type": (m.verification or {}).get("type")} for m in modules]}
 
 
 @router.put("/events/{event_id}/module-plan")

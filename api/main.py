@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from api.database import engine, get_db, init_db
 from api.models import Event, EventOperation, User, VM, utcnow
-from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, service_credentials, vm, vm_goals
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, scenarios, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
 
 _log = logging.getLogger(__name__)
@@ -374,6 +374,7 @@ app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
 app.include_router(event_dashboard.router)
 app.include_router(learner.router)
+app.include_router(scenarios.router)
 app.include_router(service_credentials.router)
 app.include_router(vm.router)
 app.include_router(vm_goals.router)
@@ -669,6 +670,27 @@ async def event_operation_designer_page(event_id: int, operation_id: int, reques
         "event_id": event.id, "event_name": event.name, "event_status": event.status,
         "operation_id": operation.id, "operation_name": operation.name,
         "read_only": event.status != "draft"})
+
+
+@app.get("/admin/scenarios", response_class=HTMLResponse)
+async def scenarios_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "scenarios.html", {"user": user, "active_nav": "scenarios"})
+
+
+@app.get("/admin/events/{event_id}/timeline", response_class=HTMLResponse)
+async def event_timeline_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_timeline.html", {"user": user,
+        "event_id": event.id, "event_name": event.name, "event_status": event.status,
+        "read_only": event.status != "draft", "time_limit_minutes": event.time_limit_minutes})
 
 
 @app.get("/admin/events/{event_id}/dashboard", response_class=HTMLResponse)

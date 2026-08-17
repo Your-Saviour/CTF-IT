@@ -69,6 +69,29 @@ class TestLoadGoalModule:
             assert g.stage is None, f"Goal {g.id} should have stage=None"
 
 
+class TestPhasesAndNarrative:
+    def test_phases_and_narrative_default_empty(self):
+        m = Module(
+            id="x", name="X", description="", type="vulnerability",
+            difficulty="easy", points=0, category="test",
+        )
+        assert m.phases == []
+        assert m.narrative == ""
+
+    def test_phases_and_narrative_load_from_yaml(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        (tmp_path / "m.yaml").write_text(
+            "id: sample\nname: Sample\ndescription: d\ntype: vulnerability\n"
+            "difficulty: easy\npoints: 10\ncategory: web\n"
+            "phases: [recon, impact]\nnarrative: An attacker pivots through the web tier.\n"
+        )
+        monkeypatch.setattr(ml, "MODULES_DIR", tmp_path)
+        modules = ml.load_all_modules()
+        sample = next(m for m in modules if m.id == "sample")
+        assert sample.phases == ["recon", "impact"]
+        assert sample.narrative == "An attacker pivots through the web tier."
+
+
 class TestRepositoryDefinitions:
     def test_every_yaml_definition_parses(self):
         definitions = [

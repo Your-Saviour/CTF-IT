@@ -96,6 +96,8 @@ class Module:
     learning_objectives: list[str] = field(default_factory=list)
     estimated_minutes: int = 0
     prerequisites: list[str] = field(default_factory=list)
+    phases: list[str] = field(default_factory=list)
+    narrative: str = ""
     references: list[Reference] = field(default_factory=list)
     debrief: dict = field(default_factory=dict)
     suggested_fix: Optional[str] = None
@@ -172,6 +174,8 @@ def load_all_modules() -> list[Module]:
             learning_objectives=data.get("learning_objectives", []),
             estimated_minutes=data.get("estimated_minutes", 0),
             prerequisites=data.get("prerequisites", data.get("requires", [])),
+            phases=data.get("phases", []),
+            narrative=data.get("narrative", ""),
             references=_parse_references(data.get("references", [])),
             debrief=data.get("debrief", {}),
             suggested_fix=data.get("suggested_fix"),
