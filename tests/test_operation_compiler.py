@@ -106,6 +106,19 @@ def test_gate_any_or_first_activates_on_single_success(mode):
     assert set(next_ready_nodes(compiled.nodes, compiled.edges, {"x": "failure", "y": "success"})) == {"gate"}
 
 
+def test_compile_skips_disabled_nodes_and_edges():
+    p = plan()
+    p["nodes"].append({"id": "disabled-node", "type": "ability", "label": "Disabled",
+                       "config": {"module_id": "nopasswd_sudo", "ability": "exploit",
+                                  "target_vm_id": "vm:hq/blue/web"}, "disabled": True})
+    p["edges"].append({"id": "eD", "source": "disabled-node", "target": "finish", "condition": "success"})
+    compiled = compile_operation(p, MODULES)
+    assert "disabled-node" not in compiled.nodes
+    assert all(e["source"] != "disabled-node" and e["target"] != "disabled-node"
+               for e in compiled.edges)
+    assert set(next_ready_nodes(compiled.nodes, compiled.edges, {})) == {"a"}
+
+
 def test_non_gate_join_activates_on_first_incoming_edge():
     nodes = {
         "x": CompiledNode("x", "ability", "X", {}),

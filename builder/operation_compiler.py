@@ -34,10 +34,17 @@ class CompiledPlan:
 
 def compile_operation(plan: dict, modules_by_id: dict[str, Module]) -> CompiledPlan:
     plan = normalize_operation_plan(plan)
-    compiled = CompiledPlan(edges=plan["edges"], policy=plan["policy"])
+    active_ids = {node["id"] for node in plan["nodes"] if not node.get("disabled")}
+    compiled = CompiledPlan(
+        edges=[edge for edge in plan["edges"]
+               if edge["source"] in active_ids and edge["target"] in active_ids],
+        policy=plan["policy"],
+    )
     compiled.trigger = next((n for n in plan["nodes"] if n["type"].endswith("_trigger")), {})
 
     for node in plan["nodes"]:
+        if node.get("disabled"):
+            continue
         node_type = node["type"]
         config = node["config"]
         cnode = CompiledNode(
