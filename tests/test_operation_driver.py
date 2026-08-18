@@ -6,6 +6,8 @@ class FakeCaldera:
     def __init__(self):
         self.operations = []
         self.op_counter = 0
+        self.op_state = "finished"
+        self.deleted = []
 
     async def ensure_source(self, source_id, name="ctf"):
         return None
@@ -23,7 +25,7 @@ class FakeCaldera:
         return op
 
     async def get_operation(self, op_id, include_chain=False):
-        return {"id": op_id, "state": "finished", "chain": [
+        return {"id": op_id, "state": self.op_state, "chain": [
             {"status": 0, "output": "VULNERABLE user=svc", "finish": "2026-08-18T00:00:00Z"},
         ]}
 
@@ -32,6 +34,9 @@ class FakeCaldera:
 
     async def get_planner_by_name(self, name):
         return {"id": f"{name}-planner-id"}
+
+    async def delete_operation(self, op_id):
+        self.deleted.append(op_id)
 
 
 def _run(coro):
@@ -49,3 +54,14 @@ def test_driver_returns_result_and_targets_single_agent():
     assert result.finished is True
     assert "VULNERABLE" in result.output
     assert fake.operations[0]["allowed_agents"] == ["abc123"]
+
+
+def test_driver_timeout_deletes_orphaned_operation():
+    fake = FakeCaldera()
+    fake.op_state = "running"
+    driver = OperationDriver(fake)
+    result = _run(driver.execute("some-ability", "some-adversary", "abc123",
+                                 "event-1", "ctf-run-1", 0))
+    assert result.status == -1
+    assert result.finished is False
+    assert fake.deleted == ["op-1"]

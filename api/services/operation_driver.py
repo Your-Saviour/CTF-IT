@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 
 from api.services.caldera import CalderaClient, get_caldera_api_key
@@ -48,6 +49,8 @@ class OperationDriver:
             if detail.get("state") in ("finished", "cleanup", "failed"):
                 break
             if time.monotonic() > deadline:
+                with suppress(Exception):
+                    await self.caldera.delete_operation(op_id)
                 return AbilityResult(status=-1, output="timeout", finished=False)
             await asyncio.sleep(2)
         chain = detail.get("chain", [])
