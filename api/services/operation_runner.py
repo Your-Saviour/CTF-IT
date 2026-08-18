@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from dataclasses import dataclass
 
 from api.database import SessionLocal
@@ -12,6 +14,12 @@ from api.services.operation_driver import OperationDriver
 from builder.caldera import single_ability_adversary_id
 from builder.fact_contract import extract_facts
 from builder.operation_compiler import CompiledNode, CompiledPlan, next_ready_nodes
+
+_log = logging.getLogger(__name__)
+
+
+class RunHardStopError(Exception):
+    """Raised when a run exceeds its configured time limit."""
 
 
 @dataclass
@@ -25,6 +33,12 @@ def decide_node_execution(node: CompiledNode, fact_store: dict[str, str]) -> Nod
     if any(trait not in fact_store for trait in node.input_traits):
         return NodeResult(skipped=True)
     return NodeResult()
+
+
+def run_deadline(run, policy: dict) -> float:
+    minutes = int(policy.get("time_limit_minutes", 60))
+    started = run.started_at or utcnow()
+    return started.timestamp() + minutes * 60
 
 
 async def _wait_for_approval(db, run_id: int, step_id: int, poll_seconds: int = 2) -> str:
@@ -56,20 +70,25 @@ async def launch_run(run_id: int) -> None:
         compiled = compile_operation(json.loads(run.plan_snapshot), modules_by_id)
 
         fact_store = json.loads(run.fact_store or "{}")
+        fact_store.update(_platform_facts(db, run))
+        run.fact_store = json.dumps(fact_store)
         run.status = "running"
         run.started_at = run.started_at or utcnow()
         db.commit()
+        deadline = run_deadline(run, compiled.policy)
 
         completed: dict[str, str] = {}
         driver = OperationDriver()
         async with driver.caldera:
             source_id = await driver.ensure_run_source(run_id)
-            await driver.seed_run_facts(source_id, _platform_facts(db, run))
+            await driver.seed_run_facts(source_id, fact_store)
 
             while True:
                 run = db.query(OperationRun).get(run_id)
                 if run.status == "cancelled":
                     break
+                if time.time() > deadline:
+                    raise RunHardStopError("run exceeded its time limit")
                 ready = next_ready_nodes(compiled.nodes, compiled.edges, completed)
                 if not ready:
                     break
@@ -82,8 +101,37 @@ async def launch_run(run_id: int) -> None:
                     if not ready:
                         break
         _finalize_run(db, run_id, completed, compiled)
+    except RunHardStopError as exc:
+        db.rollback()
+        _log.warning("operation run %s hit hard stop: %s", run_id, exc)
+        _fail_run(db, run_id, str(exc))
+    except Exception as exc:
+        db.rollback()
+        _log.exception("operation run %s failed", run_id)
+        _fail_run(db, run_id, f"{type(exc).__name__}: {exc}")
     finally:
         db.close()
+
+
+def _fail_run(db, run_id: int, error: str) -> None:
+    run = db.query(OperationRun).get(run_id)
+    if run is None:
+        return
+    if run.status != "cancelled":
+        run.status = "failed"
+    run.finished_at = utcnow()
+    step = (db.query(OperationRunStep)
+            .filter(OperationRunStep.run_id == run_id,
+                    OperationRunStep.status.in_(["running", "awaiting_approval"]))
+            .order_by(OperationRunStep.id.desc())
+            .first())
+    if step is not None:
+        step.status = "failure"
+        step.result = "failure"
+        step.finished_at = utcnow()
+        message = error or "run failed"
+        step.output = f"{(step.output or '')}\nERROR: {message}".strip()[:2000]
+    db.commit()
 
 
 async def _run_node(db, run, node, compiled, fact_store, driver, source_id) -> str:
@@ -131,18 +179,28 @@ async def _run_node(db, run, node, compiled, fact_store, driver, source_id) -> s
         return _finish_step(db, step, "failure")
 
     timeout_seconds = int(node.config.get("timeout_seconds", compiled.policy["default_timeout_seconds"]))
-    ability_result = await driver.execute(
-        node.ability_id, single_ability_adversary_id(node.ability_id), agent_paw,
-        f"event-{run.event_id}", source_id, timeout_seconds,
-    )
-    step.attempts += 1
-    step.output = (ability_result.output or "")[:2000]
-    new_facts = extract_facts(ability_result.output or "", node.output_specs)
-    run = db.query(OperationRun).get(run.id)
-    store = json.loads(run.fact_store or "{}")
-    store.update(new_facts)
-    run.fact_store = json.dumps(store)
-    result = "success" if (ability_result.finished and ability_result.status == 0) else "failure"
+    retries = int(node.config.get("retries", compiled.policy["default_retries"]))
+    retry_delay = int(node.config.get("retry_delay_seconds", compiled.policy["default_retry_delay_seconds"]))
+
+    result = "failure"
+    store: dict[str, str] = {}
+    for attempt in range(max(1, retries + 1)):
+        ability_result = await driver.execute(
+            node.ability_id, single_ability_adversary_id(node.ability_id), agent_paw,
+            f"event-{run.event_id}", source_id, timeout_seconds,
+        )
+        step.attempts += 1
+        step.output = (ability_result.output or "")[:2000]
+        run = db.query(OperationRun).get(run.id)
+        store = json.loads(run.fact_store or "{}")
+        store.update(extract_facts(ability_result.output or "", node.output_specs))
+        run.fact_store = json.dumps(store)
+        db.commit()
+        if ability_result.finished and ability_result.status == 0:
+            result = "success"
+            break
+        if attempt + 1 < max(1, retries + 1):
+            await asyncio.sleep(retry_delay)
     _finish_step(db, step, result)
     await driver.seed_run_facts(source_id, store)
     return result
@@ -161,7 +219,10 @@ def _resolve_target_vm(db, run, node):
     parts = target.split("/")  # "vm:<site>/<zone>/<endpoint>"
     if len(parts) != 3:
         return None
-    site_key = parts[0].split(":", 1)[1]
+    site_parts = parts[0].split(":", 1)
+    if len(site_parts) != 2 or not site_parts[1]:
+        return None
+    site_key = site_parts[1]
     zone_key = parts[1]
     endpoint_key = parts[2]
     query = (db.query(VM)
@@ -200,4 +261,5 @@ def mark_interrupted_runs(db) -> None:
     runs = db.query(OperationRun).filter(OperationRun.status.in_(["running", "awaiting_approval"])).all()
     for run in runs:
         run.status = "failed"
+        run.finished_at = utcnow()
     db.commit()

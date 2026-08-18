@@ -1,7 +1,10 @@
 # tests/test_operation_runner.py
 import asyncio
+import copy
+import json
 import threading
 import time
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,7 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.database import Base
-from api.models import OperationRun, OperationRunStep
+from api.models import OperationRun, OperationRunStep, utcnow
+from api.services.operation_driver import AbilityResult
 from api.services.operation_runner import decide_node_execution, _finalize_run, _run_node, _wait_for_approval
 from builder.operation_compiler import CompiledNode, compile_operation
 
@@ -225,3 +229,208 @@ def test_run_node_pauses_on_ability_when_instructor_approval_and_cancel_fails_st
 
     assert result == "failure"
     assert db_session.get(OperationRunStep, step.id).status == "failure"
+
+
+class _FakeCaldera:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return None
+
+
+class _FakeDriver:
+    def __init__(self, results):
+        self.results = list(results)
+        self.caldera = _FakeCaldera()
+
+    async def ensure_run_source(self, run_id):
+        return f"ctf-run-{run_id}"
+
+    async def seed_run_facts(self, source_id, facts):
+        self.seeded = facts
+
+    async def resolve_agent_paw(self, ip):
+        return "paw-1"
+
+    async def execute(self, ability_id, adversary_id, agent_paw, group, source_id, timeout_seconds):
+        return self.results.pop(0)
+
+
+class _ExplodingDriver:
+    def __init__(self):
+        self.caldera = _FakeCaldera()
+
+    async def ensure_run_source(self, run_id):
+        return f"ctf-run-{run_id}"
+
+    async def seed_run_facts(self, source_id, facts):
+        self.seeded = facts
+
+    async def resolve_agent_paw(self, ip):
+        return "paw-1"
+
+    async def execute(self, ability_id, adversary_id, agent_paw, group, source_id, timeout_seconds):
+        raise RuntimeError("caldera down")
+
+
+def _retry_plan(retries=2):
+    plan = copy.deepcopy(PLAN)
+    plan["policy"]["default_retries"] = retries
+    plan["policy"]["default_retry_delay_seconds"] = 0
+    return plan
+
+
+def _seeded_run(db_session, plan_snapshot, fact_store="{}", started_at=None):
+    run = _run()
+    run.plan_snapshot = json.dumps(plan_snapshot)
+    run.fact_store = fact_store
+    run.started_at = started_at
+    db_session.add(run)
+    db_session.commit()
+    return run.id
+
+
+@pytest.fixture
+def runner_env(db_session, monkeypatch):
+    sessions = sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr("api.services.operation_runner.SessionLocal", sessions)
+    monkeypatch.setattr("api.services.operation_runner._resolve_target_vm",
+                        lambda db, run, node: SimpleNamespace(ip_address="10.0.0.5"))
+    monkeypatch.setattr("builder.module_loader.load_all_modules",
+                        lambda: [MODULES["weak_ssh"], MODULES["nopasswd_sudo"]])
+    return sessions
+
+
+def test_run_node_retries_until_success(db_session, monkeypatch):
+    compiled = compile_operation(_retry_plan(), MODULES)
+    node = compiled.nodes["a"]
+    run = _run()
+    run.fact_store = json.dumps({"ctf.vuln.weak_ssh": "svc"})
+    db_session.add(run)
+    db_session.commit()
+    driver = _FakeDriver([
+        AbilityResult(status=1, output="boom", finished=True),
+        AbilityResult(status=0, output="OK FOOTHOLD", finished=True),
+    ])
+    monkeypatch.setattr("api.services.operation_runner._resolve_target_vm",
+                        lambda db, run, node: SimpleNamespace(ip_address="10.0.0.5"))
+
+    result = asyncio.run(_run_node(db_session, run, node, compiled,
+                                   {"ctf.vuln.weak_ssh": "svc"}, driver, "src"))
+
+    assert result == "success"
+    step = db_session.query(OperationRunStep).filter_by(run_id=run.id).first()
+    assert step.attempts == 2
+    assert "ctf.weak_ssh.shell" in json.loads(db_session.get(OperationRun, run.id).fact_store)
+
+
+def test_run_node_exhausts_retries_then_fails(db_session, monkeypatch):
+    compiled = compile_operation(_retry_plan(), MODULES)
+    node = compiled.nodes["a"]
+    run = _run()
+    run.fact_store = json.dumps({"ctf.vuln.weak_ssh": "svc"})
+    db_session.add(run)
+    db_session.commit()
+    driver = _FakeDriver([
+        AbilityResult(status=1, output="boom", finished=True),
+        AbilityResult(status=1, output="boom", finished=True),
+        AbilityResult(status=1, output="boom", finished=True),
+    ])
+    monkeypatch.setattr("api.services.operation_runner._resolve_target_vm",
+                        lambda db, run, node: SimpleNamespace(ip_address="10.0.0.5"))
+
+    result = asyncio.run(_run_node(db_session, run, node, compiled,
+                                   {"ctf.vuln.weak_ssh": "svc"}, driver, "src"))
+
+    assert result == "failure"
+    step = db_session.query(OperationRunStep).filter_by(run_id=run.id).first()
+    assert step.attempts == 3
+    assert step.status == "failure"
+
+
+def test_launch_run_marks_failed_when_driver_raises(runner_env, db_session, monkeypatch):
+    from api.services.operation_runner import launch_run
+    run_id = _seeded_run(db_session, PLAN, fact_store=json.dumps({"ctf.vuln.weak_ssh": "svc"}))
+    monkeypatch.setattr("api.services.operation_runner.OperationDriver", _ExplodingDriver)
+
+    asyncio.run(launch_run(run_id))
+
+    db_session.expire_all()
+    refreshed = db_session.get(OperationRun, run_id)
+    assert refreshed.status == "failed"
+    assert refreshed.finished_at is not None
+    step = db_session.query(OperationRunStep).filter_by(run_id=run_id).first()
+    assert step.status == "failure"
+    assert "caldera down" in (step.output or "")
+
+
+def test_launch_run_hard_stop_fails_run(runner_env, db_session, monkeypatch):
+    from api.services.operation_runner import launch_run
+    plan = copy.deepcopy(PLAN)
+    plan["policy"]["time_limit_minutes"] = 1
+    run_id = _seeded_run(db_session, plan, started_at=utcnow() - timedelta(minutes=2))
+    monkeypatch.setattr("api.services.operation_runner.OperationDriver", _ExplodingDriver)
+
+    asyncio.run(launch_run(run_id))
+
+    db_session.expire_all()
+    refreshed = db_session.get(OperationRun, run_id)
+    assert refreshed.status == "failed"
+    assert refreshed.finished_at is not None
+
+
+def test_launch_run_seeds_platform_facts_into_fact_store(db_session, monkeypatch):
+    from api.models import Team, VM
+    from api.services.operation_runner import launch_run
+    team = Team(name="Blue", event_id=1)
+    db_session.add(team)
+    db_session.commit()
+    db_session.add(VM(hostname="web-1", ip_address="10.0.0.5", os="Ubuntu 24.04 LTS x64",
+                      event_id=1, team_id=team.id, status="active"))
+    db_session.commit()
+
+    ipmod = _module("ipmod", {
+        "tactic": "initial-access",
+        "recon": {"command": "echo VULNERABLE"},
+        "exploit": {"command": "echo #{ctf.ip}", "inputs": ["ctf.ip"]},
+    })
+    plan = {
+        "version": 1,
+        "policy": {"time_limit_minutes": 60, "max_concurrency": 1, "default_timeout_seconds": 120,
+                   "default_retries": 0, "default_retry_delay_seconds": 5},
+        "nodes": [
+            {"id": "trigger", "type": "manual_trigger", "label": "Manual", "config": {}},
+            {"id": "a", "type": "ability", "label": "A",
+             "config": {"module_id": "ipmod", "ability": "exploit", "target_vm_id": "vm:hq/blue/web"}},
+            {"id": "finish", "type": "finish", "label": "Finish", "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "trigger", "target": "a", "condition": "always"},
+            {"id": "e2", "source": "a", "target": "finish", "condition": "always"},
+        ],
+    }
+    run_id = _seeded_run(db_session, plan)
+
+    executed = []
+
+    class RecordingDriver(_ExplodingDriver):
+        async def execute(self, ability_id, adversary_id, agent_paw, group, source_id, timeout_seconds):
+            executed.append(ability_id)
+            return AbilityResult(status=0, output="ok", finished=True)
+
+    sessions = sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr("api.services.operation_runner.SessionLocal", sessions)
+    monkeypatch.setattr("api.services.operation_runner.OperationDriver", RecordingDriver)
+    monkeypatch.setattr("api.services.operation_runner._resolve_target_vm",
+                        lambda db, run, node: SimpleNamespace(ip_address="10.0.0.5"))
+    monkeypatch.setattr("builder.module_loader.load_all_modules", lambda: [ipmod])
+
+    asyncio.run(launch_run(run_id))
+
+    assert executed, "ability gating on a platform fact must not be skipped"
+    db_session.expire_all()
+    refreshed = db_session.get(OperationRun, run_id)
+    assert refreshed.status == "completed"
+    store = json.loads(refreshed.fact_store)
+    assert store["ctf.ip"] == "10.0.0.5"
