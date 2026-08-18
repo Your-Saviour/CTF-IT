@@ -778,6 +778,37 @@ def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
     assert result.wan_eni_id == "eni-0" and result.lan_eni_id == "eni-1"
 
 
+def test_aws_gamenet_wan_security_group_limits_temporary_ssh_to_control_plane(monkeypatch):
+    from types import SimpleNamespace
+    from api.services.gamenet_provider import AwsGameNetProvider
+
+    class Network:
+        def __init__(self): self.specs = []
+        def ensure_security_group(self, spec):
+            self.specs.append(spec)
+            return f"sg-{len(self.specs)}"
+
+    monkeypatch.setenv("CTF_CONTROL_PLANE_CIDR", "192.0.2.8/32")
+    network = Network()
+    provider = AwsGameNetProvider(
+        SimpleNamespace(), network, SimpleNamespace(environment="test"),
+    )
+    site = SimpleNamespace(
+        id=4, event_id=1, team_id=2, vpc_id="vpc-site",
+        allocated_cidr="10.128.0.0/20", zones=[],
+    )
+
+    provider.ensure_site_security_groups(site, temporary_management=True)
+    provider.ensure_site_security_groups(site)
+
+    temporary_wan, final_wan = network.specs[0], network.specs[2]
+    assert temporary_wan.ingress == ({
+        "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+        "IpRanges": [{"CidrIp": "192.0.2.8/32"}],
+    },)
+    assert final_wan.ingress == ()
+
+
 def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     from types import SimpleNamespace
     from api.services.aws import ElasticIpResult, InstanceResult
@@ -976,7 +1007,8 @@ def test_create_provider_vpc_persists_all_aws_network_ids(monkeypatch, db_sessio
                 {"wan": "subnet-wan", "infra": "subnet-infra", "blue": "subnet-blue"},
                 {"wan": "rtb-wan", "infra": "rtb-infra", "blue": "rtb-blue"}, "igw-1",
             )
-        def ensure_site_security_groups(self, selected):
+        def ensure_site_security_groups(self, selected, *, temporary_management=False):
+            assert temporary_management is True
             return {"wan": "sg-wan", "lan": "sg-lan", "blue": "sg-blue"}
         def close(self): pass
     monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())

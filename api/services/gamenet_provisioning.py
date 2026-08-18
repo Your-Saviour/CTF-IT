@@ -505,7 +505,7 @@ def _create_provider_vpc(site):
         site.route_table_ids_json = json.dumps(dict(result.route_table_ids), sort_keys=True)
         for zone in site.zones:
             zone.subnet_id = result.subnet_ids[zone.key]
-        groups = provider.ensure_site_security_groups(site)
+        groups = provider.ensure_site_security_groups(site, temporary_management=True)
         site.wan_security_group_id = groups["wan"]
         site.lan_security_group_id = groups["lan"]
         for zone in site.zones:

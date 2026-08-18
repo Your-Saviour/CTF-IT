@@ -68,7 +68,7 @@ class AwsGameNetProvider:
             secondary_cidrs=(),
         ))
 
-    def ensure_site_security_groups(self, site):
+    def ensure_site_security_groups(self, site, *, temporary_management: bool = False):
         tags = ownership_tags(
             self.config.environment, event_id=site.event_id,
             team_id=site.team_id, site_id=site.id,
@@ -76,10 +76,17 @@ class AwsGameNetProvider:
         all_traffic = lambda cidr: ({
             "IpProtocol": "-1", "IpRanges": [{"CidrIp": cidr}],
         },)
+        wan_ingress = ()
+        if temporary_management:
+            management_cidr = str(ip_network(os.environ["CTF_CONTROL_PLANE_CIDR"]))
+            wan_ingress = ({
+                "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                "IpRanges": [{"CidrIp": management_cidr}],
+            },)
         groups = {
             "wan": self.network.ensure_security_group(SecurityGroupSpec(
                 site.vpc_id, f"ctf-it-site-{site.id}-wan", "GameNet firewall WAN",
-                (), ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},),
+                wan_ingress, ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},),
                 {**tags, "NetworkRole": "wan"},
             )),
             "lan": self.network.ensure_security_group(SecurityGroupSpec(
