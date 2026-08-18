@@ -1,5 +1,7 @@
 # tests/test_operation_runner.py
 import asyncio
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,8 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.database import Base
-from api.models import OperationRun
-from api.services.operation_runner import decide_node_execution, _finalize_run, _run_node
+from api.models import OperationRun, OperationRunStep
+from api.services.operation_runner import decide_node_execution, _finalize_run, _run_node, _wait_for_approval
 from builder.operation_compiler import CompiledNode, compile_operation
 
 
@@ -134,3 +136,92 @@ def test_run_node_gate_is_pass_through():
     assert result == "success"
     finish.assert_called_once()
     assert finish.call_args.args[2] == "success"
+
+
+def _transition_in_background(session_factory, model, obj_id, **attrs):
+    def _run():
+        time.sleep(0.05)
+        other = session_factory()
+        try:
+            other.query(model).filter(model.id == obj_id).update(attrs)
+            other.commit()
+        finally:
+            other.close()
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    return thread
+
+
+def _approval_step(db_session):
+    run = _run()
+    db_session.add(run)
+    db_session.commit()
+    step = OperationRunStep(run_id=run.id, node_id="a", node_type="ability", status="awaiting_approval")
+    db_session.add(step)
+    db_session.commit()
+    return run, step
+
+
+def test_wait_for_approval_polls_until_admin_approves(db_session):
+    run, step = _approval_step(db_session)
+    sessions = sessionmaker(bind=db_session.bind)
+    thread = _transition_in_background(sessions, OperationRunStep, step.id, status="queued")
+
+    try:
+        result = asyncio.run(_wait_for_approval(db_session, run.id, step.id, poll_seconds=0.05))
+    finally:
+        thread.join()
+
+    assert result == "running"
+    assert db_session.get(OperationRunStep, step.id).status == "running"
+
+
+def test_wait_for_approval_returns_rejected_when_admin_rejects(db_session):
+    run, step = _approval_step(db_session)
+    sessions = sessionmaker(bind=db_session.bind)
+    thread = _transition_in_background(sessions, OperationRunStep, step.id, status="rejected")
+
+    try:
+        result = asyncio.run(_wait_for_approval(db_session, run.id, step.id, poll_seconds=0.05))
+    finally:
+        thread.join()
+
+    assert result == "rejected"
+    assert db_session.get(OperationRunStep, step.id).status == "rejected"
+
+
+def test_wait_for_approval_returns_failure_when_run_cancelled(db_session):
+    run, step = _approval_step(db_session)
+    sessions = sessionmaker(bind=db_session.bind)
+    thread = _transition_in_background(sessions, OperationRun, run.id, status="cancelled")
+
+    try:
+        result = asyncio.run(_wait_for_approval(db_session, run.id, step.id, poll_seconds=0.05))
+    finally:
+        thread.join()
+
+    assert result == "failure"
+
+
+def test_run_node_pauses_on_ability_when_instructor_approval_and_cancel_fails_step(db_session):
+    run = _run()
+    db_session.add(run)
+    db_session.commit()
+    step = OperationRunStep(run_id=run.id, node_id="a", node_type="ability", status="queued")
+    db_session.add(step)
+    db_session.commit()
+    node = CompiledNode("a", "ability", "Ability", {
+        "module_id": "weak_ssh", "ability": "exploit", "target_vm_id": "vm:hq/blue/web",
+    })
+    compiled = SimpleNamespace(policy={"instructor_approval": True})
+    sessions = sessionmaker(bind=db_session.bind)
+    thread = _transition_in_background(sessions, OperationRun, run.id, status="cancelled")
+
+    try:
+        result = asyncio.run(_run_node(db_session, run, node, compiled, {}, None, "src"))
+    finally:
+        thread.join()
+
+    assert result == "failure"
+    assert db_session.get(OperationRunStep, step.id).status == "failure"

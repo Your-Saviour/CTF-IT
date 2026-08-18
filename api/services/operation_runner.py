@@ -27,6 +27,22 @@ def decide_node_execution(node: CompiledNode, fact_store: dict[str, str]) -> Nod
     return NodeResult()
 
 
+async def _wait_for_approval(db, run_id: int, step_id: int, poll_seconds: int = 2) -> str:
+    while True:
+        db.expire_all()
+        fresh_run = db.query(OperationRun).get(run_id)
+        if fresh_run.status == "cancelled":
+            return "failure"
+        fresh_step = db.query(OperationRunStep).get(step_id)
+        if fresh_step.status == "rejected":
+            return "rejected"
+        if fresh_step.status == "queued":
+            fresh_step.status = "running"
+            db.commit()
+            return "running"
+        await asyncio.sleep(poll_seconds)
+
+
 async def launch_run(run_id: int) -> None:
     db = SessionLocal()
     try:
@@ -94,6 +110,16 @@ async def _run_node(db, run, node, compiled, fact_store, driver, source_id) -> s
     if decision.skipped:
         step.output = "SKIPPED: missing prerequisite facts"
         return _finish_step(db, step, "skipped")
+
+    if compiled.policy.get("instructor_approval", False):
+        step.status = "awaiting_approval"
+        db.commit()
+        outcome = await _wait_for_approval(db, run.id, step.id)
+        if outcome == "rejected":
+            step.output = "REJECTED by admin"
+            return _finish_step(db, step, "failure")
+        if outcome != "running":
+            return _finish_step(db, step, "failure")
 
     vm = _resolve_target_vm(db, run, node)
     if vm is None or not vm.ip_address:

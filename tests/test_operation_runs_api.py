@@ -151,3 +151,126 @@ def test_operation_run_detail_returns_steps(seeded_client):
         {"node_id": "n1", "node_type": "ability", "status": "running",
          "result": None, "output": None, "attempts": 1}
     ]
+
+
+def _seed_run(sessions, run_status="running", step_status=None):
+    db = sessions()
+    event = Event(name="Exercise", quota="{}", status="open")
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    team = Team(name="Red One", event_id=event.id)
+    db.add(team)
+    db.commit()
+    db.refresh(team)
+    run = OperationRun(
+        event_id=event.id, operation_id=1, team_id=team.id, status=run_status,
+        plan_snapshot="{}", fact_store="{}", trigger="{}",
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    step_id = None
+    if step_status is not None:
+        step = OperationRunStep(run_id=run.id, node_id="a", node_type="ability", status=step_status)
+        db.add(step)
+        db.commit()
+        db.refresh(step)
+        step_id = step.id
+    db.close()
+    return run.id, step_id
+
+
+def test_approve_run_step_transitions_awaiting_approval_to_queued(seeded_client):
+    test_client, sessions = seeded_client
+    run_id, step_id = _seed_run(sessions, step_status="awaiting_approval")
+
+    with patch("api.routes.admin.require_admin", return_value=User(is_admin=True)):
+        resp = test_client.post(f"/admin/api/operation-runs/{run_id}/steps/{step_id}/approve")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "approved"}
+    db = sessions()
+    assert db.get(OperationRunStep, step_id).status == "queued"
+    db.close()
+
+
+def test_approve_run_step_returns_409_when_not_awaiting_approval(seeded_client):
+    test_client, sessions = seeded_client
+    run_id, step_id = _seed_run(sessions, step_status="running")
+
+    with patch("api.routes.admin.require_admin", return_value=User(is_admin=True)):
+        resp = test_client.post(f"/admin/api/operation-runs/{run_id}/steps/{step_id}/approve")
+
+    assert resp.status_code == 409
+
+
+def test_reject_run_step_transitions_awaiting_approval_to_rejected(seeded_client):
+    test_client, sessions = seeded_client
+    run_id, step_id = _seed_run(sessions, step_status="awaiting_approval")
+
+    with patch("api.routes.admin.require_admin", return_value=User(is_admin=True)):
+        resp = test_client.post(f"/admin/api/operation-runs/{run_id}/steps/{step_id}/reject")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "rejected"}
+    db = sessions()
+    assert db.get(OperationRunStep, step_id).status == "rejected"
+    db.close()
+
+
+def test_cancel_operation_run_marks_run_cancelled(seeded_client):
+    test_client, sessions = seeded_client
+    run_id, _ = _seed_run(sessions, run_status="running")
+
+    with patch("api.routes.admin.require_admin", return_value=User(is_admin=True)):
+        resp = test_client.post(f"/admin/api/operation-runs/{run_id}/cancel")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "cancelled"}
+    db = sessions()
+    assert db.get(OperationRun, run_id).status == "cancelled"
+    db.close()
+
+
+def test_list_operation_runs_returns_all_runs(seeded_client):
+    test_client, sessions = seeded_client
+    db = sessions()
+    event = Event(name="Exercise", quota="{}", status="open")
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    first = Team(name="Red One", event_id=event.id)
+    second = Team(name="Red Two", event_id=event.id)
+    db.add_all([first, second])
+    db.commit()
+    db.refresh(first)
+    db.refresh(second)
+    operation = EventOperation(
+        event_id=event.id, name="Phase 1", position=0, operation_plan=json.dumps(_valid_plan())
+    )
+    db.add(operation)
+    db.commit()
+    db.refresh(operation)
+    r1 = OperationRun(
+        event_id=event.id, operation_id=operation.id, team_id=first.id, status="queued",
+        plan_snapshot="{}", fact_store="{}", trigger="{}",
+    )
+    r2 = OperationRun(
+        event_id=event.id, operation_id=operation.id, team_id=second.id, status="completed",
+        plan_snapshot="{}", fact_store="{}", trigger="{}",
+    )
+    db.add_all([r1, r2])
+    db.commit()
+    db.refresh(r1)
+    db.refresh(r2)
+    db.close()
+
+    with patch("api.routes.admin.require_admin", return_value=User(is_admin=True)):
+        resp = test_client.get(f"/admin/api/events/{event.id}/operations/{operation.id}/runs")
+
+    assert resp.status_code == 200
+    rows = resp.json()["runs"]
+    assert {row["id"] for row in rows} == {r1.id, r2.id}
+    assert {row["team_id"] for row in rows} == {first.id, second.id}
+    assert {row["status"] for row in rows} == {"queued", "completed"}
