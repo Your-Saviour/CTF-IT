@@ -551,7 +551,9 @@ def snapshot_site_validation_command(*, token: str, expected_version: str, publi
     return (
         f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready && "
         f"{_opnsense_release_test(expected_version)} && "
-        f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {public_ip}' >/dev/null && "
+        # AWS maps an Elastic IP at the VPC edge; the guest correctly sees the
+        # ENI's private address rather than ``public_ip``.
+        f"ifconfig {shlex.quote(wan_interface)} | grep -E 'inet [0-9]' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {private_ip}' >/dev/null && "
         f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "

@@ -59,6 +59,8 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
     assert "Allow management SSH" not in command
     assert "printf '%s\\n' generation-token" in command
     assert "/conf/ctf-site-ready" in command
+    assert "inet 198.51.100.12" not in command
+    assert "grep -E 'inet [0-9]'" in command
 
 
 def test_opnsense_config_fingerprint_is_stable_and_tracks_semantic_inputs():
