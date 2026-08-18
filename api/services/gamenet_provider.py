@@ -98,7 +98,8 @@ class AwsGameNetProvider:
         for zone in site.zones:
             groups[zone.key] = self.network.ensure_security_group(SecurityGroupSpec(
                 site.vpc_id, f"ctf-it-site-{site.id}-{zone.key}", f"GameNet zone {zone.key}",
-                all_traffic(zone.subnet, "10.64.0.0/10"), all_traffic(site.allocated_cidr),
+                all_traffic(zone.subnet, "10.64.0.0/10"),
+                all_traffic(site.allocated_cidr, "10.64.0.0/10"),
                 {**tags, "NetworkRole": zone.key},
             ))
         return groups

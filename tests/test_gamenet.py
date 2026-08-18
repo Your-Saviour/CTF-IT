@@ -883,6 +883,10 @@ def test_aws_gamenet_zone_security_group_allows_workloads_and_vpn_management():
         "IpProtocol": "-1",
         "IpRanges": [{"CidrIp": "10.128.1.0/24"}, {"CidrIp": "10.64.0.0/10"}],
     },)
+    assert network.specs[2].egress == ({
+        "IpProtocol": "-1",
+        "IpRanges": [{"CidrIp": "10.128.0.0/20"}, {"CidrIp": "10.64.0.0/10"}],
+    },)
 
 
 def test_temporary_gateway_ingress_allows_wireguard_peers_but_limits_ssh(monkeypatch):
