@@ -38,8 +38,8 @@ log = logging.getLogger(__name__)
 PROVISIONING_STEPS = (
     "allocate_keys_and_addresses", "create_gateways", "create_site_firewalls",
     "establish_site_tunnels", "connecting_control_plane", "certifying_private_boot",
-    "create_private_endpoints", "apply_blue_modules", "lock_down_public_ingress",
-    "run_acceptance_checks",
+    "create_private_endpoints", "apply_blue_modules", "run_connectivity_checks",
+    "lock_down_public_ingress", "run_exposure_checks",
 )
 
 
@@ -452,11 +452,18 @@ def lock_down_public_ingress(db, event, infrastructure):
     _remove_temporary_management_access(event)
 
 
-def run_acceptance_checks(db, event, infrastructure):
-    result = _run_connectivity_and_exposure_checks(event, infrastructure)
-    required = {"vpn_routes", "same_site", "site_isolation", "team_isolation", "private_management", "public_exposure"}
+def run_connectivity_checks(db, event, infrastructure):
+    result = _run_connectivity_and_exposure_checks(event, infrastructure, exposure=False)
+    required = {"vpn_routes", "same_site", "site_isolation", "team_isolation", "private_management"}
+    if not all(result[name] for name in required):
+        raise RuntimeError("GameNet connectivity checks did not all pass")
+
+
+def run_exposure_checks(db, event, infrastructure):
+    result = _run_connectivity_and_exposure_checks(event, infrastructure, connectivity=False)
+    required = {"public_exposure"}
     if set(result) != required or not all(result.values()):
-        raise RuntimeError("GameNet acceptance checks did not all pass")
+        raise RuntimeError("GameNet public exposure checks did not all pass")
 
 
 def _require_provider():
@@ -679,7 +686,7 @@ write_config("Remove temporary public management access");'''
             raise GameNetProviderError(f"failed to remove temporary OPNsense management rules: {detail}")
 
 
-def _run_connectivity_and_exposure_checks(event, infrastructure):
+def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity=True, exposure=True):
     db = object_session(event)
     sites = db.query(Site).filter_by(event_id=event.id).all()
     teams = db.query(Team).filter_by(event_id=event.id).all()
@@ -689,30 +696,33 @@ def _run_connectivity_and_exposure_checks(event, infrastructure):
     team_isolation = True
     vpn_routes = True
     public_exposure = True
-    provider = _provider()
-    try:
-        for team in teams:
-            gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
-            group_ids = json.loads(gateway_vm.security_group_ids_json or "[]")
-            rules = provider.security_group_rules(group_ids[0]) if len(group_ids) == 1 else ()
-            public_exposure &= tuple(rules) == _gateway_ingress(team, temporary=False)
-        for site in sites:
-            public_exposure &= provider.security_group_rules(site.wan_security_group_id) == ()
-    finally:
-        provider.close()
+    if exposure:
+        provider = _provider()
+        try:
+            for team in teams:
+                gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
+                group_ids = json.loads(gateway_vm.security_group_ids_json or "[]")
+                rules = provider.security_group_rules(group_ids[0]) if len(group_ids) == 1 else ()
+                public_exposure &= tuple(rules) == _gateway_ingress(team, temporary=False)
+            for site in sites:
+                public_exposure &= provider.security_group_rules(site.wan_security_group_id) == ()
+        finally:
+            provider.close()
     for site in sites:
         firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
         gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
-        private_management &= _tcp_probe(firewall.private_ip, 443)
-        public_exposure &= _wait_ports_closed(firewall.public_ip, (22, 80, 443))
+        if connectivity:
+            private_management &= _tcp_probe(firewall.private_ip, 443)
+        if exposure:
+            public_exposure &= _wait_ports_closed(firewall.public_ip, (22, 80, 443))
         endpoints = db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all()
-        if len(endpoints) > 1:
+        if connectivity and len(endpoints) > 1:
             code, _, _ = ssh_command(
                 endpoints[0], f"ping -c 1 -W 3 {endpoints[1].private_ip}", jump=gateway_vm,
             )
             same_site &= code == 0
         other_sites = [other for other in sites if other.team_id == site.team_id and other.id != site.id]
-        if endpoints and other_sites:
+        if connectivity and endpoints and other_sites:
             target = db.query(VM).filter(VM.site_id == other_sites[0].id, VM.role.like("%_endpoint")).first()
             if target:
                 code, _, _ = ssh_command(
@@ -721,12 +731,14 @@ def _run_connectivity_and_exposure_checks(event, infrastructure):
                 site_isolation &= code != 0
     for team in teams:
         gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
-        public_exposure &= _wait_ports_closed(gateway_vm.public_ip, (22, 80, 443, 8080))
-        for site in team.sites:
-            firewall = db.get(VM, site.firewall_vm_id)
-            vpn_routes &= _tcp_probe(firewall.private_ip, 443)
+        if exposure:
+            public_exposure &= _wait_ports_closed(gateway_vm.public_ip, (22, 80, 443, 8080))
+        if connectivity:
+            for site in team.sites:
+                firewall = db.get(VM, site.firewall_vm_id)
+                vpn_routes &= _tcp_probe(firewall.private_ip, 443)
         other = next((candidate for candidate in teams if candidate.id != team.id and candidate.sites), None)
-        if other:
+        if connectivity and other:
             source = db.query(VM).filter(VM.team_id == team.id, VM.role.like("%_endpoint")).first()
             if source:
                 destination = db.get(VM, other.sites[0].firewall_vm_id).private_ip
@@ -734,9 +746,13 @@ def _run_connectivity_and_exposure_checks(event, infrastructure):
                     source, f"ping -c 1 -W 3 {destination}", jump=gateway_vm,
                 )
                 team_isolation &= code != 0
-    return {"vpn_routes": vpn_routes, "same_site": same_site, "site_isolation": site_isolation,
-            "team_isolation": team_isolation, "private_management": private_management,
-            "public_exposure": public_exposure}
+    result = {}
+    if connectivity:
+        result.update({"vpn_routes": vpn_routes, "same_site": same_site, "site_isolation": site_isolation,
+                       "team_isolation": team_isolation, "private_management": private_management})
+    if exposure:
+        result["public_exposure"] = public_exposure
+    return result
 
 
 def _tcp_probe(host, port, timeout=3):

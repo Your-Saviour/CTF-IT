@@ -554,6 +554,9 @@ def test_firewall_and_certification_phases_precede_endpoint_creation():
     assert PROVISIONING_STEPS.index("establish_site_tunnels") < PROVISIONING_STEPS.index("connecting_control_plane")
     assert PROVISIONING_STEPS.index("connecting_control_plane") < PROVISIONING_STEPS.index("certifying_private_boot")
     assert PROVISIONING_STEPS.index("certifying_private_boot") < PROVISIONING_STEPS.index("create_private_endpoints")
+    assert PROVISIONING_STEPS.index("create_private_endpoints") < PROVISIONING_STEPS.index("run_connectivity_checks")
+    assert PROVISIONING_STEPS.index("run_connectivity_checks") < PROVISIONING_STEPS.index("lock_down_public_ingress")
+    assert PROVISIONING_STEPS.index("lock_down_public_ingress") < PROVISIONING_STEPS.index("run_exposure_checks")
 
 
 def test_vpc_only_validation_rejects_public_or_ambiguous_responses():
