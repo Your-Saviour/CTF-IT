@@ -73,8 +73,6 @@ def test_gamenet_site_is_private_and_routes_through_opnsense(
             event_id, session_factory=lambda: db,
         )
         assert not result.remaining
-        db.delete(db.get(Event, event_id))
-        db.commit()
         for name in (f"ctf-e{event_id}-t{team.id}", "ctf-gamenet"):
             subprocess.run(
                 ["ip", "link", "delete", name], check=False,

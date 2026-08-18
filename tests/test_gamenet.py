@@ -838,6 +838,25 @@ def test_aws_gamenet_wan_security_group_limits_temporary_ssh_to_control_plane(mo
     assert final_wan.ingress == ()
 
 
+def test_temporary_gateway_ingress_allows_wireguard_peers_but_limits_ssh(monkeypatch):
+    from api.services.gamenet_provisioning import _gateway_ingress
+
+    monkeypatch.setenv("CTF_CONTROL_PLANE_CIDR", "192.0.2.8/32")
+    team = MagicMock()
+    team.vpn_gateway.listen_port = 51820
+
+    assert _gateway_ingress(team, temporary=True) == (
+        {
+            "IpProtocol": "udp", "FromPort": 51820, "ToPort": 51820,
+            "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+        },
+        {
+            "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+            "IpRanges": [{"CidrIp": "192.0.2.8/32"}],
+        },
+    )
+
+
 def test_snapshot_validation_adapter_passes_lan_address_to_renderer(monkeypatch):
     from api.services import gamenet_provider, opnsense_images
 

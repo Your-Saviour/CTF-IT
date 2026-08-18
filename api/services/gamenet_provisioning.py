@@ -578,10 +578,9 @@ def _gateway_ingress(team, *, temporary: bool) -> tuple[dict, ...]:
         raise GameNetProviderError("CTF_CONTROL_PLANE_CIDR must be a valid IPv4 CIDR") from exc
     if control_plane.version != 4:
         raise GameNetProviderError("CTF_CONTROL_PLANE_CIDR must be an IPv4 CIDR")
-    udp_cidr = str(control_plane) if temporary else "0.0.0.0/0"
     rules = [{
         "IpProtocol": "udp", "FromPort": team.vpn_gateway.listen_port,
-        "ToPort": team.vpn_gateway.listen_port, "IpRanges": [{"CidrIp": udp_cidr}],
+        "ToPort": team.vpn_gateway.listen_port, "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
     }]
     if temporary:
         rules.append({
