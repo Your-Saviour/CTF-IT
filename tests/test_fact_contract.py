@@ -92,3 +92,22 @@ def test_catalogue_validation_reports_bad_inputs():
     b = mod("b", {"exploit": {"command": "y", "inputs": ["ctf.a.nope"]}})
     report = validate_catalogue([a, b])
     assert any("unknown trait" in e for e in report["b"])
+
+
+def test_named_group_string_falls_back_to_group_one():
+    m = mod("w", {"recon": {
+        "command": "echo VULNERABLE user=x",
+        "parser": [{"module": "x", "mappings": [{
+            "source": "ctf.vuln.w",
+            "custom_parser_vals": {"marker": "VULNERABLE", "pattern": "user=(?P<user>\\S+)", "group": "user"},
+        }]}],
+    }})
+    facts = ability_facts(m, "recon")
+    assert facts.outputs[0].group == 1
+    assert extract_facts("VULNERABLE user=svc", facts.outputs) == {"ctf.vuln.w": "svc"}
+
+    m2 = mod("v", {"exploit": {
+        "command": "x",
+        "outputs": [{"trait": "ctf.v.shell", "marker": "OK", "pattern": "user=(\\S+)", "group": "user"}],
+    }})
+    assert ability_facts(m2, "exploit").outputs[0].group == 1

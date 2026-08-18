@@ -60,6 +60,14 @@ def _requirement_sources(section: dict) -> list[str]:
     return [s for s in sources if s]
 
 
+def _group_int(value) -> int:
+    """Coerce a capture-group index to int, falling back to 1 on named/odd values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 1
+
+
 def _spec_from_mapping(mapping: dict) -> FactSpec | None:
     trait = mapping.get("source")
     if not trait:
@@ -69,7 +77,7 @@ def _spec_from_mapping(mapping: dict) -> FactSpec | None:
         trait=trait,
         marker=vals.get("marker", ""),
         pattern=vals.get("pattern", ""),
-        group=int(vals.get("group", 1)),
+        group=_group_int(vals.get("group", 1)),
     )
 
 
@@ -84,7 +92,7 @@ def ability_facts(module: Module, phase: str) -> AbilityFacts:
             trait=o["trait"],
             marker=o.get("marker", ""),
             pattern=o.get("pattern", ""),
-            group=int(o.get("group", 1)),
+            group=_group_int(o.get("group", 1)),
         ) for o in section["outputs"]]
     elif _parser_mappings(section):
         outputs = [s for m in _parser_mappings(section) if (s := _spec_from_mapping(m))]
