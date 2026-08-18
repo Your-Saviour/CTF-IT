@@ -189,6 +189,9 @@ async def lifespan(app: FastAPI):
             db.add(Event(name="Default CTF Event", quota=quota, status="draft"))
             db.commit()
 
+        # Seed the draft operation-chaining showcase event (idempotent)
+        seed_showcase_event(db)
+
         # Seed default service credentials if none exist
         from api.services.secrets import encrypt_secret
         from api.models import ServiceCredential
@@ -340,6 +343,53 @@ async def lifespan(app: FastAPI):
                 await verification_task
         await ai_agent.close_agent_client()
         engine.dispose()
+
+
+def seed_showcase_event(db) -> None:
+    from api.models import Event, EventOperation
+    if db.query(Event).filter(Event.name == "Operation Chaining Demo").first():
+        return
+    infrastructure = {"version": 1, "sites": [{"key": "demo", "name": "Demo", "zones": [{
+        "key": "site", "name": "Demo Site", "team": "blue", "endpoints": [{
+            "key": "box", "name": "Demo Box", "base_type": "ubuntu_24_server",
+        }],
+    }]}]}
+    module_plan = {"version": 1, "assignments": {"vm:demo/site/box": {
+        "mode": "manual_only",
+        "pinned_module_ids": ["weak_ssh_credentials", "nopasswd_sudo", "malicious_cron_beacon"],
+        "resolved_module_ids": ["weak_ssh_credentials", "nopasswd_sudo", "malicious_cron_beacon"],
+    }}}
+    plan = {
+        "version": 1,
+        "policy": {"time_limit_minutes": 60, "max_concurrency": 1, "default_timeout_seconds": 120,
+                   "default_retries": 0, "default_retry_delay_seconds": 5, "instructor_approval": False},
+        "nodes": [
+            {"id": "trigger", "type": "manual_trigger", "label": "Manual Trigger", "config": {}},
+            {"id": "foothold", "type": "ability", "label": "Foothold (weak SSH)",
+             "config": {"module_id": "weak_ssh_credentials", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "privesc", "type": "ability", "label": "Privilege Escalation (NOPASSWD sudo)",
+             "config": {"module_id": "nopasswd_sudo", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "implant", "type": "ability", "label": "Implant (cron beacon)",
+             "config": {"module_id": "malicious_cron_beacon", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "finish", "type": "finish", "label": "Finish", "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "trigger", "target": "foothold", "condition": "always"},
+            {"id": "e2", "source": "foothold", "target": "privesc", "condition": "success"},
+            {"id": "e3", "source": "privesc", "target": "implant", "condition": "success"},
+            {"id": "e4", "source": "implant", "target": "finish", "condition": "always"},
+        ],
+    }
+    event = Event(name="Operation Chaining Demo", status="draft",
+                  quota='{"vulnerability":{"easy":2,"medium":1,"hard":0}}',
+                  infrastructure=json.dumps(infrastructure),
+                  module_plan=json.dumps(module_plan))
+    db.add(event)
+    db.flush()
+    db.add(EventOperation(event_id=event.id, name="RCE → Privilege Escalation → Implant",
+                          description="Chained sweep: foothold → privesc → implant",
+                          position=0, operation_plan=json.dumps(plan)))
+    db.commit()
 
 
 app = FastAPI(title="CTF Training Platform", lifespan=lifespan)

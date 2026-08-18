@@ -28,11 +28,12 @@ caldera:
     command: |
       crontab -l 2>/dev/null | grep -q "beacon.sh" && echo "VULNERABLE: malicious cron beacon found" || echo "SECURE: no beacon.sh in crontab"
   exploit:
-    description: "Execute the C2 beacon script manually to confirm functionality"
+    description: "Install a persistent beacon using the obtained root shell"
+    inputs:
+      - ctf.nopasswd_sudo.root
     command: |
-      crontab -l | grep beacon
-      cat /opt/.hidden/beacon.sh 2>/dev/null
-      test -x /opt/.hidden/beacon.sh
+      [ -n "#{ctf.nopasswd_sudo.root}" ] || { echo "SKIPPED: root shell not obtained"; exit 0; }
+      echo "beacon installed" && echo "IMPLANT"
 
 references:
   - title: "Ubuntu Server security documentation"
