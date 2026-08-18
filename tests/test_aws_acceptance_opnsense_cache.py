@@ -1,4 +1,5 @@
 import json
+import stat
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -8,8 +9,34 @@ from scripts.aws_acceptance_opnsense_cache import (
     validate_account,
 )
 
+from api.models import PlatformSettings
+
 
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc)
+
+
+def test_acceptance_platform_key_survives_ephemeral_database(tmp_path):
+    from tests.aws_acceptance.cache_fixture import load_acceptance_platform_key
+    from api.database import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    key_path = tmp_path / "state" / "platform-key.json"
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    first = load_acceptance_platform_key(db, key_path)
+    db.query(PlatformSettings).filter(
+        PlatformSettings.key.in_(("ssh_private_key", "ssh_public_key")),
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    second = load_acceptance_platform_key(db, key_path)
+
+    assert second == first
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+    db.close()
+    engine.dispose()
 
 
 def identity(**changes):

@@ -34,11 +34,15 @@ def aws_opnsense_image(aws_context):
         GOLDEN_CONFIG_REVISION, IMAGE_BUILD_REVISION, CacheIdentity,
         discover_cache, promote_cache,
     )
-    from .cache_fixture import materialize_cached_image
+    from .cache_fixture import load_acceptance_platform_key, materialize_cached_image
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine, expire_on_commit=False)()
+    platform_key_path = os.environ.get("AWS_ACCEPTANCE_PLATFORM_KEY_FILE", "").strip()
+    if not platform_key_path:
+        raise RuntimeError("AWS_ACCEPTANCE_PLATFORM_KEY_FILE is required")
+    load_acceptance_platform_key(db, Path(platform_key_path))
     ec2 = aws_context.ec2()
     version = "26.7"
     bootstrap, bootstrap_digest = download_bootstrap()

@@ -1,10 +1,37 @@
 """Database adapter for a retained OPNsense acceptance AMI."""
 
 import json
+import os
+from pathlib import Path
 
 from api.models import OpnsenseImage, PlatformSettings, utcnow
 from api.services.opnsense_images import BOOTSTRAP_SOURCE_URL, BUILD_METHOD, SUPPORTED_RELEASES
+from api.services.ssh_keys import get_or_create_platform_keypair
 from scripts.aws_acceptance_opnsense_cache import CacheIdentity, CachedAmi
+
+
+def load_acceptance_platform_key(db, path: Path) -> tuple[str, str]:
+    """Keep the key baked into a cached acceptance AMI across ephemeral databases."""
+    path = Path(path)
+    if path.is_file():
+        stored = json.loads(path.read_text())
+        private_key = stored["private_key"]
+        public_key = stored["public_key"]
+        if not private_key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"):
+            raise RuntimeError("cached acceptance platform private key is invalid")
+        if not public_key.startswith("ssh-ed25519 "):
+            raise RuntimeError("cached acceptance platform public key is invalid")
+        db.add(PlatformSettings(key="ssh_private_key", value=private_key))
+        db.add(PlatformSettings(key="ssh_public_key", value=public_key))
+        db.commit()
+        return private_key, public_key
+
+    private_key, public_key = get_or_create_platform_keypair(db)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as handle:
+        json.dump({"private_key": private_key, "public_key": public_key}, handle)
+    return private_key, public_key
 
 
 def materialize_cached_image(db, cached: CachedAmi, identity: CacheIdentity, *,

@@ -165,7 +165,10 @@ def test_aws_login_and_acceptance_are_containerized() -> None:
         for value in acceptance["environment"]
     )
     assert "AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD=${AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD:-}" in acceptance["environment"]
+    assert "AWS_ACCEPTANCE_PLATFORM_KEY_FILE=/var/lib/aws-acceptance/platform-key.json" in acceptance["environment"]
+    assert "aws_acceptance_state:/var/lib/aws-acceptance" in acceptance["volumes"]
     assert "aws_credentials" in compose["volumes"]
+    assert "aws_acceptance_state" in compose["volumes"]
 
 
 def test_opnsense_cache_operator_commands_run_in_acceptance_container() -> None:
@@ -203,5 +206,6 @@ def test_aws_containers_expose_no_static_keys_or_host_credential_mounts() -> Non
         assert "AWS_ACCESS_KEY_ID" not in environment
         assert "AWS_SECRET_ACCESS_KEY" not in environment
         assert "aws_credentials:/root/.aws" in volumes
-        assert all(volume.startswith(("aws_credentials:", "opnsense_source_cache:"))
+        assert all(volume.startswith(("aws_credentials:", "opnsense_source_cache:",
+                                      "aws_acceptance_state:"))
                    for volume in volumes)

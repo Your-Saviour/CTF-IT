@@ -95,6 +95,7 @@ services:
     volumes:
       - aws_credentials:/root/.aws
       - opnsense_source_cache:/var/cache/opnsense:ro
+      - aws_acceptance_state:/var/lib/aws-acceptance
     environment:
       - SECRET_KEY=aws-acceptance-container-only
       - DATA_ENCRYPTION_KEY=aws-acceptance-data-container-only
@@ -114,6 +115,7 @@ services:
       - AWS_ACCEPTANCE_ACCOUNT_ID=${AWS_ACCEPTANCE_ACCOUNT_ID:-}
       - AWS_ACCEPTANCE_RUN_ID=${AWS_ACCEPTANCE_RUN_ID:-}
       - AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD=${AWS_ACCEPTANCE_FORCE_OPNSENSE_BUILD:-}
+      - AWS_ACCEPTANCE_PLATFORM_KEY_FILE=/var/lib/aws-acceptance/platform-key.json
       - OPNSENSE_CORE_ARCHIVE=/var/cache/opnsense/core-26.7.tar.gz
       - OPNSENSE_CORE_COMMIT_FILE=/var/cache/opnsense/core-26.7.commit
     depends_on:
@@ -154,6 +156,7 @@ services:
 
 volumes:
   api_data:
+  aws_acceptance_state:
   aws_credentials:
   agent_data:
   opnsense_source_cache:
