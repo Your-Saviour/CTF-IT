@@ -556,24 +556,45 @@ def edge_activated(condition: str, result: str) -> bool:
     return False
 
 
+def _satisfied(node: CompiledNode, incoming: list[dict], status: dict[str, str]) -> bool:
+    activated = [e for e in incoming if e["source"] in status and edge_activated(e["condition"], status[e["source"]])]
+    if node.node_type == "gate":
+        mode = node.config.get("mode", "all")
+        if mode == "all":
+            return len(activated) == len(incoming) and all(e["source"] in status for e in incoming)
+        return bool(activated)
+    return bool(activated)
+
+
 def next_ready_nodes(nodes: dict[str, CompiledNode], edges: list[dict], completed: dict[str, str]) -> list[str]:
+    status: dict[str, str] = dict(completed)
+    for node_id, node in nodes.items():
+        if node.node_type.endswith("_trigger"):
+            status.setdefault(node_id, "success")
+
+    changed = True
+    while changed:
+        changed = False
+        for node_id, node in nodes.items():
+            if node_id in status:
+                continue
+            incoming = [e for e in edges if e["target"] == node_id]
+            if not incoming:
+                continue
+            if not all(e["source"] in status for e in incoming):
+                continue
+            if not _satisfied(node, incoming, status):
+                status[node_id] = "skipped"
+                changed = True
+
     ready: list[str] = []
     for node_id, node in nodes.items():
-        if node_id in completed:
+        if node_id in status:
             continue
         incoming = [e for e in edges if e["target"] == node_id]
-        if not incoming and node.node_type not in ("finish",):
+        if not incoming:
             continue
-        activated = [e for e in incoming if e["source"] in completed and edge_activated(e["condition"], completed[e["source"]])]
-        if node.node_type == "gate":
-            mode = node.config.get("mode", "all")
-            if mode == "all":
-                satisfied = len(activated) == len(incoming) and all(e["source"] in completed for e in incoming)
-            else:  # any / first
-                satisfied = bool(activated)
-        else:
-            satisfied = bool(activated)
-        if satisfied:
+        if _satisfied(node, incoming, status):
             ready.append(node_id)
     return sorted(ready)
 ```
@@ -1219,12 +1240,47 @@ Expose launch/list/detail/approve/cancel and mark interrupted runs on startup.
 
 - [ ] **Step 1: Write the failing test**
 
+The admin router in `api/routes/admin.py` carries the prefix `/admin/api`, so the JSON endpoints are served at `/admin/api/...`. The test uses a `client` fixture (not patched for auth) so an unauthenticated POST returns 403; model after `tests/test_event_operations_api.py` (in-memory SQLite via `StaticPool`, `app.include_router(router)`, `app.dependency_overrides[get_db] = override_db`, `TestClient`). For this test do NOT patch `require_admin`:
+
 ```python
 # tests/test_operation_runs_api.py
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from api.database import Base, get_db
+from api.models import Event
+from api.routes.admin import router
+
+
+@pytest.fixture
+def client():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    app = FastAPI()
+    app.include_router(router)
+
+    def override_db():
+        session = sessions()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_db
+    with TestClient(app) as test_client:
+        yield test_client
+
+
 def test_run_endpoint_rejects_non_admin(client):
-    resp = client.post("/admin/events/1/operations/1/run", json={})
+    resp = client.post("/admin/api/events/1/operations/1/run", json={})
     assert resp.status_code == 403
 ```
+
+(Add `import pytest` at the top of the file.) In Step 5 add happy-path tests using `unittest.mock.patch("api.routes.admin.require_admin", return_value=...)` plus a seeded `Event`, `EventOperation`, and `Team`, following `tests/test_event_operations_api.py`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1347,7 +1403,7 @@ In `api/main.py`, in the startup block after the interrupted-provisioning handli
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `pytest tests/test_operation_runs_api.py -v`
-Expected: PASS (the 403 test; add happy-path tests with a client fixture + seeded EventOperation/Team as the existing `tests/test_event_operations_api.py` does).
+Expected: PASS (the 403 test; add happy-path tests with a `require_admin` patch + seeded EventOperation/Team as `tests/test_event_operations_api.py` does).
 
 - [ ] **Step 6: Commit**
 
@@ -1370,7 +1426,7 @@ Add a Run button to the operation designer and a run detail view with per-step o
 - Modify: `api/routes/admin.py` (or `main.py`) to serve the run page
 
 **Interfaces:**
-- Consumes: `GET /admin/events/{event_id}/operations/{operation_id}/runs` and `GET /admin/operation-runs/{run_id}` (Task 7).
+- Consumes: `GET /admin/api/events/{event_id}/operations/{operation_id}/runs` and `GET /admin/api/operation-runs/{run_id}` (Task 7).
 
 - [ ] **Step 1: Add the Run button**
 
@@ -1384,7 +1440,7 @@ In `frontend/static/event-operation.js`, wire it (fetch the run endpoint, then r
 
 ```javascript
 document.getElementById('operation-run')?.addEventListener('click', async () => {
-  const resp = await fetch(`/admin/events/${eventId}/operations/${operationId}/run`, {
+  const resp = await fetch(`/admin/api/events/${eventId}/operations/${operationId}/run`, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({}),
   });
   const data = await resp.json();
@@ -1398,7 +1454,7 @@ document.getElementById('operation-run')?.addEventListener('click', async () => 
 
 - [ ] **Step 2: Add the run detail page**
 
-Create `frontend/templates/operation_run.html` with a status header, a per-step list (node_id → status/result/output), a fact-store table, and approve/reject buttons for steps with `status === "awaiting_approval"`. Poll `GET /admin/operation-runs/{run_id}` every 4s and re-render (mirror the polling pattern in the provisioning progress bar). Approve/reject call `POST /admin/operation-runs/{run_id}/steps/{step_id}/approve|reject`.
+Create `frontend/templates/operation_run.html` with a status header, a per-step list (node_id → status/result/output), a fact-store table, and approve/reject buttons for steps with `status === "awaiting_approval"`. Poll `GET /admin/api/operation-runs/{run_id}` every 4s and re-render (mirror the polling pattern in the provisioning progress bar). Approve/reject call `POST /admin/api/operation-runs/{run_id}/steps/{step_id}/approve` / `.../reject`.
 
 - [ ] **Step 3: Add the HTML route**
 

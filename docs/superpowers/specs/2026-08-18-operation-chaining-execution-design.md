@@ -103,11 +103,13 @@ Traversal uses a worklist over the validated-acyclic plan (start at the trigger,
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /admin/events/{event_id}/operations/{operation_id}/run` | compile + launch; body `{team_id?}` — omit to run for every team (one `OperationRun` each) |
-| `GET /admin/events/{event_id}/operations/{operation_id}/runs` | list runs (status, team, progress) |
-| `GET /admin/operation-runs/{run_id}` | detail: status, per-step results, fact store, graph node statuses |
-| `POST /admin/operation-runs/{run_id}/steps/{step_id}/approve` / `reject` | human-in-loop |
-| `POST /admin/operation-runs/{run_id}/cancel` | cancel a running/paused run |
+| `POST /admin/api/events/{event_id}/operations/{operation_id}/run` | compile + launch; body `{team_id?}` — omit to run for every team (one `OperationRun` each) |
+| `GET /admin/api/events/{event_id}/operations/{operation_id}/runs` | list runs (status, team, progress) |
+| `GET /admin/api/operation-runs/{run_id}` | detail: status, per-step results, fact store, graph node statuses |
+| `POST /admin/api/operation-runs/{run_id}/steps/{step_id}/approve` / `reject` | human-in-loop |
+| `POST /admin/api/operation-runs/{run_id}/cancel` | cancel a running/paused run |
+
+(The admin router in `api/routes/admin.py` carries the `/admin/api` prefix, so the JSON endpoints above are served under it; the run-detail HTML page is served at `/admin/events/{event_id}/operations/{operation_id}/runs/{run_id}` from `api/main.py`.)
 
 Launch uses an asyncio background task (`asyncio.create_task(launch_run(run.id))`) so a sweep doesn't block the request.
 
