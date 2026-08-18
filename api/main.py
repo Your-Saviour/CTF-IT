@@ -365,6 +365,8 @@ def seed_showcase_event(db) -> None:
                    "default_retries": 0, "default_retry_delay_seconds": 5, "instructor_approval": False},
         "nodes": [
             {"id": "trigger", "type": "manual_trigger", "label": "Manual Trigger", "config": {}},
+            {"id": "recon", "type": "ability", "label": "Foothold Recon (weak SSH)",
+             "config": {"module_id": "weak_ssh_credentials", "ability": "recon", "target_vm_id": "vm:demo/site/box"}},
             {"id": "foothold", "type": "ability", "label": "Foothold (weak SSH)",
              "config": {"module_id": "weak_ssh_credentials", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
             {"id": "privesc", "type": "ability", "label": "Privilege Escalation (NOPASSWD sudo)",
@@ -374,10 +376,11 @@ def seed_showcase_event(db) -> None:
             {"id": "finish", "type": "finish", "label": "Finish", "config": {}},
         ],
         "edges": [
-            {"id": "e1", "source": "trigger", "target": "foothold", "condition": "always"},
-            {"id": "e2", "source": "foothold", "target": "privesc", "condition": "success"},
-            {"id": "e3", "source": "privesc", "target": "implant", "condition": "success"},
-            {"id": "e4", "source": "implant", "target": "finish", "condition": "always"},
+            {"id": "e1", "source": "trigger", "target": "recon", "condition": "always"},
+            {"id": "e2", "source": "recon", "target": "foothold", "condition": "success"},
+            {"id": "e3", "source": "foothold", "target": "privesc", "condition": "success"},
+            {"id": "e4", "source": "privesc", "target": "implant", "condition": "success"},
+            {"id": "e5", "source": "implant", "target": "finish", "condition": "success"},
         ],
     }
     event = Event(name="Operation Chaining Demo", status="draft",
