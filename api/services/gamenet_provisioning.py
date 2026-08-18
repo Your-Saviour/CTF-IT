@@ -673,9 +673,10 @@ write_config("Remove temporary public management access");'''
         )
         encoded = base64.b64encode(script.encode()).decode()
         command = f"echo {encoded} | base64 -d | /bin/sh"
-        code, _, error = ssh_command(firewall, command, host=firewall.private_ip)
+        code, output, error = ssh_command(firewall, command, host=firewall.private_ip)
         if code:
-            raise GameNetProviderError(f"failed to remove temporary OPNsense management rules: {error[:300]}")
+            detail = (error or output)[:300]
+            raise GameNetProviderError(f"failed to remove temporary OPNsense management rules: {detail}")
 
 
 def _run_connectivity_and_exposure_checks(event, infrastructure):

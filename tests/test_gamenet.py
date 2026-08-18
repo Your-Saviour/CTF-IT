@@ -888,6 +888,29 @@ def test_opnsense_lockdown_dispatches_posix_script_without_csh_quoting(monkeypat
     assert "configctl filter reload" in script
 
 
+def test_opnsense_lockdown_failure_reports_stdout_when_stderr_is_empty(monkeypatch):
+    from types import SimpleNamespace
+    from api.services import gamenet_provisioning
+
+    event = SimpleNamespace(id=1)
+    site = SimpleNamespace(firewall_vm_id=9)
+    firewall = SimpleNamespace(private_ip="10.128.0.4")
+    class Query:
+        def filter_by(self, **_kwargs): return self
+        def __iter__(self): return iter([site])
+        def one(self): return firewall
+    db = SimpleNamespace(query=lambda _model: Query())
+    monkeypatch.setattr(gamenet_provisioning, "object_session", lambda _event: db)
+    monkeypatch.setattr(
+        gamenet_provisioning,
+        "ssh_command",
+        lambda *_args, **_kwargs: (1, "PHP reported invalid configuration", ""),
+    )
+
+    with pytest.raises(GameNetProviderError, match="PHP reported invalid configuration"):
+        gamenet_provisioning._remove_temporary_management_access(event)
+
+
 def test_snapshot_validation_adapter_passes_lan_address_to_renderer(monkeypatch):
     from api.services import gamenet_provider, opnsense_images
 
