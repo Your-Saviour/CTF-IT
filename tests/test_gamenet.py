@@ -196,6 +196,26 @@ def test_gateway_skips_apt_when_required_packages_are_already_installed(monkeypa
     assert "install -y wireguard iptables unbound; fi &&" in commands[0]
 
 
+def test_gateway_configuration_failure_reports_stdout_when_stderr_is_empty(monkeypatch):
+    from api.services import gamenet_provider
+
+    gateway = MagicMock(
+        private_key_encrypted="encrypted", vpn_address="10.64.0.1",
+        listen_port=51820, platform_public_key=None, platform_address=None,
+    )
+    vm = MagicMock()
+    monkeypatch.setattr(gamenet_provider, "decrypt_secret", lambda _value: "private-key")
+    monkeypatch.setattr(gamenet_provider, "upload_text", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        gamenet_provider,
+        "ssh_command",
+        lambda *_args, **_kwargs: (1, "cloud-init reported a package failure", ""),
+    )
+
+    with pytest.raises(GameNetProviderError, match="cloud-init reported a package failure"):
+        gamenet_provider.configure_gateway(gateway, vm, [], [])
+
+
 def test_gateway_guest_firewall_allows_wireguard_listener():
     source = Path("api/services/gamenet_provider.py").read_text()
     assert 'ufw allow {gateway.listen_port}/udp' in source

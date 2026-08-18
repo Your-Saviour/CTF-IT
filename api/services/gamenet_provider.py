@@ -899,9 +899,9 @@ def configure_gateway(gateway: TeamVPNGateway, vm: VM, sites: list[Site], partic
         # expected transient failure only after the interface is configured.
         "systemctl reset-failed unbound && systemctl enable unbound && systemctl restart unbound"
     )
-    code, _, error = ssh_command(vm, command, host=management_host, timeout=300)
+    code, output, error = ssh_command(vm, command, host=management_host, timeout=300)
     if code:
-        raise GameNetProviderError(f"gateway WireGuard configuration failed: {error[:300]}")
+        raise GameNetProviderError(f"gateway WireGuard configuration failed: {(error or output)[:300]}")
 
 
 def configure_site_wireguard(site: Site, firewall: VM, gateway: TeamVPNGateway, gateway_vm: VM,
