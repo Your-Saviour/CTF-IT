@@ -759,7 +759,7 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
     # Use the /28 containing the ENI address so network+1 is both the
     # OPNsense LAN address and an address AWS permits on the ENI.
     site = SimpleNamespace(allocated_cidr=str(ip_network(f"{private_ip}/28", strict=False)))
-    vm = SimpleNamespace(hostname="opnsense-validation-site")
+    vm = SimpleNamespace(hostname="opnsense-validation-site", private_ip=private_ip)
     previous_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR")
     os.environ["CTF_CONTROL_PLANE_CIDR"] = control_plane_cidr
     try:

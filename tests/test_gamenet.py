@@ -816,6 +816,35 @@ def test_aws_gamenet_wan_security_group_limits_temporary_ssh_to_control_plane(mo
     assert final_wan.ingress == ()
 
 
+def test_snapshot_validation_adapter_passes_lan_address_to_renderer(monkeypatch):
+    from api.services import gamenet_provider, opnsense_images
+
+    responses = iter([
+        (0, "ena0 ena1\n", ""),
+        (0, "", ""),
+        (0, "26.7.2_2\n", ""),
+    ])
+    monkeypatch.setattr(opnsense_images, "_ssh", lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setattr(opnsense_images, "_upload_atomic", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        gamenet_provider, "get_or_create_platform_keypair",
+        lambda _db: ("private", "ssh-ed25519 public"),
+    )
+    rendered = {}
+    def render(_site, vm, *_args, **_kwargs):
+        rendered["private_ip"] = vm.private_ip
+        return "<opnsense/>"
+    monkeypatch.setattr(gamenet_provider, "render_opnsense_config", render)
+
+    gamenet_provider.configure_snapshot_validation_site(
+        object(), host="198.51.100.10", private_ip="172.31.254.17",
+        lan_mac="02:00:00:00:00:17", expected_version="26.7",
+        control_plane_cidr="192.0.2.8/32",
+    )
+
+    assert rendered == {"private_ip": "172.31.254.17"}
+
+
 def test_aws_gamenet_gateway_uses_standard_subnet_owned_sg_and_eip():
     from types import SimpleNamespace
     from api.services.aws import ElasticIpResult, InstanceResult
