@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import base64
 import hashlib
 import logging
 import os
@@ -666,10 +667,12 @@ $config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"]=array_values(array_fi
 ));
 $config["system"]["ssh"]["interfaces"]="lan";
 write_config("Remove temporary public management access");'''
-        command = "/bin/sh -c " + shlex.quote(
+        script = (
             f"/usr/local/bin/php -r {shlex.quote(php)} && "
             "/usr/local/sbin/configctl filter reload && /usr/local/sbin/configctl openssh restart"
         )
+        encoded = base64.b64encode(script.encode()).decode()
+        command = f"echo {encoded} | base64 -d | /bin/sh"
         code, _, error = ssh_command(firewall, command, host=firewall.private_ip)
         if code:
             raise GameNetProviderError(f"failed to remove temporary OPNsense management rules: {error[:300]}")

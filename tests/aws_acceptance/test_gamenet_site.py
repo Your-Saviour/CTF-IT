@@ -44,6 +44,7 @@ def test_gamenet_site_is_private_and_routes_through_opnsense(
     team = Team(name="Acceptance", event_id=event.id)
     db.add(team)
     db.flush()
+    team_id = team.id
     allocate_event_networks(db, event, [team], infrastructure)
     ensure_vm_placeholders(db, event, infrastructure)
     db.commit()
@@ -73,7 +74,7 @@ def test_gamenet_site_is_private_and_routes_through_opnsense(
             event_id, session_factory=lambda: db,
         )
         assert not result.remaining
-        for name in (f"ctf-e{event_id}-t{team.id}", "ctf-gamenet"):
+        for name in (f"ctf-e{event_id}-t{team_id}", "ctf-gamenet"):
             subprocess.run(
                 ["ip", "link", "delete", name], check=False,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

@@ -857,6 +857,37 @@ def test_temporary_gateway_ingress_allows_wireguard_peers_but_limits_ssh(monkeyp
     )
 
 
+def test_opnsense_lockdown_dispatches_posix_script_without_csh_quoting(monkeypatch):
+    import base64
+    from types import SimpleNamespace
+    from api.services import gamenet_provisioning
+
+    event = SimpleNamespace(id=1)
+    site = SimpleNamespace(firewall_vm_id=9)
+    firewall = SimpleNamespace(private_ip="10.128.0.4")
+    class Query:
+        def filter_by(self, **_kwargs): return self
+        def __iter__(self): return iter([site])
+        def one(self): return firewall
+    db = SimpleNamespace(query=lambda _model: Query())
+    commands = []
+    monkeypatch.setattr(gamenet_provisioning, "object_session", lambda _event: db)
+    monkeypatch.setattr(
+        gamenet_provisioning,
+        "ssh_command",
+        lambda _vm, command, **_kwargs: commands.append(command) or (0, "", ""),
+    )
+
+    gamenet_provisioning._remove_temporary_management_access(event)
+
+    assert len(commands) == 1
+    prefix, suffix = "echo ", " | base64 -d | /bin/sh"
+    assert commands[0].startswith(prefix) and commands[0].endswith(suffix)
+    script = base64.b64decode(commands[0][len(prefix):-len(suffix)]).decode()
+    assert 'write_config("Remove temporary public management access")' in script
+    assert "configctl filter reload" in script
+
+
 def test_snapshot_validation_adapter_passes_lan_address_to_renderer(monkeypatch):
     from api.services import gamenet_provider, opnsense_images
 
