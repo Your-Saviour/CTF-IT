@@ -174,6 +174,9 @@ async def lifespan(app: FastAPI):
         from api.services.opnsense_images import interrupt_running_jobs
         interrupt_running_jobs(db)
 
+        from api.services.operation_runner import mark_interrupted_runs
+        mark_interrupted_runs(db)
+
         # Create default event if none exists
         if not db.query(Event).first():
             quota = os.environ.get(

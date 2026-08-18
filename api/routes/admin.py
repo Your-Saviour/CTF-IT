@@ -14,8 +14,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import AccountToken, AdminAudit, Event, EventOperation, OpnsenseImage, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
+from api.models import AccountToken, AdminAudit, Event, EventOperation, OpnsenseImage, OperationRun, OperationRunStep, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
 from api.routes.auth import _token_digest, get_current_user
+from api.services.operation_runner import launch_run
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 
@@ -1018,6 +1019,103 @@ async def preview_event_operation_plan(event_id: int, operation_id: int, request
             return JSONResponse({"error": "Team not found"}, status_code=404)
     team_data = {"id": team.id, "name": team.name} if team else {"id": None, "name": "Canonical team"}
     return compile_team_preview(plan, infrastructure, module_plan, modules, team_data)
+
+
+@router.post("/events/{event_id}/operations/{operation_id}/run")
+async def run_event_operation(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    body = await request.json()
+    from builder.operation_plan import validate_operation_plan
+    infrastructure, module_plan, modules = _operation_context(event)
+    plan = json.loads(operation.operation_plan)
+    issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    if issues:
+        return JSONResponse({"error": "operation plan is invalid", "issues": issues}, status_code=422)
+
+    team_ids = []
+    if body.get("team_id") is not None:
+        team = db.query(Team).filter(Team.id == body["team_id"], Team.event_id == event_id).first()
+        if not team:
+            return JSONResponse({"error": "Team not found"}, status_code=404)
+        team_ids = [team.id]
+    else:
+        team_ids = [t.id for t in db.query(Team).filter(Team.event_id == event_id).all()]
+
+    created = []
+    for team_id in team_ids:
+        run = OperationRun(event_id=event_id, operation_id=operation_id, team_id=team_id,
+                           status="queued", plan_snapshot=operation.operation_plan,
+                           fact_store="{}", trigger="{}")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        created.append(run.id)
+        asyncio.create_task(launch_run(run.id))
+    return {"status": "started", "run_ids": created}
+
+
+@router.get("/events/{event_id}/operations/{operation_id}/runs")
+async def list_event_operation_runs(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    runs = db.query(OperationRun).filter(OperationRun.operation_id == operation_id).all()
+    return {"runs": [{"id": r.id, "status": r.status, "team_id": r.team_id,
+                      "started_at": r.started_at.isoformat() if r.started_at else None,
+                      "finished_at": r.finished_at.isoformat() if r.finished_at else None} for r in runs]}
+
+
+@router.get("/operation-runs/{run_id}")
+async def get_operation_run(run_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    run = db.query(OperationRun).get(run_id)
+    if not run:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    steps = db.query(OperationRunStep).filter(OperationRunStep.run_id == run_id).all()
+    return {"id": run.id, "status": run.status, "team_id": run.team_id,
+            "fact_store": json.loads(run.fact_store or "{}"),
+            "steps": [{"node_id": s.node_id, "node_type": s.node_type, "status": s.status,
+                       "result": s.result, "output": s.output, "attempts": s.attempts}
+                      for s in steps]}
+
+
+@router.post("/operation-runs/{run_id}/steps/{step_id}/approve")
+async def approve_run_step(run_id: int, step_id: int, request: Request, db: Session = Depends(get_db)):
+    return await _approve_reject_run_step(run_id, step_id, request, db, approve=True)
+
+
+@router.post("/operation-runs/{run_id}/steps/{step_id}/reject")
+async def reject_run_step(run_id: int, step_id: int, request: Request, db: Session = Depends(get_db)):
+    return await _approve_reject_run_step(run_id, step_id, request, db, approve=False)
+
+
+async def _approve_reject_run_step(run_id, step_id, request, db, approve):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    step = db.query(OperationRunStep).filter(OperationRunStep.id == step_id,
+                                             OperationRunStep.run_id == run_id).first()
+    if not step or step.status != "awaiting_approval":
+        return JSONResponse({"error": "step not awaiting approval"}, status_code=409)
+    step.status = "queued" if approve else "rejected"
+    db.commit()
+    return {"status": "approved" if approve else "rejected"}
+
+
+@router.post("/operation-runs/{run_id}/cancel")
+async def cancel_operation_run(run_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    run = db.query(OperationRun).get(run_id)
+    if not run:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    run.status = "cancelled"
+    db.commit()
+    return {"status": "cancelled"}
 
 
 @router.post("/events")
