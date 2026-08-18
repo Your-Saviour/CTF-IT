@@ -237,7 +237,7 @@ POLL_SECONDS = int(os.environ.get("GAMENET_PROVIDER_POLL_SECONDS", "10"))
 CREATE_TIMEOUT = int(os.environ.get("GAMENET_INSTANCE_TIMEOUT_SECONDS", "900"))
 WG_INTERFACE = os.environ.get("GAMENET_WG_INTERFACE", "ctf-gamenet")
 OPNSENSE_RELEASE = os.environ.get("GAMENET_OPNSENSE_RELEASE", "26.7")
-OPNSENSE_SITE_CONFIG_SCHEMA = 2
+OPNSENSE_SITE_CONFIG_SCHEMA = 3
 
 
 class GameNetProviderError(RuntimeError):
@@ -527,6 +527,7 @@ def opnsense_config_fingerprint(*, site: Site, vm: VM, expected_version: str, la
         "schema": OPNSENSE_SITE_CONFIG_SCHEMA,
         "site_id": site.id,
         "site_cidr": site.allocated_cidr,
+        "infrastructure_subnet": getattr(site, "infrastructure_subnet", None),
         "vm_id": vm.id,
         "cloud_instance_id": vm.cloud_instance_id,
         "hostname": vm.hostname,
@@ -815,10 +816,15 @@ def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
     environment = Environment(loader=templates, autoescape=False)
     environment.filters["b64encode"] = lambda value: base64.b64encode(str(value).encode()).decode()
     template = environment.get_template("opnsense_config.xml.j2")
-    network = ip_network(site.allocated_cidr)
+    site_network = ip_network(site.allocated_cidr)
+    infrastructure_cidr = getattr(site, "infrastructure_subnet", None)
+    lan_network = ip_network(infrastructure_cidr or site.allocated_cidr)
+    routed_site_network = str(site_network) if lan_network != site_network else None
+    vpc_gateway = str(lan_network.network_address + 1) if routed_site_network else None
     return template.render(
         opnsense_hostname=vm.hostname, opnsense_lan_ip=vm.private_ip,
-        opnsense_lan_subnet=network.prefixlen,
+        opnsense_lan_subnet=lan_network.prefixlen,
+        opnsense_vpc_gateway=vpc_gateway, opnsense_routed_site_network=routed_site_network,
         opnsense_wan_interface=wan_interface, opnsense_lan_interface=lan_interface,
         opnsense_admin_password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode(),
         opnsense_ssh_pubkey=public_key, temporary_management=temporary_management,

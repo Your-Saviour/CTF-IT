@@ -77,8 +77,23 @@
       <subnet>{{ opnsense_lan_subnet }}</subnet>
     </lan>
   </interfaces>
+{% if opnsense_vpc_gateway %}
+  <gateways>
+    <gateway_item>
+      <interface>lan</interface><gateway>{{ opnsense_vpc_gateway }}</gateway>
+      <name>VPC_LAN_GATEWAY</name><priority>255</priority><weight>1</weight>
+      <ipprotocol>inet</ipprotocol><monitor_disable>1</monitor_disable>
+      <descr>AWS VPC router</descr>
+    </gateway_item>
+  </gateways>
+  <staticroutes>
+    <route><network>{{ opnsense_routed_site_network }}</network><gateway>VPC_LAN_GATEWAY</gateway>
+      <descr>GameNet zone subnets</descr></route>
+  </staticroutes>
+{% else %}
   <gateways/>
   <staticroutes/>
+{% endif %}
   <filter/>
   <OPNsense>
     <Firewall>

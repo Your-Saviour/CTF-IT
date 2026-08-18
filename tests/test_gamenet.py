@@ -64,7 +64,8 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
 
 
 def test_opnsense_config_fingerprint_is_stable_and_tracks_semantic_inputs():
-    site = MagicMock(id=7, allocated_cidr="10.128.0.0/20")
+    site = MagicMock(id=7, allocated_cidr="10.128.0.0/20",
+                     infrastructure_subnet="10.128.0.0/24")
     vm = MagicMock(id=9, cloud_instance_id="i-instance-1", public_ip="198.51.100.12",
                    private_ip="10.128.0.1", hostname="firewall")
     gateway_vm = MagicMock(public_ip="198.51.100.20")
@@ -256,7 +257,8 @@ def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
     team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
     allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
     site = db_session.query(Site).one()
-    vm = VM(hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id)
+    vm = VM(hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id,
+            private_ip="10.128.0.4")
     db_session.add(vm); db_session.flush()
     rendered = render_opnsense_config(
         site, vm, "ssh-ed25519 TEST", "password", temporary_management=True,
@@ -271,6 +273,9 @@ def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
     assert "<filter>" not in rendered
     assert "<if>vtnet7</if>" in rendered
     assert "<if>vtnet3</if>" in rendered
+    assert "<subnet>24</subnet>" in rendered
+    assert "<gateway>10.128.0.1</gateway>" in rendered
+    assert "<network>10.128.0.0/20</network>" in rendered
     assert "<passwordauth>" not in rendered
     assert "<ssl-certref>self-signed</ssl-certref>" not in rendered
 
