@@ -559,6 +559,22 @@ def test_firewall_and_certification_phases_precede_endpoint_creation():
     assert PROVISIONING_STEPS.index("lock_down_public_ingress") < PROVISIONING_STEPS.index("run_exposure_checks")
 
 
+def test_connectivity_gate_requires_nat_egress(monkeypatch):
+    from api.services import gamenet_provisioning
+
+    monkeypatch.setattr(
+        gamenet_provisioning,
+        "_run_connectivity_and_exposure_checks",
+        lambda *_args, **_kwargs: {
+            "vpn_routes": True, "same_site": True, "site_isolation": True,
+            "team_isolation": True, "private_management": True,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="connectivity checks"):
+        gamenet_provisioning.run_connectivity_checks(None, object(), {})
+
+
 def test_vpc_only_validation_rejects_public_or_ambiguous_responses():
     with pytest.raises(GameNetProviderError, match="vpc_only=true"):
         validate_vpc_only_instance({"vpc_only": 1, "main_ip": "0.0.0.0"})

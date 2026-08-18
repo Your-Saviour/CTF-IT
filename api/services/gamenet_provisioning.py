@@ -454,8 +454,8 @@ def lock_down_public_ingress(db, event, infrastructure):
 
 def run_connectivity_checks(db, event, infrastructure):
     result = _run_connectivity_and_exposure_checks(event, infrastructure, exposure=False)
-    required = {"vpn_routes", "same_site", "site_isolation", "team_isolation", "private_management"}
-    if not all(result[name] for name in required):
+    required = {"vpn_routes", "same_site", "site_isolation", "team_isolation", "private_management", "nat_egress"}
+    if set(result) != required or not all(result.values()):
         raise RuntimeError("GameNet connectivity checks did not all pass")
 
 
@@ -695,6 +695,7 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
     site_isolation = True
     team_isolation = True
     vpn_routes = True
+    nat_egress = True
     public_exposure = True
     if exposure:
         provider = _provider()
@@ -721,6 +722,12 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
                 endpoints[0], f"ping -c 1 -W 3 {endpoints[1].private_ip}", jump=gateway_vm,
             )
             same_site &= code == 0
+        if connectivity and endpoints:
+            code, output, _ = ssh_command(
+                endpoints[0], "curl -fsS --max-time 20 https://checkip.amazonaws.com",
+                jump=gateway_vm, timeout=60,
+            )
+            nat_egress &= code == 0 and output.strip() == firewall.public_ip
         other_sites = [other for other in sites if other.team_id == site.team_id and other.id != site.id]
         if connectivity and endpoints and other_sites:
             target = db.query(VM).filter(VM.site_id == other_sites[0].id, VM.role.like("%_endpoint")).first()
@@ -749,7 +756,8 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
     result = {}
     if connectivity:
         result.update({"vpn_routes": vpn_routes, "same_site": same_site, "site_isolation": site_isolation,
-                       "team_isolation": team_isolation, "private_management": private_management})
+                       "team_isolation": team_isolation, "private_management": private_management,
+                       "nat_egress": nat_egress})
     if exposure:
         result["public_exposure"] = public_exposure
     return result
