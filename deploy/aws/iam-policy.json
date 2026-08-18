@@ -115,6 +115,7 @@
         "ec2:DisassociateRouteTable",
         "ec2:DisassociateVpcCidrBlock",
         "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyNetworkInterfaceAttribute",
         "ec2:ModifyVpcAttribute",
         "ec2:ReleaseAddress",
         "ec2:ReplaceRoute",

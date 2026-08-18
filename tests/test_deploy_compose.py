@@ -137,6 +137,15 @@ def test_iam_policy_allows_removing_run_tags_only_from_owned_resources() -> None
     assert operated["Condition"]["StringEquals"]["aws:ResourceTag/ManagedBy"] == "ctf-it"
 
 
+def test_iam_policy_allows_disabling_source_checks_on_owned_network_interfaces() -> None:
+    policy = json.loads((ROOT / "deploy" / "aws" / "iam-policy.json").read_text())
+    statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+    operated = statements["OperateOwnedInfrastructure"]
+
+    assert "ec2:ModifyNetworkInterfaceAttribute" in operated["Action"]
+    assert operated["Condition"]["StringEquals"]["aws:ResourceTag/ManagedBy"] == "ctf-it"
+
+
 def test_aws_login_and_acceptance_are_containerized() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
     tools = compose["services"]["aws-tools"]
