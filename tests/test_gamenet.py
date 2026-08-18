@@ -857,6 +857,34 @@ def test_aws_gamenet_wan_security_group_limits_temporary_ssh_to_control_plane(mo
     assert final_wan.ingress == ()
 
 
+def test_aws_gamenet_zone_security_group_allows_workloads_and_vpn_management():
+    from types import SimpleNamespace
+    from api.services.gamenet_provider import AwsGameNetProvider
+
+    class Network:
+        def __init__(self): self.specs = []
+        def ensure_security_group(self, spec):
+            self.specs.append(spec)
+            return f"sg-{len(self.specs)}"
+
+    network = Network()
+    provider = AwsGameNetProvider(
+        SimpleNamespace(), network, SimpleNamespace(environment="test"),
+    )
+    site = SimpleNamespace(
+        id=4, event_id=1, team_id=2, vpc_id="vpc-site",
+        allocated_cidr="10.128.0.0/20",
+        zones=[SimpleNamespace(key="workloads", subnet="10.128.1.0/24")],
+    )
+
+    provider.ensure_site_security_groups(site)
+
+    assert network.specs[2].ingress == ({
+        "IpProtocol": "-1",
+        "IpRanges": [{"CidrIp": "10.128.1.0/24"}, {"CidrIp": "10.64.0.0/10"}],
+    },)
+
+
 def test_temporary_gateway_ingress_allows_wireguard_peers_but_limits_ssh(monkeypatch):
     from api.services.gamenet_provisioning import _gateway_ingress
 

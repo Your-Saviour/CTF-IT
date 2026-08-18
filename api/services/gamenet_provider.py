@@ -73,8 +73,8 @@ class AwsGameNetProvider:
             self.config.environment, event_id=site.event_id,
             team_id=site.team_id, site_id=site.id,
         )
-        all_traffic = lambda cidr: ({
-            "IpProtocol": "-1", "IpRanges": [{"CidrIp": cidr}],
+        all_traffic = lambda *cidrs: ({
+            "IpProtocol": "-1", "IpRanges": [{"CidrIp": cidr} for cidr in cidrs],
         },)
         wan_ingress = ()
         if temporary_management:
@@ -98,7 +98,7 @@ class AwsGameNetProvider:
         for zone in site.zones:
             groups[zone.key] = self.network.ensure_security_group(SecurityGroupSpec(
                 site.vpc_id, f"ctf-it-site-{site.id}-{zone.key}", f"GameNet zone {zone.key}",
-                all_traffic(zone.subnet), all_traffic(site.allocated_cidr),
+                all_traffic(zone.subnet, "10.64.0.0/10"), all_traffic(site.allocated_cidr),
                 {**tags, "NetworkRole": zone.key},
             ))
         return groups
