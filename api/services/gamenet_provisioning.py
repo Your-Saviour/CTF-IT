@@ -320,6 +320,7 @@ def establish_site_tunnels(db, event, infrastructure):
 
 def create_private_endpoints(db, event, infrastructure):
     _require_endpoint_prerequisites(db, event, infrastructure)
+    _, public_key = get_or_create_platform_keypair(db)
     definitions = {site["key"]: site for site in infrastructure["sites"]}
     for site in db.query(Site).filter_by(event_id=event.id):
         zone_defs = {zone["key"]: zone for zone in definitions[site.key]["zones"]}
@@ -344,6 +345,7 @@ def create_private_endpoints(db, event, infrastructure):
                         try:
                             result = provider.create_endpoint(
                                 site, zone, vm, ami_id=AwsConfig.from_env().ubuntu_ami(site.region),
+                                key_name=provider.config.key_pair_name, public_key=public_key,
                             )
                             _persist_instance_result(vm, result)
                         finally:

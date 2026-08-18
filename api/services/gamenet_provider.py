@@ -208,8 +208,12 @@ class AwsGameNetProvider:
             team_id=site.team_id, site_id=site.id,
         ))
 
-    def create_endpoint(self, site, zone, vm, *, ami_id: str):
+    def create_endpoint(self, site, zone, vm, *, ami_id: str,
+                        key_name: str, public_key: str):
         vm.ssh_user = "ubuntu"
+        self.compute.ensure_key_pair(
+            key_name, public_key, ownership_tags(self.config.environment),
+        )
         return self.compute.launch_instance(InstanceSpec(
             ami_id=ami_id,
             instance_type=vm.instance_type or "t3.small",
@@ -222,6 +226,7 @@ class AwsGameNetProvider:
                 private_ip=vm.private_ip,
             ),),
             tags=self._tags(site, vm),
+            key_name=key_name,
         ))
 import paramiko
 import bcrypt

@@ -618,21 +618,26 @@ def test_endpoint_creation_uses_approved_ami_and_persists_eni_metadata(monkeypat
     db_session.commit()
     calls = []
     class Provider:
-        def create_endpoint(self, _site, _zone, vm, *, ami_id):
-            calls.append(ami_id)
+        config = type("Config", (), {"key_pair_name": "ctf-it-platform"})()
+        def create_endpoint(self, _site, _zone, vm, *, ami_id, key_name, public_key):
+            calls.append((ami_id, key_name, public_key))
             return InstanceResult("i-" + str(vm.id), "running", "eni-" + str(vm.id),
                                   None, vm.private_ip, "ap-southeast-2a",
                                   primary_mac="02:00:00:00:00:10")
         def close(self): pass
     monkeypatch.setattr(gamenet_provisioning, "_provider", lambda: Provider())
     monkeypatch.setattr(gamenet_provisioning, "_require_endpoint_prerequisites", lambda *_args: None)
+    monkeypatch.setattr(gamenet_provisioning, "get_or_create_platform_keypair",
+                        lambda _db: ("private", "ssh-ed25519 TEST"))
     monkeypatch.setattr(AwsConfig, "from_env", classmethod(lambda cls: type(
         "Config", (), {"ubuntu_ami": lambda self, region: "ami-ubuntu"},
     )()))
     monkeypatch.setattr(gamenet_provisioning, "_assign_blue_modules", lambda *_args: None)
     create_private_endpoints(db_session, event, INFRASTRUCTURE)
     endpoints = db_session.query(VM).filter_by(role="blue_endpoint").all()
-    assert calls and set(calls) == {"ami-ubuntu"}
+    assert calls and set(calls) == {
+        ("ami-ubuntu", "ctf-it-platform", "ssh-ed25519 TEST"),
+    }
     assert all(vm.cloud_instance_id and vm.primary_eni_id and vm.vpc_mac for vm in endpoints)
     assert all(vm.network_phase == "network_converted" for vm in endpoints)
 
@@ -1069,6 +1074,8 @@ def test_aws_gamenet_private_endpoint_has_no_public_ip():
 
     class Compute:
         def __init__(self): self.spec = None
+        def ensure_key_pair(self, name, public_key, tags):
+            self.key = (name, public_key, tags)
         def launch_instance(self, spec):
             self.spec = spec
             return InstanceResult("i-endpoint", "pending", "eni-endpoint", None, "10.40.10.8")
@@ -1078,9 +1085,14 @@ def test_aws_gamenet_private_endpoint_has_no_public_ip():
     zone = SimpleNamespace(subnet_id="subnet-blue", security_group_id="sg-private")
     vm = SimpleNamespace(id=10, private_ip="10.40.10.8", instance_type="t3.small")
 
-    result = provider.create_endpoint(site, zone, vm, ami_id="ami-ubuntu")
+    result = provider.create_endpoint(
+        site, zone, vm, ami_id="ami-ubuntu",
+        key_name="ctf-it-platform", public_key="ssh-ed25519 TEST",
+    )
 
     assert result.public_ip is None
+    assert compute.key[:2] == ("ctf-it-platform", "ssh-ed25519 TEST")
+    assert compute.spec.key_name == "ctf-it-platform"
     assert compute.spec.network_interfaces[0].associate_public_ip is False
     assert compute.spec.network_interfaces[0].subnet_id == "subnet-blue"
 
