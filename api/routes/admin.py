@@ -1079,7 +1079,7 @@ async def get_operation_run(run_id: int, request: Request, db: Session = Depends
     steps = db.query(OperationRunStep).filter(OperationRunStep.run_id == run_id).all()
     return {"id": run.id, "status": run.status, "team_id": run.team_id,
             "fact_store": json.loads(run.fact_store or "{}"),
-            "steps": [{"node_id": s.node_id, "node_type": s.node_type, "status": s.status,
+            "steps": [{"id": s.id, "node_id": s.node_id, "node_type": s.node_type, "status": s.status,
                        "result": s.result, "output": s.output, "attempts": s.attempts}
                       for s in steps]}
 

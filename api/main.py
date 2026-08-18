@@ -689,6 +689,22 @@ async def event_operation_designer_page(event_id: int, operation_id: int, reques
         "read_only": event.status != "draft"})
 
 
+@app.get("/admin/events/{event_id}/operations/{operation_id}/runs/{run_id}", response_class=HTMLResponse)
+async def operation_run_page(event_id: int, operation_id: int, run_id: int, request: Request,
+                             db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = db.query(EventOperation).filter(
+        EventOperation.id == operation_id, EventOperation.event_id == event_id
+    ).first()
+    if not event or not operation:
+        return RedirectResponse(f"/admin/events/{event_id}/operation", status_code=303)
+    return templates.TemplateResponse(request, "operation_run.html", {"user": user,
+        "event_id": event.id, "operation_id": operation.id, "run_id": run_id})
+
+
 @app.get("/admin/scenarios", response_class=HTMLResponse)
 async def scenarios_page(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)

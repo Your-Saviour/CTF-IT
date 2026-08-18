@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run_id }} — CTF Platform{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><style>
+.operation-run-app{height:100%;display:flex;flex-direction:column;min-height:0}
+.operation-run-body{flex:1;min-height:0;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:16px}
+.operation-run-body .card{width:100%}
+.operation-run-body .card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.operation-run-body .card-header h2{margin:0}
+.run-meta{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--text-secondary)}
+.run-meta strong{color:var(--text-primary);font-weight:600}
+.run-status{display:inline-block;padding:4px 8px;border:1px solid var(--border);font-size:11px;text-transform:uppercase}
+.run-status-completed{color:var(--green);border-color:var(--green)}
+.run-status-failed{color:var(--red);border-color:var(--red)}
+.run-status-cancelled{color:var(--text-secondary);border-color:var(--border)}
+.run-status-queued{color:var(--amber);border-color:var(--amber)}
+.run-status-running,.run-status-awaiting_approval{color:var(--cyan);border-color:var(--cyan);animation:status-pulse 1.5s ease-in-out infinite}
+.run-table th,.run-table td{font-size:12px;vertical-align:top}
+.run-output{background:var(--bg-deep);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font-size:11px;white-space:pre-wrap;word-break:break-word;margin:0;max-height:180px;overflow:auto}
+.run-step-actions{display:flex;gap:6px;flex-wrap:wrap}
+.run-step-actions .btn{padding:0.25rem 0.6rem;font-size:0.7rem}
+.step-success{color:var(--green)}
+.step-failure{color:var(--red)}
+.step-skipped{color:var(--text-secondary)}
+.step-rejected{color:var(--amber)}
+.step-queued{color:var(--amber)}
+.step-running,.step-awaiting_approval{color:var(--cyan)}
+.run-empty{color:var(--text-muted);font-size:12px}
+@media (max-width:768px){
+ .planner-actions{flex-wrap:wrap}
+}
+</style>{% endblock %}
+{% block body_class %}planner-page{% endblock %}{% block site_nav %}{% endblock %}{% block container_class %}planner-root{% endblock %}
+{% block content %}
+<main class="operation-run-app" data-event-id="{{ event_id }}" data-operation-id="{{ operation_id }}" data-run-id="{{ run_id }}">
+ <header class="planner-toolbar">
+  <div class="planner-context-row"><a class="planner-brand" href="/admin">&gt;_ CTF Platform</a><div class="planner-identity"><div><h1>Operation run #{{ run_id }}</h1><p id="run-summary" class="planner-event-status">Loading…</p></div><span id="run-status-badge" class="run-status">…</span></div><div class="planner-account"><span>{{ user.username }}</span><form method="post" action="/auth/logout"><button class="btn" type="submit">Logout</button></form></div></div>
+  <div class="planner-command-row"><div class="planner-command-start"><a class="planner-back" href="/admin/events/{{ event_id }}/operations/{{ operation_id }}">Back to designer</a><a class="planner-back" href="/admin/events/{{ event_id }}/operation">Operations</a><span id="run-poll-state" role="status" aria-live="polite">Polling every 4s</span></div><div class="planner-actions"><div class="planner-action-group"><button id="run-refresh" class="btn" type="button">Refresh</button><button id="run-cancel" class="btn btn-danger" type="button">Cancel run</button></div></div></div>
+ </header>
+ <div class="operation-run-body">
+  <section class="card" aria-label="Run summary">
+   <div class="card-header"><h2>Summary</h2></div>
+   <div class="run-meta"><span>Run ID <strong id="meta-run-id">#{{ run_id }}</strong></span><span>Team <strong id="meta-team">…</strong></span><span>Status <strong id="meta-status">…</strong></span></div>
+  </section>
+  <section class="card" aria-label="Execution steps">
+   <div class="card-header"><h2>Steps</h2><span id="steps-count" class="run-empty">Loading…</span></div>
+   <div id="steps-container"><p class="run-empty">Loading steps…</p></div>
+  </section>
+  <section class="card" aria-label="Fact store">
+   <div class="card-header"><h2>Fact store</h2></div>
+   <div id="facts-container"><p class="run-empty">Loading facts…</p></div>
+  </section>
+ </div>
+</main>
+<script>
+(()=>{
+const app=document.querySelector('.operation-run-app'),eventId=app.dataset.eventId,operationId=app.dataset.operationId,runId=app.dataset.runId;
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const TERMINAL_STATUSES=new Set(['completed','failed','cancelled']);
+let pollTimer=null,loaded=false;
+function statusClass(status){return 'step-'+esc(String(status||'queued').toLowerCase())}
+function fmt(value){return value===null||value===undefined||value===''?'—':esc(value)}
+function statusText(status){return String(status||'queued').replace(/_/g,' ')}
+function setPollState(text){$('run-poll-state').textContent=text}
+async function loadRun(){
+ try{
+  const resp=await fetch(`/admin/api/operation-runs/${runId}`);
+  const data=await resp.json();
+  if(!resp.ok){throw new Error(data.error||'Failed to load run')}
+  loaded=true;render(data);
+  if(TERMINAL_STATUSES.has(data.status)){if(pollTimer){clearInterval(pollTimer);pollTimer=null}setPollState('Run finished — manual refresh')}
+ }catch(error){
+  setPollState('Poll failed');
+  if(!loaded){$('run-summary').textContent=error.message||'Failed to load run';$('run-status-badge').textContent='error';$('run-status-badge').className='run-status run-status-failed'}
+ }
+}
+function render(data){
+ $('run-summary').textContent=statusText(data.status);
+ $('run-status-badge').textContent=statusText(data.status);
+ $('run-status-badge').className='run-status run-status-'+esc(String(data.status).toLowerCase());
+ $('meta-team').textContent=data.team_id?('#'+data.team_id):'—';
+ $('meta-status').textContent=statusText(data.status);
+ renderSteps(data.steps||[]);
+ renderFacts(data.fact_store||{});
+ const active=!TERMINAL_STATUSES.has(data.status);
+ $('run-cancel').style.display=active?'':'none';
+}
+function renderSteps(steps){
+ $('steps-count').textContent=steps.length?`${steps.length} step${steps.length===1?'':'s'}`:'';
+ if(!steps.length){$('steps-container').innerHTML='<p class="run-empty">No steps recorded yet.</p>';return}
+ $('steps-container').innerHTML='<table class="run-table"><thead><tr><th>Node</th><th>Type</th><th>Status</th><th>Result</th><th>Attempts</th><th>Output</th><th></th></tr></thead><tbody>'+steps.map(step=>`<tr>
+  <td><strong>${esc(step.node_id)}</strong></td>
+  <td>${esc(step.node_type)}</td>
+  <td><span class="${statusClass(step.status)}">${esc(statusText(step.status))}</span></td>
+  <td>${fmt(step.result)}</td>
+  <td>${esc(step.attempts)}</td>
+  <td>${step.output?`<pre class="run-output">${esc(step.output)}</pre>`:'—'}</td>
+  <td class="run-step-actions">${step.status==='awaiting_approval'?`<button class="btn btn-primary" type="button" data-step-id="${esc(step.id)}" data-action="approve">Approve</button><button class="btn btn-danger" type="button" data-step-id="${esc(step.id)}" data-action="reject">Reject</button>`:''}</td>
+ </tr>`).join('')+'</tbody></table>';
+}
+function renderFacts(facts){
+ const entries=Object.entries(facts||{});
+ if(!entries.length){$('facts-container').innerHTML='<p class="run-empty">No facts recorded yet.</p>';return}
+ $('facts-container').innerHTML='<table class="run-table"><thead><tr><th>Trait</th><th>Value</th></tr></thead><tbody>'+entries.map(([trait,value])=>`<tr><td><strong>${esc(trait)}</strong></td><td><pre class="run-output">${esc(value)}</pre></td></tr>`).join('')+'</tbody></table>';
+}
+async function act(action,stepId){
+ try{
+  const resp=await fetch(`/admin/api/operation-runs/${runId}/steps/${stepId}/${action}`,{method:'POST',headers:{'Content-Type':'application/json'}});
+  const data=await resp.json();
+  if(!resp.ok)throw new Error(data.error||'Request failed');
+  await loadRun();
+ }catch(error){setPollState(error.message)}
+}
+$('steps-container').addEventListener('click',event=>{const button=event.target.closest('[data-action]');if(!button)return;act(button.dataset.action,button.dataset.stepId)});
+$('run-refresh').onclick=loadRun;
+$('run-cancel').onclick=async()=>{if(!confirm('Cancel this operation run?'))return;try{const resp=await fetch(`/admin/api/operation-runs/${runId}/cancel`,{method:'POST',headers:{'Content-Type':'application/json'}});const data=await resp.json();if(!resp.ok)throw new Error(data.error||'Request failed');await loadRun()}catch(error){setPollState(error.message)}};
+loadRun();
+pollTimer=setInterval(loadRun,4000);
+})();
+</script>
+{% endblock %}

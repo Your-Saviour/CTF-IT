@@ -37,6 +37,16 @@ def test_operation_designer_exposes_real_workflow_actions_and_dialogs():
     assert 'id="edge-dialog"' not in html
 
 
+def test_operation_designer_exposes_run_action():
+    html = (ROOT / "frontend/templates/event_operation.html").read_text()
+    source = (ROOT / "frontend/static/event-operation.js").read_text()
+    assert 'id="operation-run"' in html
+    assert "btn btn-primary" in html
+    assert "operations/${operationId}/run" in source
+    assert "runs/${runId}" in source
+    assert "confirm(" in source
+
+
 def test_operation_designer_assets_and_route_are_wired():
     html = (ROOT / "frontend/templates/event_operation.html").read_text()
     main = (ROOT / "api/main.py").read_text()

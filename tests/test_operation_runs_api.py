@@ -148,7 +148,7 @@ def test_operation_run_detail_returns_steps(seeded_client):
     assert body["team_id"] == team.id
     assert body["fact_store"] == {"ctf.vuln.demo": "found"}
     assert body["steps"] == [
-        {"node_id": "n1", "node_type": "ability", "status": "running",
+        {"id": step.id, "node_id": "n1", "node_type": "ability", "status": "running",
          "result": None, "output": None, "attempts": 1}
     ]
 
