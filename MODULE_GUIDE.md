@@ -190,6 +190,64 @@ exploit:
     sudo id
 ```
 
+## Outputs and Inputs (Exploit Chaining)
+
+Operation chaining (compiled operation plans executed against Caldera) formalizes how abilities pass facts to one another. A `recon` or `exploit` section may declare `outputs` (facts the command emits) and `inputs` (facts the command requires before it can run). Inputs are evaluated against the run's accumulated fact store: an ability whose inputs are missing is **skipped** (the graph continues along `failure`/`skipped` edges).
+
+**Trait naming** — output traits must be namespaced to the module: `ctf.<module_id>.<name>` (e.g. `ctf.nopasswd_sudo.root`). The two auto-derived traits are exempt: `ctf.vuln.<module_id>` (recon `VULNERABLE`) and `ctf.goal.<goal_id>` (goal `GOAL_ACHIEVED`). See `builder/fact_contract.py` — `validate_module_facts` / `validate_catalogue_facts` enforce this at catalogue load.
+
+Each output entry supports:
+
+| Field | Meaning |
+|-------|---------|
+| `trait` | Fact trait emitted |
+| `marker` | Optional substring that must appear in the output line (line filter) |
+| `pattern` | Optional regex; capture group becomes the value |
+| `group` | Capture-group index when `pattern` is used (default `1`) |
+
+Without a `pattern`, the value is the marker string (or `"1"` when only a trait is given).
+
+**Auto-derived defaults** — if `outputs`/`inputs` are omitted, `ability_facts()` falls back to:
+- `outputs`: an existing `parser` block (the `ctf_extract` mappings become output specs), else for a recon command containing `VULNERABLE` a `ctf.vuln.<module_id>` output, else for a goal exploit containing `GOAL_ACHIEVED` a `ctf.goal.<goal_id>` output.
+- `inputs`: existing `requirements` sources, else for an exploit with a recon phase a `ctf.vuln.<module_id>` input (a module's exploit implicitly requires its own recon).
+
+**Example** — the seeded "Operation Chaining Demo" chain: `weak_ssh_credentials` → `nopasswd_sudo` → `malicious_cron_beacon`:
+
+```yaml
+# weak_ssh_credentials.yaml (exploit) — produces the foothold token
+exploit:
+  outputs:
+    - trait: ctf.weak_ssh_credentials.shell
+      marker: FOOTHOLD
+  command: |
+    USER="#{ctf.vuln.weak_ssh_credentials}"
+    su -c "id && echo FOOTHOLD" "$USER"
+```
+
+```yaml
+# nopasswd_sudo.yaml (exploit) — consumes foothold, emits root shell
+exploit:
+  inputs:
+    - ctf.weak_ssh_credentials.shell
+  outputs:
+    - trait: ctf.nopasswd_sudo.root
+      marker: ROOT_SHELL
+  command: |
+    sudo -n id 2>/dev/null | grep -q "uid=0" && echo "ROOT_SHELL" || echo "SKIPPED: no root shell"
+```
+
+```yaml
+# malicious_cron_beacon.yaml (exploit) — consumes root shell
+exploit:
+  inputs:
+    - ctf.nopasswd_sudo.root
+  command: |
+    [ -n "#{ctf.nopasswd_sudo.root}" ] || { echo "SKIPPED: root shell not obtained"; exit 0; }
+    echo "beacon installed" && echo "IMPLANT"
+```
+
+At run time the runner extracts emitted facts from each ability's output (`extract_facts`) into the run's fact store, seeds them into the run's Caldera source, and the compiler's `next_ready_nodes` / `edge_activated` (in `builder/operation_compiler.py`) decide which node is next. A node is skipped if its `inputs` are not yet present in the fact store.
+
 ## Verification Types
 
 The `verification` field defines how the server checks whether the user has completed the task. The in-container `audit.py` collects a broad system snapshot, and the server matches it against the module's verification spec.
