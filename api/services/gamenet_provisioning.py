@@ -660,7 +660,7 @@ def _remove_temporary_management_access(event):
     db = object_session(event)
     for site in db.query(Site).filter_by(event_id=event.id):
         firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
-        php = '''require_once("config.inc"); global $config;
+        php = '''require_once("config.inc"); require_once("util.inc"); global $config;
 $rules=$config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"]??[];
 $config["OPNsense"]["Firewall"]["Filter"]["rules"]["rule"]=array_values(array_filter(
     $rules, fn($item)=>!in_array($item["description"]??"", ["Allow management SSH","Allow management HTTPS"])

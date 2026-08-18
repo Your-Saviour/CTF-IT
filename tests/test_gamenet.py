@@ -884,6 +884,7 @@ def test_opnsense_lockdown_dispatches_posix_script_without_csh_quoting(monkeypat
     prefix, suffix = "echo ", " | base64 -d | /bin/sh"
     assert commands[0].startswith(prefix) and commands[0].endswith(suffix)
     script = base64.b64decode(commands[0][len(prefix):-len(suffix)]).decode()
+    assert 'require_once("util.inc")' in script
     assert 'write_config("Remove temporary public management access")' in script
     assert "configctl filter reload" in script
 
