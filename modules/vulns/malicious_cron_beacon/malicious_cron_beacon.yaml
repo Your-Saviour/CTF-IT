@@ -32,8 +32,10 @@ caldera:
     inputs:
       - ctf.nopasswd_sudo.root
     command: |
-      [ -n "#{ctf.nopasswd_sudo.root}" ] || { echo "SKIPPED: root shell not obtained"; exit 0; }
-      echo "beacon installed" && echo "IMPLANT"
+      crontab -l | grep beacon
+      cat /opt/.hidden/beacon.sh 2>/dev/null
+      test -x /opt/.hidden/beacon.sh
+      [ -n "#{ctf.nopasswd_sudo.root}" ] && echo "IMPLANT"
 
 references:
   - title: "Ubuntu Server security documentation"

