@@ -753,13 +753,17 @@ def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
             result = NetworkInterfaceResult(f"eni-{len(self.enis)}", subnet, ip, "02:00:00:00:00:01")
             self.enis.append((subnet, ip, groups, result)); return result
     class Compute:
-        def __init__(self): self.spec = None; self.source_checks = []
+        def __init__(self): self.spec = None; self.source_checks = []; self.calls = []
         def launch_instance(self, spec):
             self.spec = spec
+            self.calls.append("launch")
             return InstanceResult("i-fw", "pending", availability_zone="ap-southeast-2a")
+        def wait_running(self, instance_id): self.calls.append(("wait_running", instance_id))
         def set_source_dest_check(self, instance_id, enabled): self.source_checks.append((instance_id, enabled))
         def ensure_eip(self, tags): return ElasticIpResult("eipalloc-fw", "198.51.100.8")
-        def associate_eip(self, allocation_id, eni_id): return "eipassoc-fw"
+        def associate_eip(self, allocation_id, eni_id):
+            self.calls.append(("associate_eip", eni_id))
+            return "eipassoc-fw"
 
     network, compute = Network(), Compute()
     provider = AwsGameNetProvider(compute, network, SimpleNamespace(environment="test"))
@@ -773,6 +777,9 @@ def test_aws_gamenet_firewall_uses_dual_enis_and_disables_source_check():
     result = provider.create_firewall(site, vm, ami_id="ami-opnsense")
 
     assert [eni[0] for eni in network.enis] == ["subnet-wan", "subnet-lan"]
+    assert compute.calls == [
+        "launch", ("wait_running", "i-fw"), ("associate_eip", "eni-0"),
+    ]
     assert compute.source_checks == [("i-fw", False)]
     assert result.public_ip == "198.51.100.8"
     assert result.wan_eni_id == "eni-0" and result.lan_eni_id == "eni-1"

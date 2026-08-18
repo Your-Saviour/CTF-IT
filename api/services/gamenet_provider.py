@@ -159,6 +159,7 @@ class AwsGameNetProvider:
             ),
             tags=tags,
         ))
+        self.compute.wait_running(result.instance_id)
         self.compute.set_source_dest_check(result.instance_id, enabled=False)
         allocation = self.compute.ensure_eip(tags)
         self.compute.associate_eip(allocation.allocation_id, wan.eni_id)
