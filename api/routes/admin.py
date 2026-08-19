@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.models import AccountToken, AdminAudit, Event, EventOperation, OpnsenseImage, OperationRun, OperationRunStep, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
+from builder.fact_contract import fact_summary
+from builder.module_loader import load_all_modules
 from api.routes.auth import _token_digest, get_current_user
 from api.services.operation_runner import launch_run
 
@@ -1082,6 +1084,42 @@ async def get_operation_run(run_id: int, request: Request, db: Session = Depends
             "steps": [{"id": s.id, "node_id": s.node_id, "node_type": s.node_type, "status": s.status,
                        "result": s.result, "output": s.output, "attempts": s.attempts}
                       for s in steps]}
+
+
+@router.get("/events/{event_id}/operations/{operation_id}/ability-facts")
+async def get_event_operation_ability_facts(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    """Return structured input/output facts for each ability in the event operation plan."""
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    operation = db.query(EventOperation).filter(
+        EventOperation.event_id == event_id, EventOperation.id == operation_id
+    ).first()
+    if not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+
+    plan = json.loads(operation.operation_plan or "{}")
+    modules_by_id = {m.id: m for m in load_all_modules()}
+
+    fact_data = []
+    for node in plan.get("nodes", []):
+        if node.get("type") != "ability":
+            continue
+        config = node.get("config") or {}
+        module_id = config.get("module_id")
+        phase = config.get("ability")
+        module = modules_by_id.get(module_id)
+        if not module or phase not in ("recon", "exploit"):
+            continue
+        fact_data.append({
+            "node_id": node["id"],
+            "module_id": module_id,
+            "module_name": module.name,
+            "phase": phase,
+            **fact_summary(module, phase),
+        })
+
+    return {"fact_data": fact_data}
 
 
 @router.post("/operation-runs/{run_id}/steps/{step_id}/approve")
