@@ -4,6 +4,7 @@ import {
   abilityCommand,
   findAbilityDetails,
   renderAbilityDetails,
+  renderAbilityFacts,
 } from '../frontend/static/event-operation-ability-details.js';
 
 const node={type:'ability',label:'Run <check>',config:{module_id:'weak_ssh',ability:'exploit',target_vm_id:'vm:web'}};
@@ -50,4 +51,20 @@ test('renders expanded command controls and handles incomplete metadata',()=>{
 
 test('renders a useful unavailable state for stale ability nodes',()=>{
   assert.match(renderAbilityDetails(node,{targets:[],abilities:[]},{expanded:false}),/Ability details are unavailable/);
+});
+
+test('renders fact inputs and outputs with markers', () => {
+  const html = renderAbilityFacts({
+    inputs: ['ctf.vuln.weak_ssh'],
+    outputs: [{ trait: 'ctf.weak_ssh.shell', marker: 'VULNERABLE', pattern: 'user=(\\S+)' }],
+  });
+  assert.match(html, /ctf\.vuln\.weak_ssh/);
+  assert.match(html, /ctf\.weak_ssh\.shell/);
+  assert.match(html, /VULNERABLE/);
+});
+
+test('returns empty string when no facts are present', () => {
+  assert.equal(renderAbilityFacts({ inputs: [], outputs: [] }), '');
+  assert.equal(renderAbilityFacts(null), '');
+  assert.equal(renderAbilityFacts(undefined), '');
 });

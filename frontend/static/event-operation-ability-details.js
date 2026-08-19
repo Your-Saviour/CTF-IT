@@ -31,3 +31,16 @@ export function renderAbilityDetails(node,catalogue,{expanded=false}={}){
   <details class="ability-command"${expanded?' open':''}><summary>Show command</summary>${commandContent}</details>
  </article>`;
 }
+
+export function renderAbilityFacts(facts){
+  const inputs=Array.isArray(facts?.inputs)?facts.inputs:[];
+  const outputs=Array.isArray(facts?.outputs)?facts.outputs:[];
+  if(!inputs.length&&!outputs.length)return '';
+  const inputBlock=inputs.length
+    ?`<div><h4>Inputs</h4><ul class="ability-fact-list">${inputs.map(t=>`<li><code>${esc(t)}</code></li>`).join('')}</ul></div>`
+    :'<div><h4>Inputs</h4><p class="ability-command-empty">None</p></div>';
+  const outputBlock=outputs.length
+    ?`<div><h4>Outputs</h4><ul class="ability-fact-list">${outputs.map(o=>`<li><code>${esc(o.trait)}</code>${o.marker?` <span class="op-state-badge op-state-other">${esc(o.marker)}</span>`:''}</li>`).join('')}</ul></div>`
+    :'<div><h4>Outputs</h4><p class="ability-command-empty">None</p></div>';
+  return `<section class="ability-facts"><h3>Input / Output Facts</h3>${inputBlock}${outputBlock}</section>`;
+}
