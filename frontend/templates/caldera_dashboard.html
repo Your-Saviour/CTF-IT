@@ -745,7 +745,7 @@
 
             var outputsHtml = outputs.length
                 ? outputs.map(function (o) {
-                    var markerHtml = o.marker ? '<span title="' + o.marker + '" class="op-state-badge op-state-other" style="font-size:0.65rem;">' + o.marker + '</span>' : '';
+                    var markerHtml = o.marker ? '<span title="' + escHtml(o.marker) + '" class="op-state-badge op-state-other" style="font-size:0.65rem;">' + escHtml(o.marker) + '</span>' : '';
                     return '<div>' +
                         '<span class="detail-label" style="font-size:0.65rem; color:var(--text-secondary);">trait</span>' +
                         '<span class="detail-value" style="font-size:0.65rem; color:var(--text-primary);">' + escHtml(o.trait) + '</span>' +

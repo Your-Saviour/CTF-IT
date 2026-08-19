@@ -59,7 +59,7 @@ def test_operation_designer_assets_and_route_are_wired():
 def test_operation_designer_cache_busts_controller_and_state_module_together():
     html = (ROOT / "frontend/templates/event_operation.html").read_text()
     source = (ROOT / "frontend/static/event-operation.js").read_text()
-    assert '/static/event-operation.js?v=6' in html
+    assert '/static/event-operation.js?v=7' in html
     assert "from './event-operation-state.js?v=4'" in source
 
 
@@ -72,7 +72,7 @@ def test_ability_nodes_expose_shared_details_and_expandable_dialog():
     assert 'id="ability-details-dialog-content"' in html
     assert 'data-ability-dialog-action="close"' in html
     assert '/static/event-operation-ability-details.css?v=2' in html
-    assert '/static/event-operation.js?v=6' in html
+    assert '/static/event-operation.js?v=7' in html
     assert "from './event-operation-ability-details.js?v=2'" in source
     assert 'data-inspector-tab="details"' in source
     assert 'data-inspector-tab="settings"' in source
