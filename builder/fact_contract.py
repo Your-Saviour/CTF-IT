@@ -112,6 +112,22 @@ def ability_facts(module: Module, phase: str) -> AbilityFacts:
     return AbilityFacts(outputs=outputs, inputs=inputs)
 
 
+def fact_summary(module: Module, phase: str) -> dict:
+    """Serialize a module/phase ability's fact contract for the UI.
+
+    Returns JSON-ready `{"inputs": [...], "outputs": [{"trait", "marker",
+    "pattern"}, ...]}` so API routes don't leak the `FactSpec` dataclass.
+    """
+    facts = ability_facts(module, phase)
+    return {
+        "inputs": list(facts.inputs),
+        "outputs": [
+            {"trait": o.trait, "marker": o.marker, "pattern": o.pattern}
+            for o in facts.outputs
+        ],
+    }
+
+
 def substitute_command(command: str, fact_store: dict[str, str]) -> str:
     return TRAIT_REF.sub(lambda m: fact_store.get(m.group(1), ""), command)
 

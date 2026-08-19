@@ -111,3 +111,19 @@ def test_named_group_string_falls_back_to_group_one():
         "outputs": [{"trait": "ctf.v.shell", "marker": "OK", "pattern": "user=(\\S+)", "group": "user"}],
     }})
     assert ability_facts(m2, "exploit").outputs[0].group == 1
+
+
+def test_fact_summary_serializes_inputs_and_outputs():
+    from builder.fact_contract import fact_summary
+    m = mod("nopasswd_sudo", {
+        "recon": {"command": "echo VULNERABLE"},
+        "exploit": {
+            "command": "sudo id",
+            "inputs": ["ctf.weak_ssh.shell"],
+            "outputs": [{"trait": "ctf.nopasswd_sudo.root", "marker": "ROOT_SHELL"}],
+        },
+    })
+    assert fact_summary(m, "exploit") == {
+        "inputs": ["ctf.weak_ssh.shell"],
+        "outputs": [{"trait": "ctf.nopasswd_sudo.root", "marker": "ROOT_SHELL", "pattern": ""}],
+    }
