@@ -73,7 +73,7 @@ def test_ability_nodes_expose_shared_details_and_expandable_dialog():
     assert 'data-ability-dialog-action="close"' in html
     assert '/static/event-operation-ability-details.css?v=2' in html
     assert '/static/event-operation.js?v=6' in html
-    assert "from './event-operation-ability-details.js?v=1'" in source
+    assert "from './event-operation-ability-details.js?v=2'" in source
     assert 'data-inspector-tab="details"' in source
     assert 'data-inspector-tab="settings"' in source
     assert 'data-ability-action="expand"' in source
