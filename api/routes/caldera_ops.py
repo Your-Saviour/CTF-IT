@@ -9,6 +9,9 @@ from api.database import get_db
 from api.models import Event, Team, VM, VMModule
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient, get_caldera_api_key
+from builder.caldera import build_ability_uuid_map
+from builder.fact_contract import fact_summary
+from builder.module_loader import load_all_modules
 
 router = APIRouter(prefix="/admin/api/caldera", tags=["admin"])
 
@@ -409,7 +412,40 @@ async def get_operation(op_id: str, request: Request, db: Session = Depends(get_
     return response
 
 
-# ── Debrief Report ──────────────────────────────────────────────────────────────
+@router.get("/operations/{op_id}/ability-facts")
+async def get_operation_ability_facts(op_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return structured input/output facts for each ability in the operation chain."""
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    async with _make_client() as caldera:
+        try:
+            op = await caldera.get_operation(op_id, include_chain=True)
+        except Exception as e:
+            return JSONResponse({"error": f"Caldera unavailable: {e}"}, status_code=502)
+
+    modules = load_all_modules()
+    uuid_to_module = build_ability_uuid_map(modules)
+    modules_by_id = {m.id: m for m in modules}
+
+    fact_data = {}
+    for link in op.get("chain", []):
+        ability_id = (link.get("ability") or {}).get("ability_id", "")
+        info = uuid_to_module.get(ability_id)
+        if not info:
+            continue
+        module = modules_by_id.get(info["module_id"])
+        if not module:
+            continue
+        fact_data[ability_id] = {
+            "module_id": info["module_id"],
+            "module_name": info["module_name"],
+            "phase": info["phase"],
+            **fact_summary(module, info["phase"]),
+        }
+
+    return {"fact_data": fact_data}
 
 @router.get("/operations/{op_id}/report")
 async def get_operation_report(op_id: str, request: Request, db: Session = Depends(get_db)):
