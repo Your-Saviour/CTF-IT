@@ -291,6 +291,21 @@
     </table></div>
 </div>
 
+<!-- Ability Facts -->
+<div class="card" id="ability-facts-card">
+    <h3>Ability Input/Output Facts</h3>
+    <div class="table-wrap"><table id="ability-facts-table">
+        <colgroup>
+            <col style="width: 150px;">
+            <col style="width: 150px;">
+            <col style="width: 300px;">
+        </colgroup>
+        <tbody id="ability-facts-content">
+            <tr><td colspan="3" style="color: var(--text-muted); text-align: center;">Loading...</td></tr>
+        </tbody>
+    </table></div>
+</div>
+
 <!-- Attack Graph -->
 <div class="card">
     <h3>Attack Graph</h3>
@@ -429,6 +444,7 @@
     {% else %}
     var OP_ID = null;
     {% endif %}
+    var factDataMap = {};
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -492,6 +508,16 @@
                 renderAgents(op.agents || []);
                 renderApprovals(op.chain || []);
                 renderChain(op.chain || []);
+                // Fetch ability input/output facts
+                apiFetch('/admin/api/caldera/operations/' + OP_ID + '/ability-facts')
+                    .then(function (factsResp) {
+                        factDataMap = factsResp.fact_data || {};
+                        renderAbilityFacts(op.chain || []);
+                    })
+                    .catch(function (e) {
+                        console.error('Failed to load ability facts:', e);
+                        document.getElementById('ability-facts-content').innerHTML = '<span class="empty-list">Failed to load ability facts.</span>';
+                    });
 
                 // Render attack tree from operation response
                 var section = document.getElementById('op-attack-tree-section');
@@ -690,6 +716,65 @@
                 '<td>' + outputCell + '</td>' +
                 '</tr>';
         }).join('');
+    }
+
+    function renderAbilityFacts(chain) {
+        var contentEl = document.getElementById('ability-facts-content');
+        if (!contentEl) return;
+
+        if (!chain || !chain.length) {
+            contentEl.innerHTML = '<span class="empty-list">No ability chain data available.</span>';
+            return;
+        }
+
+        var chainHtml = chain.map(function (c, idx) {
+            var vmLink = c.vm_id
+                ? '<a href="/admin/infrastructure/vms/' + escHtml(c.vm_id) + '" style="color:var(--cyan);text-decoration:none;">' + escHtml(c.vm_hostname || c.paw) + '</a>'
+                : escHtml(c.vm_hostname || c.paw);
+            var modName = c.module_name || c.ability_name || '—';
+            var phase = c.phase != null ? c.phase : '—';
+
+            // Get fact data from the map
+            var factData = factDataMap[c.ability_id] || {};
+            var inputs = factData.inputs || [];
+            var outputs = factData.outputs || [];
+
+            var inputsHtml = inputs.length
+                ? '<pre class="code-block" style="font-size:0.65rem; color:var(--cyan-dim);">' + escHtml(inputs.join(', ')) + '</pre>'
+                : '<span style="color:var(--text-muted)">—</span>';
+
+            var outputsHtml = outputs.length
+                ? outputs.map(function (o) {
+                    var markerHtml = o.marker ? '<span title="' + o.marker + '" class="op-state-badge op-state-other" style="font-size:0.65rem;">' + o.marker + '</span>' : '';
+                    return '<div>' +
+                        '<span class="detail-label" style="font-size:0.65rem; color:var(--text-secondary);">trait</span>' +
+                        '<span class="detail-value" style="font-size:0.65rem; color:var(--text-primary);">' + escHtml(o.trait) + '</span>' +
+                        markerHtml +
+                        '</div>';
+                }).join('<hr>')
+                : '<span style="color:var(--text-muted)">—</span>';
+
+            var phaseClass = phase === 'recon' ? 'recon' : (phase === 'exploit' ? 'exploit' : '');
+
+            return '<div class="ability-fact-block">' +
+                '<div class="ability-fact-header">' +
+                    '<span class="tactic-badge ' + phaseClass + '">' + escHtml(phase) + '</span>' +
+                    '<span>' + escHtml(modName) + '</span>' +
+                '</div>' +
+                '<div class="ability-fact-row">' +
+                    '<div>' +
+                        '<span class="detail-label" style="font-size:0.7rem; color:var(--text-secondary);">Inputs</span>' +
+                        inputsHtml +
+                    '</div>' +
+                    '<div>' +
+                        '<span class="detail-label" style="font-size:0.7rem; color:var(--text-secondary);">Outputs</span>' +
+                        outputsHtml +
+                    '</div>' +
+                '</div>' +
+                '</div>';
+        }).join('');
+
+        contentEl.innerHTML = chainHtml.length > 0 ? chainHtml : '<span class="empty-list">No ability chain data available.</span>';
     }
 
     function toggleOutput(id) {
