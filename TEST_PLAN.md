@@ -95,3 +95,26 @@ The smoke test must confirm:
 - teardown deletes VMs, DNS records, and VPCs;
 - stopping/deleting an event cleans up associated Caldera operations;
 - a second quickstart run is idempotent.
+
+## Expo-IT green-service live acceptance
+
+The default suite exercises the deployment, secret, retry, integration, and firewall boundaries with fakes. A release using green infrastructure must additionally use a disposable Vultr VM and a read-only repository deploy key:
+
+```bash
+docker compose --profile test run --rm \
+  -e EXPO_IT_GREEN_LIVE=1 \
+  -e EXPO_IT_GIT_SSH_KEY_PATH=/run/secrets/expo_it_deploy_key \
+  -e EXPO_IT_GREEN_TARGET=root@203.0.113.10 \
+  tests pytest tests/test_expo_it_green_live.py -m expo_it_green_live -q
+```
+
+The key path must be mounted into the test container and the target must be a disposable Ubuntu 24.04 VM reachable with the test runner's normal SSH identity. Never use a production Expo-IT host. After the automated check, verify:
+
+- the resolved checkout equals `origin/stable` and authenticated `/api/v1/data` validates;
+- HTTPS succeeds through every event team's GameNet VPN;
+- HTTPS/SSH fail from an unrelated public source after lockdown;
+- the green VM cannot initiate traffic to any allocated team site CIDR;
+- the event shows one shared green VM and one enabled owned Expo-IT binding;
+- the Git SSH-key fact is absent after success but remains encrypted after an induced failure;
+- Retry reuses the VM and owned integration records; and
+- event deletion removes the disposable VM and owned records while preserving administrator-managed destinations.

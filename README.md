@@ -705,3 +705,13 @@ docker compose --profile test run --rm tests
 ```
 
 This validates module/base definitions, selection, attack-tree behavior, goal state transitions, scoring, and quota validation. See [TEST_PLAN.md](TEST_PLAN.md) for integration boundaries and the manual infrastructure checklist. CI runs the same test image on every push and pull request.
+
+## Shared green-team infrastructure (Expo-IT)
+
+CTF-IT can provision one event-owned Expo-IT VM alongside the per-team GameNet topology. In the event Network Planner, add a **Green-team infrastructure** VM, select an Ubuntu 24.04 base and Vultr region/plan, then open Module Assignments and manually assign **Expo-IT** to that shared VM. The module always clones `git@github.com:Your-Saviour/Expo-IT.git` at the remote `stable` branch.
+
+In the assignment editor, enter a Git SSH private key that can read the repository. The field is write-only: CTF-IT stores the value encrypted for the event, never returns it through the API, transfers it to the VM as a protected temporary file, and deletes the persisted key only after build, health, network acceptance, and automatic integration setup all succeed. A failed run retains the encrypted fact so **Retry** can reuse the same VM; replacing or clearing the key is explicit.
+
+GameNet gives each participant VPN profile a `/32` route to the service. Vultr firewall rules allow HTTPS only from event VPN gateways and the configured control plane, and the green VM rejects new connections into team site CIDRs. Consequently, the generated HTTPS URL is expected to work over GameNet VPN and not from the public internet. Set `VULTR_API_KEY` and a valid IPv4 `CTF_CONTROL_PLANE_CIDR` before starting provisioning.
+
+Successful deployment creates an event-owned Expo-IT credential, destination, and enabled event binding, then queues the initial synchronization when the event opens. These managed records cannot be edited or deleted individually; deleting the event removes only records owned by its green VM and preserves administrator-managed integrations.
