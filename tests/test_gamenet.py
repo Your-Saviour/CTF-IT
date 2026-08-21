@@ -279,6 +279,7 @@ def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
     assert "<source_net>10.128.0.0/20</source_net>" in rendered
     assert "<snat_mode>hybrid</snat_mode>" in rendered
     assert "<description>GameNet site outbound NAT</description>" in rendered
+    assert '<rule uuid="7be3d5a8-ff48-4a10-bb7e-4c114eb20d20">' in rendered
     assert "<interface>wan</interface>" in rendered
     assert "<passwordauth>" not in rendered
     assert "<ssl-certref>self-signed</ssl-certref>" not in rendered

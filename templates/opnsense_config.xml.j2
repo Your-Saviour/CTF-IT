@@ -130,7 +130,8 @@
             <nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any><description>Allow LAN traffic</description></rule>
         </rules>
         <snatrules>
-          <rule><enabled>1</enabled><nonat>0</nonat><nosync>0</nosync><sequence>1</sequence>
+          <rule uuid="7be3d5a8-ff48-4a10-bb7e-4c114eb20d20">
+            <enabled>1</enabled><nonat>0</nonat><nosync>0</nosync><sequence>1</sequence>
             <interface>wan</interface><ipprotocol>inet</ipprotocol><protocol>any</protocol>
             <source_net>{{ opnsense_site_network }}</source_net><source_not>0</source_not><source_port/>
             <destination_net>any</destination_net><destination_not>0</destination_not><destination_port/>
