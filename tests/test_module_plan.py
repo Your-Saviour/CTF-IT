@@ -6,6 +6,7 @@ from builder.module_plan import (
     normalize_module_plan,
     reconcile_module_plan,
     resolve_assignment,
+    validate_green_assignments,
 )
 from builder.module_loader import Module
 
@@ -70,6 +71,16 @@ def test_green_nodes_only_accept_green_infrastructure_modules():
         {}, [deployment, mod("endpoint_only")], refill=False,
     )
     assert rejected["issues"][0]["code"] == "incompatible_base"
+
+
+def test_green_assignments_require_manual_deployment_modules():
+    plan = {"version": 1, "assignments": {"green:expo_it": {
+        "mode": "random_fill", "pinned_module_ids": ["endpoint_only"],
+        "resolved_module_ids": ["endpoint_only"],
+    }}}
+    assert {issue["code"] for issue in validate_green_assignments(
+        plan, infrastructure(), [mod("endpoint_only")],
+    )} == {"green_manual_only", "invalid_green_module"}
 
 
 def test_pins_override_quota_and_fill_only_the_deficit():

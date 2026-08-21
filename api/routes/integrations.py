@@ -114,6 +114,8 @@ def update_destination(destination_id: int, body: DestinationRequest, request: R
     item = db.get(IntegrationDestination, destination_id)
     if not item:
         raise HTTPException(404, "destination not found")
+    if item.owner_green_vm_id:
+        raise HTTPException(409, "managed green deployment destinations cannot be edited directly")
     if body.adapter_key not in adapter_keys():
         raise HTTPException(422, "unknown integration adapter")
     credential = db.get(ServiceCredential, body.credential_id)
@@ -153,6 +155,8 @@ def delete_destination(destination_id: int, request: Request, db: Session = Depe
     item = db.get(IntegrationDestination, destination_id)
     if not item:
         raise HTTPException(404, "destination not found")
+    if item.owner_green_vm_id:
+        raise HTTPException(409, "managed green deployment destinations are removed with their infrastructure")
     if item.bindings:
         raise HTTPException(409, "destination is referenced by an event")
     db.delete(item); db.commit()

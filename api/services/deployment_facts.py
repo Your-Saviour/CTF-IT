@@ -92,3 +92,38 @@ def resolve_inputs(db: Session, event: Event, vm_key: str, module) -> dict[str, 
     if missing:
         raise ValueError(f"missing required deployment facts: {', '.join(sorted(missing))}")
     return values
+
+
+def missing_required_inputs(db: Session, event: Event) -> list[dict]:
+    infrastructure = json.loads(event.infrastructure or "{}")
+    issues = []
+    for vm in infrastructure.get("green_infrastructure", {}).get("vms", []):
+        configured = {row.trait for row in db.query(GreenDeploymentFact).filter_by(
+            event_id=event.id, vm_key=vm["key"],
+        )}
+        for trait, spec in declared_inputs(event, vm["key"]).items():
+            if trait not in configured:
+                issues.append({
+                    "code": "missing_deployment_fact", "message": f"{spec.label} is required",
+                    "vm_id": f"green:{vm['key']}", "vm_key": vm["key"], "trait": trait,
+                })
+    return issues
+
+
+def clear_orphaned_inputs(db: Session, event: Event, module_plan: dict) -> int:
+    modules = {module.id: module for module in load_all_modules()}
+    valid: set[tuple[str, str]] = set()
+    for vm_id, assignment in module_plan.get("assignments", {}).items():
+        if not vm_id.startswith("green:"):
+            continue
+        vm_key = vm_id.removeprefix("green:")
+        for module_id in assignment.get("resolved_module_ids", []):
+            module = modules.get(module_id)
+            if module and module.deployment:
+                valid.update((vm_key, spec.trait) for spec in module.deployment.inputs)
+    rows = db.query(GreenDeploymentFact).filter_by(event_id=event.id).all()
+    removed = 0
+    for row in rows:
+        if row.trait != "expo_it.api_key" and (row.vm_key, row.trait) not in valid:
+            db.delete(row); removed += 1
+    return removed

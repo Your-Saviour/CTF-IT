@@ -175,10 +175,11 @@
         document.getElementById('vm-health-summary').textContent = counts.healthy + ' healthy · ' + counts.degraded + ' degraded · ' + counts.failed + ' failed · ' + counts.pending + ' pending';
         document.getElementById('vm-grid').innerHTML = vms.length ? vms.map(function(vm) {
             var agent = vm.caldera_agent;
-            var agentText = !agent.available ? 'agent: unknown' : agent.alive ? 'agent: alive' : agent.present ? 'agent: not alive' : 'agent: missing';
+            var agentText = vm.ownership === 'event' ? 'shared green service' : !agent.available ? 'agent: unknown' : agent.alive ? 'agent: alive' : agent.present ? 'agent: not alive' : 'agent: missing';
+            var greenMeta = vm.ownership === 'event' ? '<div class="vm-meta">' + esc(vm.resolved_commit || 'commit pending') + ' · ' + esc(vm.service_health || 'health pending') + ' · integration: ' + esc(vm.integration_status || 'pending') + '</div>' : '';
             return '<a class="vm-card ' + esc(vm.health) + '" href="/admin/infrastructure/vms/' + encodeURIComponent(vm.id) + '"><div class="vm-head"><span class="vm-name">' + esc(vm.hostname || 'VM ' + vm.id) + '</span><span class="health-' + esc(vm.health) + '">' + esc(vm.health.toUpperCase()) + '</span></div>' +
                 '<div class="vm-meta">' + esc(vm.team_name) + ' · ' + esc(vm.ip_address || 'no IP') + '</div><div class="vm-meta">' + esc(vm.status || 'registered') + (vm.provision_step ? ' / ' + esc(vm.provision_step) : '') + ' · ' + esc(agentText) + '</div>' +
-                '<div class="vm-meta">Modules ' + vm.module_progress.completed + '/' + vm.module_progress.assigned + ' (' + percent(vm.module_progress.percentage) + ')</div>' + progress(vm.module_progress.percentage) + '</a>';
+                greenMeta + '<div class="vm-meta">Modules ' + vm.module_progress.completed + '/' + vm.module_progress.assigned + ' (' + percent(vm.module_progress.percentage) + ')</div>' + progress(vm.module_progress.percentage) + '</a>';
         }).join('') : '<div class="empty">No VMs in this event</div>';
     }
 

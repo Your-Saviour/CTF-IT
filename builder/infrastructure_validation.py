@@ -187,16 +187,18 @@ def infrastructure_summary(infrastructure: dict, team_count: int = 1) -> dict:
     )
     per_region = Counter(site.get("region") for site in sites if site.get("region"))
     green_count = len(infrastructure.get("green_infrastructure", {}).get("vms", []))
-    return {
+    result = {
         "teams": team_count,
         "sites": len(sites) * team_count,
         "gateways": team_count,
         "firewalls": len(sites) * team_count,
         "endpoints": endpoint_count * team_count,
-        "green_vms": green_count,
         "vms": (1 + len(sites) + endpoint_count) * team_count + green_count,
         "vpcs_by_region": {region: count * team_count for region, count in sorted(per_region.items())},
     }
+    if green_count:
+        result["green_vms"] = green_count
+    return result
 
 
 def site_subnets(cidr: str, zone_count: int) -> tuple[str, list[tuple[str, str]]]:

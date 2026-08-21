@@ -31,7 +31,9 @@ def normalize_module_plan(value):
         raise ValueError("module_plan.assignments must be an object")
     result = empty_module_plan()
     for vm_id, row in assignments.items():
-        if not isinstance(vm_id, str) or not vm_id.startswith("vm:") or vm_id.count("/") != 2:
+        endpoint_id = isinstance(vm_id, str) and vm_id.startswith("vm:") and vm_id.count("/") == 2
+        green_id = isinstance(vm_id, str) and vm_id.startswith("green:") and vm_id.count(":") == 1 and bool(vm_id[6:])
+        if not endpoint_id and not green_id:
             raise ValueError("assignment keys must be stable VM IDs")
         if not isinstance(row, dict) or row.get("mode") not in {"random_fill", "manual_only"}:
             raise ValueError(f"{vm_id}.mode must be random_fill or manual_only")
@@ -137,3 +139,26 @@ def resolve_assignment(endpoint, assignment, quota, library, *, refill):
 
 def resolved_module_ids(plan, stable_vm_id):
     return list(normalize_module_plan(plan)["assignments"].get(stable_vm_id, {}).get("resolved_module_ids", []))
+
+
+def validate_green_assignments(plan, infrastructure, library):
+    normalized = normalize_module_plan(plan)
+    green_ids = {row["id"] for row in assignable_endpoints(infrastructure) if row["role"] == "green"}
+    by_id = {module.id: module for module in library}
+    issues = []
+    expo_count = 0
+    for vm_id in green_ids:
+        assignment = normalized["assignments"].get(vm_id, {})
+        if assignment.get("mode") != "manual_only":
+            issues.append({"code": "green_manual_only", "vm_id": vm_id,
+                           "message": "Green infrastructure assignments must be manual-only"})
+        for module_id in assignment.get("resolved_module_ids", []):
+            module = by_id.get(module_id)
+            if not module or module.type != "green_infrastructure":
+                issues.append({"code": "invalid_green_module", "vm_id": vm_id, "module_id": module_id,
+                               "message": "Green nodes accept only deployment modules"})
+            if module_id == "expo_it":
+                expo_count += 1
+    if expo_count > 1:
+        issues.append({"code": "duplicate_expo_it", "message": "Only one Expo-IT deployment is allowed per event"})
+    return issues

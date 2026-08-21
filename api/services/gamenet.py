@@ -154,6 +154,10 @@ def render_user_config(db: Session, user: User) -> str:
         raise RuntimeError("GameNet VPN is not ready")
     routes = [gateway.vpn_address + "/32"]
     routes += [site.allocated_cidr for site in db.query(Site).filter_by(team_id=user.team_id).order_by(Site.order)]
+    from api.models import VM
+    routes += [vm.public_ip + "/32" for vm in db.query(VM).filter_by(
+        event_id=user.event_id, role="green_service", status="active",
+    ) if vm.public_ip]
     return "\n".join([
         "[Interface]", f"PrivateKey = {decrypt_secret(credential.private_key_encrypted)}",
         f"Address = {credential.address}/32", f"DNS = {gateway.vpn_address}", "", "[Peer]", f"PublicKey = {gateway.public_key}",

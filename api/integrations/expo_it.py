@@ -172,9 +172,18 @@ class ExpoITAdapter:
     def validate_destination(self, destination) -> list[str]:
         return []
 
+    @staticmethod
+    def _verify_tls(destination) -> bool:
+        try:
+            config = json.loads(getattr(destination, "config_json", None) or "{}")
+        except (TypeError, ValueError):
+            return True
+        return config.get("tls_verify", True) is not False
+
     async def _get(self, destination, secret: str) -> tuple[httpx.Response, dict]:
         url = destination.base_url.rstrip("/") + "/api/v1/data"
-        async with httpx.AsyncClient(timeout=15, follow_redirects=False, transport=self.transport) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False, transport=self.transport,
+                                     verify=self._verify_tls(destination)) as client:
             response = await client.get(url, headers={"X-API-Key": secret, "Accept": "application/json"})
         response.raise_for_status()
         return response, ExpoData.model_validate(response.json()).model_dump(exclude_none=True)
@@ -193,7 +202,8 @@ class ExpoITAdapter:
             _, remote = await self._get(destination, secret)
             payload = merge_remote(remote, snapshot_for_event(binding.event_id), binding.event_id)
             url = destination.base_url.rstrip("/") + "/api/v1/data"
-            async with httpx.AsyncClient(timeout=15, follow_redirects=False, transport=self.transport) as client:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False, transport=self.transport,
+                                         verify=self._verify_tls(destination)) as client:
                 response = await client.put(url, headers={"X-API-Key": secret}, json=payload)
             response.raise_for_status()
             return SyncResult(True, "ok", "Synchronized", response.status_code, False)
