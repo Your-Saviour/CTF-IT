@@ -146,6 +146,18 @@ def test_iam_policy_allows_disabling_source_checks_on_owned_network_interfaces()
     assert operated["Condition"]["StringEquals"]["aws:ResourceTag/ManagedBy"] == "ctf-it"
 
 
+def test_iam_policy_does_not_race_new_route_table_tag_visibility() -> None:
+    policy = json.loads((ROOT / "deploy" / "aws" / "iam-policy.json").read_text())
+    statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+    associations = statements["ManageRouteTableAssociations"]
+    assert set(associations["Action"]) == {
+        "ec2:AssociateRouteTable", "ec2:DisassociateRouteTable",
+    }
+    assert associations["Resource"] == "*"
+    assert "Condition" not in associations
+    assert not set(associations["Action"]) & set(statements["OperateOwnedInfrastructure"]["Action"])
+
+
 def test_aws_login_and_acceptance_are_containerized() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
     tools = compose["services"]["aws-tools"]

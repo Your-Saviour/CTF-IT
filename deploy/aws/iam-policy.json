@@ -90,11 +90,19 @@
       }
     },
     {
+      "Sid": "ManageRouteTableAssociations",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "OperateOwnedInfrastructure",
       "Effect": "Allow",
       "Action": [
         "ec2:AssociateAddress",
-        "ec2:AssociateRouteTable",
         "ec2:AssociateVpcCidrBlock",
         "ec2:AttachInternetGateway",
         "ec2:AuthorizeSecurityGroupEgress",
@@ -112,7 +120,6 @@
         "ec2:DetachInternetGateway",
         "ec2:DeregisterImage",
         "ec2:DisassociateAddress",
-        "ec2:DisassociateRouteTable",
         "ec2:DisassociateVpcCidrBlock",
         "ec2:ModifyInstanceAttribute",
         "ec2:ModifyNetworkInterfaceAttribute",
