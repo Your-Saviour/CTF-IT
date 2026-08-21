@@ -426,6 +426,28 @@ def test_opnsense_wait_requires_a_reboot_before_accepting_target_version(monkeyp
     assert commands[0].index("ctf-opnsense-bootstrap-boot") < commands[0].index("configctl")
 
 
+def test_opnsense_wait_rejects_target_version_while_first_boot_lock_is_held(monkeypatch):
+    from api.services import opnsense_images
+
+    commands = []
+
+    def ssh(_db, _host, command, **_kwargs):
+        commands.append(command)
+        if len(commands) == 1 and "LOCK_SH" in command:
+            return 1, "", "OPNsense first boot still running"
+        return 0, "26.7\n", ""
+
+    times = iter((0, 0, 1))
+    monkeypatch.setattr(opnsense_images, "POLL_TIMEOUT", 10)
+    monkeypatch.setattr(opnsense_images.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(opnsense_images.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(opnsense_images, "_ssh", ssh)
+
+    opnsense_images._wait_for_opnsense(object(), "198.51.100.10", "26.7")
+
+    assert len(commands) == 2
+
+
 def test_opnsense_wait_captures_serial_console_before_cleanup(monkeypatch):
     from api.services import opnsense_images
 

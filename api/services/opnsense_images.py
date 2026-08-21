@@ -442,13 +442,21 @@ def _wait_for_opnsense(db: Session, host: str, version: str, *, diagnostics=None
     stalled_polls = 0
     while time.monotonic() < deadline:
         try:
+            boot_ready = (
+                '$fp=fopen("/var/run/booting", "a+e"); '
+                'if (!$fp || !flock($fp, LOCK_SH | LOCK_NB)) { '
+                'fwrite(STDERR, "OPNsense first boot still running\\n"); exit(1); } '
+                'fclose($fp);'
+            )
             command = (
                 "if pgrep -f '[o]pnsense-bootstrap' >/dev/null; then "
                 "tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; "
                 "elif test -s /root/ctf-opnsense-bootstrap-boot && "
                 "test \"$(cat /root/ctf-opnsense-bootstrap-boot)\" != \"$(sysctl -n kern.boottime)\"; then "
-                "if test -x /usr/local/sbin/configctl; then opnsense-version -v; "
-                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; fi; "
+                "if ! test -x /usr/local/sbin/configctl; then "
+                "tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; "
+                f"elif ! /usr/local/bin/php -r {shlex.quote(boot_ready)}; then exit 1; "
+                "else opnsense-version -v; fi; "
                 "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; fi"
             )
             code, output, error = _ssh(
