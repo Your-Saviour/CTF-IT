@@ -1,0 +1,37 @@
+id: expo_it
+name: Expo-IT
+description: Shared green-team exercise management and reporting service.
+type: green_infrastructure
+difficulty: medium
+points: 0
+category: exercise-management
+tags: [green-team, reporting, integration]
+supported_bases: [ubuntu_24_server]
+min_ram_mb: 2048
+min_vcpu: 1
+steps:
+  - run: install.sh
+deployment:
+  repository: git@github.com:Your-Saviour/Expo-IT.git
+  branch: stable
+  inputs:
+    - trait: git.ssh_private_key
+      label: Git SSH private key
+      value_type: ssh_private_key
+      secret: true
+  outputs:
+    - trait: expo_it.resolved_commit
+      label: Resolved commit
+      value_type: string
+      secret: false
+    - trait: expo_it.private_url
+      label: Private URL
+      value_type: url
+      secret: false
+    - trait: expo_it.api_key
+      label: API key
+      value_type: token
+      secret: true
+      consume_as: expo_it_integration
+  completion_check:
+    type: expo_it_management_api

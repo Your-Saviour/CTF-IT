@@ -11,7 +11,10 @@ from builder.module_loader import Module
 
 
 def infrastructure():
-    return {"vpn_gateway": {}, "sites": [{"key": "hq", "name": "HQ", "zones": [
+    return {"vpn_gateway": {}, "green_infrastructure": {"vms": [{
+        "key": "expo_it", "name": "Expo-IT", "base_type": "ubuntu",
+        "default_plan": "small", "region": "syd",
+    }]}, "sites": [{"key": "hq", "name": "HQ", "zones": [
         {"key": "blue", "name": "Blue", "team": "blue", "endpoints": [
             {"key": "analyst", "name": "Analyst", "base_type": "ubuntu"}]},
         {"key": "red", "name": "Red", "team": "red", "endpoints": [
@@ -25,7 +28,8 @@ def test_empty_plan_is_versioned():
 
 def test_assignable_endpoints_include_blue_and_red():
     assert [(row["id"], row["role"]) for row in assignable_endpoints(infrastructure())] == [
-        ("vm:hq/blue/analyst", "blue"), ("vm:hq/red/operator", "red")]
+        ("green:expo_it", "green"), ("vm:hq/blue/analyst", "blue"),
+        ("vm:hq/red/operator", "red")]
 
 
 def test_normalize_rejects_duplicate_module_ids():
@@ -46,6 +50,26 @@ def test_reconcile_keeps_deleted_assignment_visible_as_issue():
 def mod(module_id, *, difficulty="easy", conflicts=None, requires=None):
     return Module(module_id, module_id, module_id, "vulnerability", difficulty, 100, "test",
                   conflicts=conflicts or [], requires=requires or [])
+
+
+def test_green_nodes_only_accept_green_infrastructure_modules():
+    deployment = Module(
+        "expo_it", "Expo-IT", "Shared service", "green_infrastructure", "medium", 0,
+        "exercise-management", supported_bases=["ubuntu"], deployment={"inputs": [], "outputs": []},
+    )
+    result = resolve_assignment(
+        {"base_type": "ubuntu", "role": "green"},
+        {"mode": "manual_only", "pinned_module_ids": ["expo_it"], "resolved_module_ids": []},
+        {}, [deployment, mod("endpoint_only")], refill=False,
+    )
+    assert result["resolved_module_ids"] == ["expo_it"]
+
+    rejected = resolve_assignment(
+        {"base_type": "ubuntu", "role": "green"},
+        {"mode": "manual_only", "pinned_module_ids": ["endpoint_only"], "resolved_module_ids": []},
+        {}, [deployment, mod("endpoint_only")], refill=False,
+    )
+    assert rejected["issues"][0]["code"] == "incompatible_base"
 
 
 def test_pins_override_quota_and_fill_only_the_deficit():

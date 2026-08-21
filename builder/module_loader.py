@@ -22,6 +22,47 @@ Step = Union[CopyStep, RunStep]
 
 
 @dataclass(frozen=True)
+class DeploymentFactSpec:
+    trait: str
+    label: str
+    value_type: str = "string"
+    secret: bool = False
+    consume_as: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class DeploymentContract:
+    repository: str
+    branch: str
+    inputs: tuple[DeploymentFactSpec, ...] = ()
+    outputs: tuple[DeploymentFactSpec, ...] = ()
+    completion_check: dict = field(default_factory=dict)
+
+
+def _parse_deployment(value: object) -> Optional[DeploymentContract]:
+    if value is None:
+        return None
+    if isinstance(value, DeploymentContract):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("deployment must be an object")
+    def facts(name: str) -> tuple[DeploymentFactSpec, ...]:
+        result = tuple(DeploymentFactSpec(
+            trait=item["trait"], label=item["label"], value_type=item.get("value_type", "string"),
+            secret=bool(item.get("secret", False)), consume_as=item.get("consume_as"),
+        ) for item in value.get(name, []))
+        traits = [item.trait for item in result]
+        if len(traits) != len(set(traits)) or any(not trait or " " in trait for trait in traits):
+            raise ValueError(f"deployment.{name} contains invalid or duplicate traits")
+        return result
+    return DeploymentContract(
+        repository=value.get("repository", ""), branch=value.get("branch", ""),
+        inputs=facts("inputs"), outputs=facts("outputs"),
+        completion_check=value.get("completion_check", {}),
+    )
+
+
+@dataclass(frozen=True)
 class Reference:
     title: str
     url: str
@@ -116,8 +157,12 @@ class Module:
     red_points: int = 0
     defend_points: int = 0
     revert_verification: dict = field(default_factory=dict)
+    deployment: Optional[DeploymentContract] = None
 
     def __post_init__(self):
+        self.deployment = _parse_deployment(self.deployment)
+        if self.type == "green_infrastructure" and not self.deployment:
+            raise ValueError("green_infrastructure modules require a deployment contract")
         if self.stage is None:
             self.stage = _default_stage(self.type)
         if self.type in {"vulnerability", "hardening", "payload"}:
@@ -189,6 +234,7 @@ def module_from_yaml(yaml_path: Path) -> Module:
         red_points=data.get("red_points", 0),
         defend_points=data.get("defend_points", 0),
         revert_verification=data.get("revert_verification", {}),
+        deployment=data.get("deployment"),
     )
 
 

@@ -69,6 +69,7 @@ def endpoint_instances(endpoint: dict) -> list[dict]:
 def normalize_infrastructure(value: dict) -> dict:
     """Deep-copy a plan and expand legacy count-based endpoint groups."""
     result = deepcopy(value)
+    result.setdefault("green_infrastructure", {"vms": []})
     for site in result.get("sites", []):
         site.setdefault("firewall_team", "blue")
         for zone in site.get("zones", []):
@@ -79,6 +80,9 @@ def normalize_infrastructure(value: dict) -> dict:
 def infrastructure_node_ids(infrastructure: dict) -> set[str]:
     """Return every stable node identifier addressable by the planner."""
     result = {"gateway"}
+    for vm in infrastructure.get("green_infrastructure", {}).get("vms", []):
+        if isinstance(vm.get("key"), str):
+            result.add(f"green:{vm['key']}")
     for site in infrastructure.get("sites", []):
         site_key = site.get("key")
         if not isinstance(site_key, str):

@@ -33,6 +33,14 @@ def gamenet_hostname(event_id: int, team_id: int, *parts: object) -> str:
     return normalized[:54].rstrip("-") + "-" + suffix
 
 
+def gamenet_green_hostname(event_id: int, key: str) -> str:
+    raw = f"gamenet-e{event_id}-green-{key}"
+    normalized = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
+    if len(normalized) <= 63:
+        return normalized
+    return normalized[:54].rstrip("-") + "-" + hashlib.sha256(normalized.encode()).hexdigest()[:8]
+
+
 def validate_infrastructure(
     infrastructure: dict,
     valid_base_ids: set[str],
@@ -44,7 +52,7 @@ def validate_infrastructure(
     errors: list[str] = []
     if not isinstance(infrastructure, dict):
         return ["infrastructure must be a JSON object"]
-    extra = set(infrastructure) - {"vpn_gateway", "sites"}
+    extra = set(infrastructure) - {"vpn_gateway", "sites", "green_infrastructure"}
     if extra:
         errors.append(f"infrastructure has unknown keys: {', '.join(sorted(extra))}")
 
@@ -63,6 +71,27 @@ def validate_infrastructure(
         return errors
     site_keys: set[str] = set()
     region_counts: Counter[str] = Counter()
+    green = infrastructure.get("green_infrastructure", {"vms": []})
+    if not isinstance(green, dict) or set(green) - {"vms"}:
+        errors.append("green_infrastructure must be an object containing only vms")
+    else:
+        green_vms = green.get("vms", [])
+        if not isinstance(green_vms, list):
+            errors.append("green_infrastructure.vms must be an array")
+        else:
+            green_keys: set[str] = set()
+            for index, vm in enumerate(green_vms):
+                path = f"green_infrastructure.vms[{index}]"
+                if not isinstance(vm, dict):
+                    errors.append(f"{path} must be an object")
+                    continue
+                _key(vm.get("key"), f"{path}.key", green_keys, errors)
+                if not isinstance(vm.get("name"), str) or not vm["name"].strip():
+                    errors.append(f"{path}.name is required")
+                _validate_machine(vm, path, valid_base_ids, errors, require_region=True)
+                region = vm.get("region")
+                if valid_regions is not None and region not in valid_regions:
+                    errors.append(f"{path}.region references unavailable region '{region}'")
     for si, site in enumerate(sites):
         path = f"sites[{si}]"
         if not isinstance(site, dict):
@@ -157,13 +186,15 @@ def infrastructure_summary(infrastructure: dict, team_count: int = 1) -> dict:
         for site in sites for zone in site.get("zones", []) for endpoint in zone.get("endpoints", [])
     )
     per_region = Counter(site.get("region") for site in sites if site.get("region"))
+    green_count = len(infrastructure.get("green_infrastructure", {}).get("vms", []))
     return {
         "teams": team_count,
         "sites": len(sites) * team_count,
         "gateways": team_count,
         "firewalls": len(sites) * team_count,
         "endpoints": endpoint_count * team_count,
-        "vms": (1 + len(sites) + endpoint_count) * team_count,
+        "green_vms": green_count,
+        "vms": (1 + len(sites) + endpoint_count) * team_count + green_count,
         "vpcs_by_region": {region: count * team_count for region, count in sorted(per_region.items())},
     }
 

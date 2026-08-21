@@ -47,7 +47,10 @@ def normalize_module_plan(value):
 
 
 def assignable_endpoints(infrastructure):
-    rows = []
+    rows = [{"id": f"green:{vm['key']}", "name": vm.get("name", vm["key"]),
+             "base_type": vm.get("base_type"), "role": "green", "shared": True,
+             "site": "Shared", "zone": "Green team"}
+            for vm in (infrastructure or {}).get("green_infrastructure", {}).get("vms", [])]
     for site in (infrastructure or {}).get("sites", []):
         for zone in site.get("zones", []):
             for endpoint in zone.get("endpoints", []):
@@ -67,8 +70,9 @@ def reconcile_module_plan(plan, infrastructure):
     return result, issues
 
 
-def _compatible(module, base_type):
-    return not module.disabled and (not module.supported_bases or base_type in module.supported_bases)
+def _compatible(module, base_type, role=None):
+    placement_ok = (module.type == "green_infrastructure") == (role == "green")
+    return placement_ok and not module.disabled and (not module.supported_bases or base_type in module.supported_bases)
 
 
 def _conflicts(module, selected):
@@ -98,7 +102,7 @@ def resolve_assignment(endpoint, assignment, quota, library, *, refill):
             issues.append({"code": "unknown_module", "module_id": module_id,
                            "message": f"Module '{module_id}' is unavailable"})
             return
-        if not _compatible(module, endpoint.get("base_type")):
+        if not _compatible(module, endpoint.get("base_type"), endpoint.get("role")):
             issues.append({"code": "incompatible_base", "module_id": module_id,
                            "message": f"Module '{module_id}' is incompatible with this base"})
         for required in module.requires:
@@ -119,7 +123,7 @@ def resolve_assignment(endpoint, assignment, quota, library, *, refill):
             for difficulty, count in tiers.items():
                 have = sum(m.type == module_type and m.difficulty == difficulty for m in selected)
                 pool = [m for m in library if m.type == module_type and m.difficulty == difficulty
-                        and _compatible(m, endpoint.get("base_type")) and m not in selected and not _conflicts(m, selected)]
+                        and _compatible(m, endpoint.get("base_type"), endpoint.get("role")) and m not in selected and not _conflicts(m, selected)]
                 for _ in range(max(0, int(count) - have)):
                     if not pool:
                         issues.append({"code": "quota_unfilled", "message": f"Cannot fill {difficulty} {module_type} quota"})
