@@ -93,6 +93,53 @@ def require_admin(request: Request, db: Session = Depends(get_db)):
     return user
 
 
+@router.get("/events/{event_id}/green/{vm_key}/facts")
+async def green_fact_list(event_id: int, vm_key: str, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    from api.services.deployment_facts import fact_presence
+    return JSONResponse(fact_presence(db, event, vm_key), headers={"Cache-Control": "no-store"})
+
+
+@router.put("/events/{event_id}/green/{vm_key}/facts/{trait}")
+async def green_fact_put(event_id: int, vm_key: str, trait: str, request: Request,
+                         db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "deployment facts are read only"}, status_code=409)
+    from api.services.deployment_facts import fact_presence, put_fact
+    try:
+        put_fact(db, event, vm_key, trait, (await request.json()).get("value"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    item = next(item for item in fact_presence(db, event, vm_key) if item["trait"] == trait)
+    return JSONResponse(item, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/events/{event_id}/green/{vm_key}/facts/{trait}", status_code=204)
+async def green_fact_delete(event_id: int, vm_key: str, trait: str, request: Request,
+                            db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "deployment facts are read only"}, status_code=409)
+    from api.services.deployment_facts import clear_fact, declared_inputs
+    if trait not in declared_inputs(event, vm_key):
+        return JSONResponse({"error": "fact is not declared by an assigned deployment module"}, status_code=422)
+    clear_fact(db, event.id, vm_key, trait)
+    return Response(status_code=204)
+
+
 def _audit(db: Session, actor: User, action: str, target: User | None = None, **metadata):
     db.add(AdminAudit(
         actor_id=actor.id,
