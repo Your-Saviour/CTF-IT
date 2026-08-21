@@ -156,6 +156,17 @@ def test_snapshot_site_apply_uses_posix_shell_for_opnsense_root():
     assert "nohup lockf -t 0 /conf/ctf-site-apply.lock /bin/sh" in source
 
 
+def test_snapshot_site_apply_renews_https_webgui_certificate_before_ready():
+    from api.services.gamenet_provider import _opnsense_apply_script
+
+    script = _opnsense_apply_script(
+        "generation-token", "/tmp/site.xml", "/tmp/apply-site.sh",
+    )
+    restart = "/usr/local/sbin/configctl webgui restart renew"
+    assert restart in script
+    assert script.index(restart) < script.index("/conf/ctf-site-ready.tmp")
+
+
 def test_gateway_resets_unbound_start_limit_after_wireguard_is_ready():
     source = Path("api/services/gamenet_provider.py").read_text()
     command = "systemctl reset-failed unbound && systemctl enable unbound && systemctl restart unbound"

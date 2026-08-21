@@ -592,6 +592,7 @@ def _opnsense_apply_script(token: str, config_path: str, script_path: str) -> st
         "rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder /usr/local/etc/rc.syshook.d/start/99-ctf-builder",
         "/usr/local/sbin/configctl interface reconfigure lan",
         "/usr/local/sbin/configctl interface reconfigure wan",
+        "/usr/local/sbin/configctl webgui restart renew",
         "/usr/local/sbin/configctl openssh restart", "/usr/local/sbin/configctl filter reload",
         f"rm -f {shlex.quote(config_path)}",
         f"printf '%s\\n' {quoted_token} > /conf/ctf-site-ready.tmp",
