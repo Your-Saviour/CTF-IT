@@ -24,9 +24,10 @@ from api.models import (
     VPNCredential, Zone, utcnow,
 )
 from api.services.gamenet_provider import (
-    AwsGameNetProvider, GameNetProviderError, configure_snapshot_opnsense,
+    AwsGameNetProvider, GameNetProviderError, add_deterministic_endpoint_address,
+    configure_snapshot_opnsense,
     configure_gateway, configure_site_wireguard, install_local_wireguard,
-    ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
+    finalize_endpoint_network, ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
     upload_text, validate_site_tunnel,
 )
 from api.services.secrets import decrypt_secret
@@ -323,6 +324,7 @@ def create_private_endpoints(db, event, infrastructure):
     _, public_key = get_or_create_platform_keypair(db)
     definitions = {site["key"]: site for site in infrastructure["sites"]}
     for site in db.query(Site).filter_by(event_id=event.id):
+        gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
         zone_defs = {zone["key"]: zone for zone in definitions[site.key]["zones"]}
         for zone in site.zones:
             next_host = 10
@@ -350,6 +352,13 @@ def create_private_endpoints(db, event, infrastructure):
                             _persist_instance_result(vm, result)
                         finally:
                             provider.close()
+                        db.commit()
+                    if not vm.network_phase:
+                        add_deterministic_endpoint_address(vm, site, gateway_vm)
+                        vm.network_phase = "address_staged"
+                        db.commit()
+                    if vm.network_phase == "address_staged":
+                        finalize_endpoint_network(vm, site, gateway_vm)
                         vm.network_phase = "network_converted"
                         db.commit()
                     if vm.public_ip or not vm.private_ip:

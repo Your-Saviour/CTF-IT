@@ -632,14 +632,30 @@ def test_endpoint_creation_uses_approved_ami_and_persists_eni_metadata(monkeypat
     monkeypatch.setattr(AwsConfig, "from_env", classmethod(lambda cls: type(
         "Config", (), {"ubuntu_ami": lambda self, region: "ami-ubuntu"},
     )()))
+    network_calls = []
+    monkeypatch.setattr(
+        gamenet_provisioning, "add_deterministic_endpoint_address",
+        lambda vm, site, gateway: network_calls.append(("stage", vm.id, site.id, gateway.id)),
+    )
+    monkeypatch.setattr(
+        gamenet_provisioning, "finalize_endpoint_network",
+        lambda vm, site, gateway: network_calls.append(("finalize", vm.id, site.id, gateway.id)),
+    )
     monkeypatch.setattr(gamenet_provisioning, "_assign_blue_modules", lambda *_args: None)
     create_private_endpoints(db_session, event, INFRASTRUCTURE)
-    endpoints = db_session.query(VM).filter_by(role="blue_endpoint").all()
+    endpoints = db_session.query(VM).filter(VM.role.like("%_endpoint")).order_by(VM.id).all()
+    assert endpoints
     assert calls and set(calls) == {
         ("ami-ubuntu", "ctf-it-platform", "ssh-ed25519 TEST"),
     }
     assert all(vm.cloud_instance_id and vm.primary_eni_id and vm.vpc_mac for vm in endpoints)
     assert all(vm.network_phase == "network_converted" for vm in endpoints)
+    assert network_calls == [
+        call
+        for vm in endpoints
+        for call in (("stage", vm.id, site.id, gateway.id),
+                     ("finalize", vm.id, site.id, gateway.id))
+    ]
 
 
 def test_endpoint_stage_one_selects_nic_by_attachment_mac_and_jumps_gateway(monkeypatch, db_session):
