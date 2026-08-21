@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 
 from api.database import get_db
 from api.integrations.registry import adapter_keys, get_adapter
-from api.models import Event, EventIntegration, IntegrationDestination, ServiceCredential, utcnow
+from api.models import (
+    Event, EventIntegration, IntegrationDestination, IntegrationSyncJob,
+    ServiceCredential, utcnow,
+)
 from api.routes.auth import get_current_user
 from api.services.integration_outbox import enqueue_event_sync
 from api.services.secrets import decrypt_secret
@@ -114,6 +117,13 @@ def update_destination(destination_id: int, body: DestinationRequest, request: R
     item.base_url = _url(body.base_url, body.allow_insecure_http)
     item.credential_id, item.enabled = body.credential_id, body.enabled
     item.allow_insecure_http, item.config_json = body.allow_insecure_http, json.dumps(body.config)
+    if not body.enabled:
+        binding_ids = [binding.id for binding in item.bindings]
+        if binding_ids:
+            db.query(IntegrationSyncJob).filter(
+                IntegrationSyncJob.binding_id.in_(binding_ids),
+                IntegrationSyncJob.status.in_(("pending", "retrying")),
+            ).update({IntegrationSyncJob.status: "cancelled"}, synchronize_session=False)
     db.commit(); db.refresh(item)
     return destination_payload(item)
 
@@ -156,6 +166,8 @@ def upsert_event_integration(event_id: int, body: BindingRequest, request: Reque
     event = db.get(Event, event_id); destination = db.get(IntegrationDestination, body.destination_id)
     if not event or not destination:
         raise HTTPException(404, "event or destination not found")
+    if body.enabled and not destination.enabled:
+        raise HTTPException(409, "destination is disabled")
     item = db.query(EventIntegration).filter_by(event_id=event_id, destination_id=body.destination_id).first()
     if not item:
         item = EventIntegration(event_id=event_id, destination_id=body.destination_id)
@@ -170,6 +182,11 @@ def upsert_event_integration(event_id: int, body: BindingRequest, request: Reque
             raise HTTPException(409, f"destination is active for event {conflict.event_id}")
     item.enabled = body.enabled
     item.last_status = "pending" if body.enabled else "disabled"
+    if not body.enabled:
+        db.query(IntegrationSyncJob).filter(
+            IntegrationSyncJob.binding_id == item.id,
+            IntegrationSyncJob.status.in_(("pending", "retrying")),
+        ).update({IntegrationSyncJob.status: "cancelled"}, synchronize_session=False)
     db.commit(); db.refresh(item)
     return binding_payload(item)
 

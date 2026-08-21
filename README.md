@@ -158,6 +158,25 @@ Navigate to `https://ctf.example.com` and register using the generated `ADMIN_BO
 
 The Users panel is also where administrators assign events, promote or demote accounts, deactivate or reactivate access, and create one-hour password-reset links. Invitation links expire after seven days. Both link types are single-use, and access changes invalidate the affected user's active sessions.
 
+## Outbound integrations
+
+Outbound integrations are optional per event. They are configured in the database rather than with global environment variables, so one deployment can safely reuse administrator-managed credentials and destinations across multiple exercises.
+
+To configure Expo-IT:
+
+1. In **Admin → Settings → Service credentials**, create a `token` credential containing the Expo-IT `EXPO_API_KEY` value.
+2. In **Admin → Settings → Integration destinations**, create an `Expo-IT` destination, select that credential, and enter the Expo-IT base URL. HTTPS is required by default. Enable private-network HTTP only for an explicitly trusted network.
+3. Use **Test connection** and resolve any authentication, transport, or contract error before enabling the destination.
+4. Edit an event, select the destination under **Outbound integration**, and enable synchronization. A destination can be active for only one event, and an event can have only one active destination for a given adapter.
+
+Open events enqueue a durable synchronization job whenever relevant event, team, VM, goal, verification, provisioning, scenario, or timeline state changes. Mutations commit before enqueueing and never wait for Expo-IT. The event dashboard shows `pending`, `synchronized`, `retrying`, `failed`, or `disabled`; **Sync now** queues a priority attempt without making the browser request perform network I/O.
+
+Transient failures retry after 5, 15, 45, 135, and 300 seconds. Authentication, validation, and ownership conflicts fail without retry and remain visible on the event dashboard. Jobs and attempt history contain status metadata only—not payloads, API keys, authorization headers, or remote response bodies.
+
+The Expo-IT adapter reads and validates the complete `/api/v1/data` dataset, replaces CTF-IT-owned phases, scores, and `ctf-event-<event_id>-vm-<vm_id>` systems, preserves Expo-IT-owned datasets, availability, credential associations, aliases, and credential secrets, then writes the complete dataset back. It requires an Expo-IT version whose authenticated management responses include `system_aliases` while redacting password fields (commit `e04cff5` or later in the companion repository).
+
+When upgrading an existing CTF-IT installation, deploy the Expo-IT compatibility change first, stop application writers, back up the database, run `alembic upgrade head`, and then start the CTF-IT API. Migration `0017_general_integrations` creates the durable integration schema and removes the obsolete event-level Expo synchronization columns.
+
 ## Events & Scoring
 
 Draft events include a full-page network planner at `/admin/events/{id}/plan`. The diagram defines one canonical GameNet topology repeated for every team: a team VPN gateway, multi-region sites with mandatory OPNsense firewalls, red/blue zones, and individual VM endpoints. The workspace combines the topology canvas, structure outline, inspector forms, live validation, Advanced JSON, cost/resource preview, and durable node positions. Infrastructure becomes read-only once provisioning starts.

@@ -94,10 +94,6 @@ async def lifespan(app: FastAPI):
                 "infrastructure": "TEXT",
                 "started_at": "DATETIME",
                 "ends_at": "DATETIME",
-                "expo_sync_status": "VARCHAR(24)",
-                "expo_sync_last_error": "TEXT",
-                "expo_sync_attempts": "INTEGER NOT NULL DEFAULT 0",
-                "expo_sync_completed_at": "DATETIME",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))

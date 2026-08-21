@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, func, inspect, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, func, inspect, select, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database import Base
@@ -93,11 +93,6 @@ class Event(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
     )
-    expo_sync_status: Mapped[str] = mapped_column(String(24), nullable=True)
-    expo_sync_last_error: Mapped[str] = mapped_column(Text, nullable=True)
-    expo_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    expo_sync_completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-
     # Semaphore project created once per event, reused for all VM provisions
     semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
     semaphore_key_id: Mapped[int] = mapped_column(Integer, nullable=True)
@@ -671,6 +666,11 @@ class IntegrationSyncJob(Base):
     __tablename__ = "integration_sync_jobs"
     __table_args__ = (
         Index("ix_integration_jobs_due", "status", "next_attempt_at", "priority"),
+        Index(
+            "uq_integration_jobs_active_binding", "binding_id", unique=True,
+            sqlite_where=text("status IN ('pending', 'running', 'retrying')"),
+            postgresql_where=text("status IN ('pending', 'running', 'retrying')"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

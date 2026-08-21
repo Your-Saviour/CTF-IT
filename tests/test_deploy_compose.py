@@ -66,3 +66,11 @@ def test_iso_nginx_configuration_is_removed() -> None:
 def test_caldera_ssh_host_key_is_mounted_read_only() -> None:
     caldera = _services()["caldera"]
     assert "./caldera/config/ssh_host_key:/usr/src/app/conf/ssh_host_key:ro" in caldera["volumes"]
+
+
+def test_expo_it_destination_is_database_managed_not_environment_configured() -> None:
+    paths = [ROOT / ".env.example", ROOT / "docker-compose.yml", ROOT / "deploy" / ".env.example",
+             ROOT / "deploy" / "docker-compose.yml"]
+    contents = "\n".join(path.read_text() for path in paths if path.exists())
+    assert "EXPO_IT_URL" not in contents
+    assert "EXPO_IT_API_KEY" not in contents

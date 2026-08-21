@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from api.database import Base, get_db
 from api.integrations.base import ConnectionTestResult
 from api.main import app
-from api.models import Event, IntegrationDestination, ServiceCredential, User
+from api.models import Event, EventIntegration, IntegrationDestination, IntegrationSyncJob, ServiceCredential, User, utcnow
 from api.services.secrets import encrypt_secret
 
 
@@ -96,3 +96,26 @@ def test_connection_test_is_non_mutating_and_sanitized(client, database):
     assert response.status_code == 200
     assert response.json()["last_test_status"] == "successful"
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_disabling_binding_cancels_queued_delivery(client, database):
+    _, event_id, credential_id = database
+    destination = client.post(
+        "/admin/api/integrations/destinations", json=destination_payload(credential_id)
+    ).json()
+    binding = client.put(f"/admin/api/events/{event_id}/integrations", json={
+        "destination_id": destination["id"], "enabled": True,
+    }).json()
+    with Sessions() as db:
+        db.add(IntegrationSyncJob(
+            binding_id=binding["id"], status="pending", trigger_reason="vm_updated",
+            next_attempt_at=utcnow(),
+        ))
+        db.commit()
+
+    response = client.put(f"/admin/api/events/{event_id}/integrations", json={
+        "destination_id": destination["id"], "enabled": False,
+    })
+    assert response.status_code == 200
+    with Sessions() as db:
+        assert db.query(IntegrationSyncJob).one().status == "cancelled"

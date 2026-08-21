@@ -675,10 +675,6 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "updated_at": e.updated_at.isoformat(),
             "user_count": user_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
-            "expo_sync_status": e.expo_sync_status,
-            "expo_sync_last_error": e.expo_sync_last_error,
-            "expo_sync_attempts": e.expo_sync_attempts,
-            "expo_sync_completed_at": e.expo_sync_completed_at.isoformat() if e.expo_sync_completed_at else None,
         })
     return result
 
@@ -708,10 +704,6 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "updated_at": event.updated_at.isoformat(),
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
-        "expo_sync_status": event.expo_sync_status,
-        "expo_sync_last_error": event.expo_sync_last_error,
-        "expo_sync_attempts": event.expo_sync_attempts,
-        "expo_sync_completed_at": event.expo_sync_completed_at.isoformat() if event.expo_sync_completed_at else None,
     }
 
 

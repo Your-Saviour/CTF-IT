@@ -98,13 +98,22 @@ def test_vm_persists_opnsense_configuration_generation(db_session):
     assert saved.opnsense_config_status == "applying"
 
 
-def test_schema_repair_migration_covers_existing_database_feature_columns():
-    migration = Path("migrations/versions/0009_existing_feature_columns.py").read_text()
-    assert '"ust_prompt"' in migration
-    assert '"expo_sync_status"' in migration
-    assert '"expo_sync_last_error"' in migration
-    assert '"expo_sync_attempts"' in migration
-    assert '"expo_sync_completed_at"' in migration
+def test_general_integration_migration_replaces_obsolete_event_sync_columns():
+    migration = Path("migrations/versions/0017_general_integrations.py").read_text()
+    for table in (
+        "integration_destinations", "event_integrations",
+        "integration_sync_jobs", "integration_sync_attempts",
+    ):
+        assert table in migration
+    for column in (
+        "expo_sync_status", "expo_sync_last_error",
+        "expo_sync_attempts", "expo_sync_completed_at",
+    ):
+        assert f'drop_column("{column}")' in migration
+
+    startup = Path("api/main.py").read_text()
+    assert "expo_sync_status" not in startup
+    assert "expo_sync_last_error" not in startup
 
 
 def test_snapshot_configuration_resume_does_not_relaunch_live_generation(monkeypatch, db_session):

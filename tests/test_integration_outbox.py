@@ -115,6 +115,20 @@ def test_claim_due_job_has_one_winner(monkeypatch):
         assert db.get(IntegrationSyncJob, claimed).status == "running"
 
 
+def test_claim_cancels_job_when_event_has_stopped(monkeypatch):
+    sessions, event_id, _ = integration_database(monkeypatch)
+    from api.services.integration_outbox import claim_due_job, enqueue_event_sync
+
+    enqueue_event_sync(event_id, "vm_updated")
+    with sessions() as db:
+        event = db.get(Event, event_id)
+        event.status = "stopped"; event.open = False
+        db.commit()
+    assert claim_due_job() is None
+    with sessions() as db:
+        assert db.query(IntegrationSyncJob).one().status == "cancelled"
+
+
 @pytest.mark.asyncio
 async def test_run_job_records_success_without_secret(monkeypatch):
     sessions, event_id, binding_id = integration_database(monkeypatch)
@@ -147,3 +161,42 @@ async def test_run_job_retries_transient_result(monkeypatch):
         assert job.status == "retrying"
         assert job.attempt_count == 1
         assert job.next_attempt_at > job.claimed_at
+
+
+@pytest.mark.asyncio
+async def test_run_job_creates_one_follow_up_for_change_during_delivery(monkeypatch):
+    sessions, event_id, _ = integration_database(monkeypatch)
+    from api.services.integration_outbox import claim_due_job, enqueue_event_sync, run_job
+
+    enqueue_event_sync(event_id, "vm_updated")
+    job_id = claim_due_job()
+    assert enqueue_event_sync(event_id, "timeline_updated") is True
+    with patch("api.services.integration_outbox.decrypt_secret", return_value="private-key"):
+        await run_job(job_id)
+    with sessions() as db:
+        jobs = db.query(IntegrationSyncJob).order_by(IntegrationSyncJob.id).all()
+        assert [(job.status, job.trigger_reason) for job in jobs] == [
+            ("succeeded", "timeline_updated"), ("pending", "timeline_updated")
+        ]
+
+
+def test_claim_serializes_distinct_jobs_for_one_destination(monkeypatch):
+    sessions, event_id, binding_id = integration_database(monkeypatch)
+    from api.services.integration_outbox import claim_due_job, enqueue_event_sync
+
+    enqueue_event_sync(event_id, "manual")
+    with sessions() as db:
+        binding = db.get(EventIntegration, binding_id)
+        second_event = Event(name="Second", quota="{}", status="open", open=True)
+        db.add(second_event); db.flush()
+        second_binding = EventIntegration(
+            event_id=second_event.id, destination_id=binding.destination_id, enabled=False
+        )
+        db.add(second_binding); db.flush()
+        db.add(IntegrationSyncJob(
+            binding_id=second_binding.id, status="pending", trigger_reason="manual",
+            next_attempt_at=utcnow(),
+        ))
+        db.commit()
+    assert claim_due_job() is not None
+    assert claim_due_job() is None
