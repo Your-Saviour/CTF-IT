@@ -16,3 +16,5 @@ Important areas:
 All supported resources must carry canonical ownership tags. Destructive operations must read and validate those tags first. Preserve historical database columns as read-only compatibility data; do not reintroduce runtime operations for the retired provider.
 
 Run the offline suite with `docker compose --profile test run --rm --build tests pytest -q`. Live AWS acceptance is opt-in and requires an approved account ID and unique run ID.
+
+Current-facing documentation must describe AWS as the sole provisioning provider. Vultr references are acceptable only in migrations, compatibility notes, and clearly historical specs/plans. Azure and GCP remain valid planner icon keywords, not supported provisioning backends.

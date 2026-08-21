@@ -2,9 +2,11 @@
 
 CTF-IT is a VM-based red-team/blue-team training platform. Administrators create events and teams, provision EC2 instances, apply vulnerability and hardening modules through Ansible Semaphore, and run adversary operations through MITRE Caldera.
 
+CTF-IT uses AWS for all newly managed cloud infrastructure. The former Vultr integration is retired: legacy database fields remain readable for historical records, but no active route provisions, retries, or destroys Vultr resources.
+
 ## AWS configuration
 
-Production uses the IAM role attached to the API workload. Local development may set `AWS_PROFILE` in the invoking shell. The application never accepts or stores AWS access keys.
+Production uses the IAM role attached to the API workload. Local development may set `AWS_PROFILE` in the invoking shell. Boto3 resolves credentials through its standard credential chain; the application never accepts or stores AWS access keys.
 
 Required configuration:
 
@@ -22,6 +24,17 @@ CTF_CONTROL_PLANE_CIDR=203.0.113.10/32
 ```
 
 Attach [deploy/aws/iam-policy.json](deploy/aws/iam-policy.json) to the production workload role. Confirm the approved AMIs, instance-type offerings, standard subnet capacity, Elastic IP quota, VPC quota, ENI demand, and On-Demand vCPU quota before starting an event. The start endpoint performs these checks and keeps the event closed if any blocking check fails. Pricing lookup failures are reported but do not hide successful capacity checks.
+
+The configured standard VPC, subnet, and security groups are used for ordinary VMs. GameNet sites create separately tagged VPC resources in the configured region and Availability Zone. The Ubuntu and FreeBSD AMI maps must contain an approved AMI for every region an operator can select; the service does not fall back to arbitrary public images.
+
+### Production Compose configuration
+
+The production stack uses two environment files:
+
+- `/.env`, copied from [.env.example](.env.example), supplies API settings such as signing keys, database behavior, and event defaults.
+- `/deploy/.env`, copied from [deploy/.env.example](deploy/.env.example), supplies Compose/deployment settings and the AWS values interpolated into the API container.
+
+Set the complete AWS block in `deploy/.env`. Keep production credentials out of both files and attach the IAM policy to the role of the host or workload running the API. If the runtime is outside AWS, provide credentials through a supported external Boto3 credential source rather than adding access keys to application configuration.
 
 ## VM lifecycle
 
@@ -67,4 +80,4 @@ Run them only in the approved test account. Every canary resource is tagged with
 
 ## Legacy records
 
-Database columns for pre-cutover cloud records remain readable for audit/history, but the application exposes no operation that creates, changes, or deletes those historical resources. The former private-network issue note is archived under `docs/historical/`.
+Database columns for pre-cutover Vultr records remain readable for audit/history, but the application exposes no operation that creates, changes, or deletes those historical resources. Design documents and implementation plans written before the cutover may describe Vultr as the then-current provider; they are historical records, not operator instructions. The former private-network issue note is archived under `docs/historical/`.
