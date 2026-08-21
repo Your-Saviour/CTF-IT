@@ -886,7 +886,7 @@ def test_aws_gamenet_wan_security_group_limits_temporary_ssh_to_control_plane(mo
     assert final_wan.ingress == ()
 
 
-def test_aws_gamenet_zone_security_group_allows_workloads_and_vpn_management():
+def test_aws_gamenet_zone_security_group_allows_workloads_vpn_and_firewalled_egress():
     from types import SimpleNamespace
     from api.services.gamenet_provider import AwsGameNetProvider
 
@@ -914,7 +914,7 @@ def test_aws_gamenet_zone_security_group_allows_workloads_and_vpn_management():
     },)
     assert network.specs[2].egress == ({
         "IpProtocol": "-1",
-        "IpRanges": [{"CidrIp": "10.128.0.0/20"}, {"CidrIp": "10.64.0.0/10"}],
+        "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
     },)
 
 
