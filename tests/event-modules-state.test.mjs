@@ -1,6 +1,13 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {dependencyParents,directDependants,filterModules,moduleProvenance,moduleUsage} from '../frontend/static/event-modules-state.js';
+import {dependencyParents,directDependants,filterModules,moduleAvailableForVm,moduleProvenance,moduleUsage} from '../frontend/static/event-modules-state.js';
 const modules=[{id:'app',name:'Docker Lab',description:'Installs a container service',type:'application_internal',difficulty:'easy',category:'containers',tags:['docker'],requires:[],conflicts:[],supported_bases:[]},{id:'vuln',name:'Socket Exposure',description:'Exposes the Docker socket',type:'vulnerability',difficulty:'hard',category:'containers',tags:['docker'],requires:['app'],conflicts:[],supported_bases:['ubuntu']},{id:'other',name:'Journal Retention',description:'Keeps system logs',type:'hardening',difficulty:'medium',category:'logging',tags:['logs'],requires:[],conflicts:[],supported_bases:['debian']}];
+
+test('green deployment modules and endpoint modules stay in their placements',()=>{
+  const expo={id:'expo_it',type:'green_infrastructure',supported_bases:['ubuntu'],deployment:{inputs:[]}};
+  assert.equal(moduleAvailableForVm(expo,{role:'green',base_type:'ubuntu'}),true);
+  assert.equal(moduleAvailableForVm(expo,{role:'blue',base_type:'ubuntu'}),false);
+  assert.equal(moduleAvailableForVm(modules[0],{role:'green',base_type:'ubuntu'}),false);
+});
 const plan={assignments:{vm1:{pinned_module_ids:['vuln'],resolved_module_ids:['app','vuln','other']},vm2:{pinned_module_ids:['app'],resolved_module_ids:['app']}}};
 test('classifies manual random dependency and absent assignments',()=>{assert.equal(moduleProvenance(plan,'vm1','vuln',modules),'manual');assert.equal(moduleProvenance(plan,'vm1','app',modules),'dependency');assert.equal(moduleProvenance(plan,'vm1','other',modules),'random');assert.equal(moduleProvenance(plan,'vm2','other',modules),'absent')});
 test('names the assigned parent requiring a dependency',()=>assert.deepEqual(dependencyParents(plan,'vm1','app',modules),['vuln']));

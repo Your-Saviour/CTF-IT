@@ -121,9 +121,15 @@ export function effectiveNodeColor(index, layout, nodeId) {
 
 export function renameStructuralKey(state, nodeId, rawKey) {
   const index = nodeIndex(state.infrastructure), node = index.get(nodeId);
-  if (!node || !['site', 'zone', 'vm'].includes(node.type)) return {state, nodeId};
+  if (!node || !['site', 'zone', 'vm', 'green_vm'].includes(node.type)) return {state, nodeId};
   const key = slugify(rawKey), parts = nodeId.substring(nodeId.indexOf(':') + 1).split('/');
   node.value.key = key;
+  if (node.type === 'green_vm') {
+    const remap = entries => Object.fromEntries(Object.entries(entries || {}).map(([id, value]) =>
+      [id === `green:${parts[0]}` ? `green:${key}` : id, value]));
+    state.layout = {version: 1, nodes: remap(state.layout?.nodes), themes: remap(state.layout?.themes)};
+    return {state, nodeId: `green:${key}`};
+  }
   const oldToken = node.type === 'site' ? parts[0] : node.type === 'zone' ? `${parts[0]}/${parts[1]}` : parts.join('/');
   const newToken = node.type === 'site' ? key : node.type === 'zone' ? `${parts[0]}/${key}` : `${parts[0]}/${parts[1]}/${key}`;
   const remapEntries = entries => {
