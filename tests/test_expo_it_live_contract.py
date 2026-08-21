@@ -61,7 +61,11 @@ async def test_real_management_api_round_trip_preserves_expo_owned_data(tmp_path
         password_before = json.loads(raw)["credentials"][0]["password"]
 
         owned = {
-            "phases": [{"number": 0, "time_range": "09:00Z–10:00Z", "current": True}],
+            "phases": [{
+                "number": 0,
+                "time_range": "2026-08-21T09:00:00Z/2026-08-21T10:00:00Z",
+                "current": True,
+            }],
             "scoring": [{
                 "team": "BT01", "defense": 20, "usability": 0, "availability": 0,
                 "reverts": 5, "ctirep": 0, "sitrep": 0, "forensics": 0,
@@ -86,7 +90,12 @@ async def test_real_management_api_round_trip_preserves_expo_owned_data(tmp_path
             after = (await client.get("/api/v1/data", headers=headers)).json()
 
         assert after["phases"] == owned["phases"]
-        assert after["scoring"] == owned["scoring"]
+        expected_scoring = deepcopy(owned["scoring"])
+        expected_scoring[0]["collaboration"] = sum(
+            point["points"] for point in before["collaboration_points"]
+            if point["team_to"] == "BT01"
+        )
+        assert after["scoring"] == expected_scoring
         for key in ("inbox", "spot_reports", "ust", "collaboration_points"):
             assert after[key] == before[key]
         assert after["infrastructure"]["credentials"] == before["infrastructure"]["credentials"]
