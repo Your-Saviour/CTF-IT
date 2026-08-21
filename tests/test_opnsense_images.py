@@ -433,7 +433,7 @@ def test_opnsense_wait_rejects_target_version_while_first_boot_lock_is_held(monk
 
     def ssh(_db, _host, command, **_kwargs):
         commands.append(command)
-        if len(commands) == 1 and "LOCK_SH" in command:
+        if len(commands) == 1 and "/usr/local/bin/flock -n -o /var/run/booting" in command:
             return 1, "", "OPNsense first boot still running"
         return 0, "26.7\n", ""
 
