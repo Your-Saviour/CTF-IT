@@ -167,6 +167,8 @@ async def save_timeline(event_id: int, request: Request, db: Session = Depends(g
     except (TypeError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
     event.timeline = json.dumps(timeline); event.updated_at = utcnow(); db.commit(); db.refresh(event)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event_id, "timeline_updated")
     return {"status": "saved", "updated_at": event.updated_at.isoformat()}
 
 

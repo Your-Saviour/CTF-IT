@@ -70,9 +70,8 @@ def provision_event_gamenets(event_id: int) -> None:
         event.ends_at = (event.started_at + __import__("datetime").timedelta(minutes=event.time_limit_minutes)
                          if event.time_limit_minutes else None)
         db.commit()
-        from api.services.expo_ust import configured, synchronize
-        if configured():
-            asyncio.run(synchronize(event.id))
+        from api.services.integration_outbox import enqueue_event_sync
+        enqueue_event_sync(event.id, "provisioning_completed")
     except Exception as exc:
         db.rollback()
         event = db.query(Event).filter_by(id=event_id).first()

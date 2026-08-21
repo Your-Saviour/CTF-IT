@@ -1207,6 +1207,8 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
     db.add(event)
     db.commit()
     db.refresh(event)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event.id, "event_created")
     return {"status": "created", "id": event.id}
 
 
@@ -1335,8 +1337,12 @@ async def update_event(
                 "current_updated_at": current.updated_at.isoformat(),
             }, status_code=409)
         db.commit()
+        from api.services.integration_outbox import enqueue_event_sync
+        enqueue_event_sync(event_id, "event_updated")
         return {"status": "updated", "updated_at": new_updated_at.isoformat()}
     db.commit()
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event_id, "event_updated")
     return {"status": "updated", "updated_at": event.updated_at.isoformat()}
 
 
@@ -1422,27 +1428,9 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     event.status = "open"
     event.open = True
     db.commit()
-    from api.services.expo_ust import schedule
-    scheduled = schedule(event.id)
-    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None,
-            "warning": None if scheduled else "Expo-IT integration is not configured"}
-
-
-@router.post("/events/{event_id}/expo-sync/retry")
-async def retry_expo_sync(event_id: int, request: Request, db: Session = Depends(get_db)):
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    event = db.query(Event).filter_by(id=event_id).first()
-    if not event:
-        return JSONResponse({"error": "Event not found"}, status_code=404)
-    if event.status != "open":
-        return JSONResponse({"error": "Only an open event can be synchronized"}, status_code=409)
-    from api.services.expo_ust import configured, schedule
-    if not configured():
-        return JSONResponse({"error": "Expo-IT integration is not configured"}, status_code=503)
-    schedule(event_id)
-    return JSONResponse({"status": "syncing"}, status_code=202)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event.id, "event_opened")
+    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None}
 
 
 @router.get("/events/{event_id}/provision-status")

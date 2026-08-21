@@ -94,6 +94,8 @@ async def check_vm_goal(
 
     db.commit()
     db.refresh(goal)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(vm.event_id, "score_updated")
     return _goal_dict(goal)
 
 

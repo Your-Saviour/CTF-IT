@@ -75,6 +75,17 @@ def test_disabled_binding_does_not_enqueue(monkeypatch):
     assert enqueue_event_sync(event_id, "event_updated") is False
 
 
+def test_draft_event_does_not_enqueue(monkeypatch):
+    sessions, event_id, _ = integration_database(monkeypatch)
+    from api.services.integration_outbox import enqueue_event_sync
+
+    with sessions() as db:
+        event = db.get(Event, event_id)
+        event.status = "draft"; event.open = False
+        db.commit()
+    assert enqueue_event_sync(event_id, "event_updated") is False
+
+
 def test_stale_running_job_is_recovered(monkeypatch):
     sessions, _, binding_id = integration_database(monkeypatch)
     from api.services.integration_outbox import recover_stale_claims

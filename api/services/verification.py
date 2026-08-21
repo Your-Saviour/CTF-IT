@@ -352,4 +352,6 @@ async def verify_assignment(db: Session, assignment: VMModule, spec: dict, trigg
         ))
         db.commit()
         db.refresh(assignment)
+        from api.services.integration_outbox import enqueue_event_sync
+        enqueue_event_sync(assignment.vm.event_id, "score_updated")
         return result

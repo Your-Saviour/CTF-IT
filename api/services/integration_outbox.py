@@ -7,6 +7,7 @@ from api.database import SessionLocal
 from api.integrations.base import SyncResult
 from api.integrations.registry import get_adapter
 from api.models import (
+    Event,
     EventIntegration,
     IntegrationSyncAttempt,
     IntegrationSyncJob,
@@ -25,10 +26,12 @@ def enqueue_event_sync(event_id: int, reason: str, priority: int = 0) -> bool:
         bindings = (
             db.query(EventIntegration)
             .join(IntegrationDestination)
+            .join(Event)
             .filter(
                 EventIntegration.event_id == event_id,
                 EventIntegration.enabled.is_(True),
                 IntegrationDestination.enabled.is_(True),
+                Event.status == "open",
             )
             .all()
         )

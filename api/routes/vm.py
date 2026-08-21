@@ -153,6 +153,8 @@ async def create_team(request: Request, db: Session = Depends(get_db)):
     db.add(team)
     db.commit()
     db.refresh(team)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(team.event_id, "team_created")
     return {"status": "created", "id": team.id}
 
 
@@ -171,6 +173,8 @@ async def update_team(team_id: int, request: Request, db: Session = Depends(get_
         team.name = body["name"].strip()
 
     db.commit()
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(team.event_id, "team_updated")
     return {"status": "updated"}
 
 
@@ -191,8 +195,11 @@ async def delete_team(team_id: int, request: Request, db: Session = Depends(get_
             status_code=409,
         )
 
+    event_id = team.event_id
     db.delete(team)
     db.commit()
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event_id, "team_deleted")
     return {"status": "deleted"}
 
 
@@ -325,6 +332,8 @@ async def create_vm(request: Request, db: Session = Depends(get_db)):
     db.add(vm)
     db.commit()
     db.refresh(vm)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(vm.event_id, "vm_created")
     return {"status": "created", "id": vm.id}
 
 
@@ -348,6 +357,8 @@ async def update_vm(vm_id: int, request: Request, db: Session = Depends(get_db))
     from api.models import utcnow
     vm.updated_at = utcnow()
     db.commit()
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(vm.event_id, "vm_updated")
     return {"status": "updated"}
 
 
@@ -361,8 +372,11 @@ async def delete_vm(vm_id: int, request: Request, db: Session = Depends(get_db))
     if not vm:
         return JSONResponse({"error": "VM not found"}, status_code=404)
 
+    event_id = vm.event_id
     db.delete(vm)
     db.commit()
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event_id, "vm_deleted")
     return {"status": "deleted"}
 
 

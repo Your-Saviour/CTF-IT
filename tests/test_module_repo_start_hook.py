@@ -45,7 +45,7 @@ def test_start_event_syncs_repos(draft_event, monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     with patch("api.routes.admin.require_admin", return_value=admin), \
          patch("api.routes.module_repos.sync_all_repos") as mock_sync, \
-         patch("api.services.expo_ust.schedule", return_value=True):
+         patch("api.services.integration_outbox.enqueue_event_sync", return_value=True):
         with TestClient(app, raise_server_exceptions=True) as c:
             resp = c.post(f"/admin/api/events/{event.id}/start")
     app.dependency_overrides.clear()
@@ -78,7 +78,7 @@ def test_start_event_syncs_repos_off_thread(monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     with patch("api.routes.admin.require_admin", return_value=admin), \
          patch("api.routes.module_repos.sync_all_repos") as mock_sync, \
-         patch("api.services.expo_ust.schedule", return_value=True), \
+         patch("api.services.integration_outbox.enqueue_event_sync", return_value=True), \
          patch("asyncio.to_thread", side_effect=fake_to_thread):
         with TestClient(app, raise_server_exceptions=True) as c:
             resp = c.post(f"/admin/api/events/{event_id}/start")
