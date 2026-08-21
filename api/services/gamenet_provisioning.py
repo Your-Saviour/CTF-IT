@@ -15,6 +15,7 @@ import logging
 import os
 import shlex
 import socket
+import subprocess
 from ipaddress import ip_network
 from sqlalchemy.orm import object_session
 
@@ -726,7 +727,10 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
         firewall = db.query(VM).filter_by(id=site.firewall_vm_id).one()
         gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
         if connectivity:
-            private_management &= _tcp_probe(firewall.private_ip, 443)
+            site_management = _tcp_probe(firewall.private_ip, 443)
+            private_management &= site_management
+            if not site_management:
+                _log_private_path_diagnostics(event, site, firewall, gateway_vm)
         if exposure:
             public_exposure &= _wait_ports_closed(firewall.public_ip, (22, 80, 443))
         endpoints = db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all()
@@ -782,8 +786,52 @@ def _tcp_probe(host, port, timeout=3):
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
-    except OSError:
+    except OSError as exc:
+        log.warning("TCP probe failed for %s:%s: %s", host, port, exc)
         return False
+
+
+def _log_private_path_diagnostics(event, site, firewall, gateway_vm):
+    """Capture both ends of a failed control-plane-to-site management path."""
+    interface = f"ctf-e{event.id}-t{site.team_id}"[:15]
+    commands = (
+        ["ip", "-4", "route", "get", firewall.private_ip],
+        ["wg", "show", interface],
+    )
+    for command in commands:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        log.warning(
+            "private path local diagnostic %s rc=%s: %s",
+            " ".join(command), result.returncode,
+            (result.stdout or result.stderr).strip()[:2000],
+        )
+    firewall_command = (
+        "printf '%s\\n' listeners; sockstat -4 -l; "
+        "printf '%s\\n' interfaces; ifconfig wg0; "
+        "printf '%s\\n' routes; netstat -rn -f inet; "
+        "printf '%s\\n' rules; pfctl -sr"
+    )
+    code, output, error = ssh_command(
+        firewall, firewall_command, host=firewall.private_ip,
+        timeout=30, connect_timeout=15,
+    )
+    log.warning(
+        "private path firewall diagnostic rc=%s: %s", code,
+        (output or error).strip()[:6000],
+    )
+    gateway_command = (
+        "python3 -c " + shlex.quote(
+            "import socket; s=socket.create_connection((%r, 443), 5); s.close()" %
+            firewall.private_ip
+        )
+    )
+    code, output, error = ssh_command(
+        gateway_vm, gateway_command, timeout=30, connect_timeout=15,
+    )
+    log.warning(
+        "private path gateway probe rc=%s: %s", code,
+        (output or error).strip()[:1000],
+    )
 
 
 def _wait_ports_closed(host, ports, timeout=60):
