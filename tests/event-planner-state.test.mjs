@@ -30,6 +30,15 @@ test('null infrastructure opens as an editable empty network', () => {
   assert.deepEqual(infrastructure.sites, []);
   assert.equal(infrastructure.vpn_gateway.listen_port, 51820);
   assert.equal(nodeIndex(infrastructure).has('gateway'), true);
+  assert.deepEqual(infrastructure.green_infrastructure, {vms: []});
+});
+
+test('shared green VMs normalize, validate, and enter the node index', () => {
+  const value = structuredClone(infrastructure);
+  value.green_infrastructure = {vms: [{key:'expo_it', name:'Expo-IT', base_type:'ubuntu', default_plan:'small', region:'syd'}]};
+  const normalized = normalizeClientInfrastructure(value);
+  assert.equal(nodeIndex(normalized).get('green:expo_it').type, 'green_vm');
+  assert.equal(validateClientInfrastructure(normalized, {bases:[{id:'ubuntu'},{id:'opnsense'}]}).length, 0);
 });
 
 test('legacy firewall zones normalize to blue-team ownership', () => {
