@@ -3,6 +3,7 @@ name: Python Inventory Dashboard
 description: A Flask-based server inventory dashboard running as a systemd service on port 5001.
 type: application_external
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: web
 tags: [web, flask, python, inventory]

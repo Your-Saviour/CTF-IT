@@ -1,0 +1,23 @@
+.ability-inspector-tabs{display:flex;margin:-12px -12px 12px;border-bottom:1px solid var(--border)}
+.ability-inspector-tabs button{flex:1;padding:11px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text-secondary);font:inherit;font-size:.68rem;cursor:pointer}
+.ability-inspector-tabs button[aria-selected=true]{border-color:var(--cyan);color:var(--cyan)}
+.ability-inspector-tabs button:focus-visible,.ability-dossier button:focus-visible,#ability-details-dialog button:focus-visible,.ability-command summary:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.ability-dossier-heading{align-items:flex-start!important;padding:0 0 12px!important;border-bottom:1px solid var(--border)!important}
+.ability-dossier-heading span,#ability-details-dialog>div>header span{display:block;color:var(--cyan);font-size:.58rem;letter-spacing:.08em;text-transform:uppercase}
+.ability-dossier-heading h3{margin:5px 0 0;font-size:.84rem;line-height:1.4}
+.ability-dossier-heading button,.ability-command button{width:auto!important;padding:6px 8px!important;background:#000!important;color:var(--cyan)!important}
+.ability-effect{margin:14px 0;color:var(--text-secondary);font-size:.72rem;line-height:1.6}
+.ability-facts{margin:0}.ability-facts div{display:grid;grid-template-columns:112px 1fr;gap:10px;padding:8px 0;border-top:1px solid var(--border)}
+.ability-facts dt{color:var(--text-secondary);font-size:.61rem}.ability-facts dd{margin:0;color:var(--text-primary);font-size:.67rem;overflow-wrap:anywhere}
+.ability-command{margin-top:14px;border:1px solid var(--border);background:#000}.ability-command summary{padding:9px;color:var(--cyan);font-size:.65rem;cursor:pointer}
+.ability-command pre{max-height:210px;margin:0;padding:12px;overflow:auto;border-top:1px solid var(--border);white-space:pre-wrap;overflow-wrap:anywhere;color:#c8d7d9;font:11px/1.55 'JetBrains Mono',monospace}
+.ability-command button{float:right;margin:8px}.ability-command-empty,.ability-details-unavailable{padding:12px;color:var(--text-secondary);font-size:.68rem;line-height:1.5}
+.ability-details-unavailable p{margin:0 0 7px}.ability-details-unavailable p:first-child{color:var(--text-primary);font-weight:700}
+#ability-details-dialog{width:min(760px,calc(100vw - 32px));min-width:0;max-width:none;max-height:calc(100dvh - 32px);margin:auto;padding:0;background:#0b0c0a;box-shadow:0 22px 70px rgba(0,0,0,.72)}
+#ability-details-dialog::backdrop{background:rgba(0,0,0,.72)}.ability-dialog-shell{display:flex;max-height:calc(100dvh - 34px);flex-direction:column}
+.ability-dialog-shell>header{align-items:center;padding:14px 16px;border-bottom:1px solid var(--border)}.ability-dialog-shell>header h2{margin:4px 0 0;font-size:.9rem}
+.ability-dialog-shell>header button{padding:8px 10px;border:1px solid var(--border);background:#000;color:var(--text-secondary);font:inherit;font-size:.66rem;cursor:pointer}
+#ability-details-dialog-content{padding:18px;overflow:auto}.ability-dossier.expanded .ability-effect{font-size:.78rem}.ability-dossier.expanded .ability-command pre{max-height:360px}
+.ability-dossier.expanded .ability-facts div{grid-template-columns:150px 1fr}
+@media(max-width:900px){.operation-inspector-panel{width:calc(100% - 28px)}#ability-details-dialog{width:calc(100vw - 20px);max-height:calc(100dvh - 20px)}.ability-dialog-shell{max-height:calc(100dvh - 22px)}.ability-dossier.expanded .ability-facts div{grid-template-columns:112px 1fr}}
+@media(prefers-reduced-motion:reduce){.ability-dossier *{scroll-behavior:auto!important;transition:none!important}}

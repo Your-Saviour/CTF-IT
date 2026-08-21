@@ -31,6 +31,7 @@ from api.services.gamenet_provider import (
 )
 from api.services.secrets import decrypt_secret
 from builder.infrastructure_validation import gamenet_hostname
+from builder.infrastructure_planner import zone_endpoint_instances
 
 log = logging.getLogger(__name__)
 
@@ -145,28 +146,27 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
             for zone_spec in site_spec["zones"]:
                 zone = zones[zone_spec["key"]]
                 next_host = 10
-                for endpoint in zone_spec["endpoints"]:
-                    for index in range(endpoint["count"]):
-                        hostname = gamenet_hostname(
-                            event.id, team.id, site.key, zone.key, endpoint["key"], index + 1,
+                for endpoint in zone_endpoint_instances(zone_spec["endpoints"]):
+                    hostname = gamenet_hostname(
+                        event.id, team.id, site.key, zone.key, endpoint["key"],
+                    )
+                    vm = db.query(VM).filter_by(event_id=event.id, hostname=hostname).first()
+                    if not vm:
+                        private_ip = str(ip_network(zone.subnet).network_address + next_host)
+                        vm = VM(
+                            hostname=hostname, team_id=team.id, event_id=event.id,
+                            site_id=site.id, zone_id=zone.id, status="creating",
+                            role=f"{zone.team_role}_endpoint", vm_type=endpoint["key"],
+                            base_type=endpoint["base_type"],
+                            vultr_plan=endpoint["default_plan"], vultr_region=site.region,
+                            private_ip=private_ip, ip_address=private_ip,
+                            ust_prompt=endpoint.get("ust_prompt"),
                         )
-                        vm = db.query(VM).filter_by(event_id=event.id, hostname=hostname).first()
-                        if not vm:
-                            private_ip = str(ip_network(zone.subnet).network_address + next_host)
-                            vm = VM(
-                                hostname=hostname, team_id=team.id, event_id=event.id,
-                                site_id=site.id, zone_id=zone.id, status="creating",
-                                role=f"{zone.team_role}_endpoint", vm_type=endpoint["key"],
-                                base_type=endpoint["base_type"],
-                                vultr_plan=endpoint["default_plan"], vultr_region=site.region,
-                                private_ip=private_ip, ip_address=private_ip,
-                                ust_prompt=endpoint.get("ust_prompt"),
-                            )
-                            db.add(vm)
-                            db.flush()
-                        created.append(vm)
-                        vm.ust_prompt = endpoint.get("ust_prompt")
-                        next_host += 1
+                        db.add(vm)
+                        db.flush()
+                    created.append(vm)
+                    vm.ust_prompt = endpoint.get("ust_prompt")
+                    next_host += 1
     return created
 
 
@@ -269,45 +269,44 @@ def create_private_endpoints(db, event, infrastructure):
         zone_defs = {zone["key"]: zone for zone in definitions[site.key]["zones"]}
         for zone in site.zones:
             next_host = 10
-            for endpoint in zone_defs[zone.key]["endpoints"]:
-                for index in range(endpoint["count"]):
-                    hostname = gamenet_hostname(
-                        event.id, site.team_id, site.key, zone.key, endpoint["key"], index + 1,
+            for endpoint in zone_endpoint_instances(zone_defs[zone.key]["endpoints"]):
+                hostname = gamenet_hostname(
+                    event.id, site.team_id, site.key, zone.key, endpoint["key"],
+                )
+                existing = db.query(VM).filter_by(event_id=event.id, hostname=hostname).first()
+                private_ip = str(__import__("ipaddress").ip_network(zone.subnet).network_address + next_host)
+                vm = existing or VM(hostname=hostname, team_id=site.team_id, event_id=event.id, site_id=site.id,
+                                    zone_id=zone.id, status="creating", role=f"{zone.team_role}_endpoint",
+                                    base_type=endpoint["base_type"], vultr_plan=endpoint["default_plan"],
+                                    vultr_region=site.region, private_ip=private_ip, ip_address=private_ip)
+                if not existing:
+                    db.add(vm); db.flush()
+                if not vm.vultr_id or not vm.vpc_ip or not vm.vpc_mac:
+                    _create_provider_instance(
+                        vm, public=False, vpc_ids=[site.vpc_id],
+                        stock_image=True,
                     )
-                    existing = db.query(VM).filter_by(event_id=event.id, hostname=hostname).first()
-                    private_ip = str(__import__("ipaddress").ip_network(zone.subnet).network_address + next_host)
-                    vm = existing or VM(hostname=hostname, team_id=site.team_id, event_id=event.id, site_id=site.id,
-                                        zone_id=zone.id, status="creating", role=f"{zone.team_role}_endpoint",
-                                        base_type=endpoint["base_type"], vultr_plan=endpoint["default_plan"],
-                                        vultr_region=site.region, private_ip=private_ip, ip_address=private_ip)
-                    if not existing:
-                        db.add(vm); db.flush()
-                    if not vm.vultr_id or not vm.vpc_ip or not vm.vpc_mac:
-                        _create_provider_instance(
-                            vm, public=False, vpc_ids=[site.vpc_id],
-                            stock_image=True,
-                        )
-                        vm.network_phase = "provider_created"
-                        db.commit()
-                    if vm.public_ip or not vm.vpc_ip or not vm.vpc_mac:
-                        raise GameNetProviderError("missing VPC attachment metadata or unexpected public endpoint address")
-                    gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
-                    if vm.network_phase in {None, "provider_created"}:
-                        add_deterministic_endpoint_address(vm, site, gateway_vm)
-                        vm.network_phase = "address_added"
-                        db.commit()
-                    if vm.network_phase == "address_added":
-                        finalize_endpoint_network(vm, site, gateway_vm)
-                        vm.network_phase = "network_converted"
-                        vm.ip_address = vm.private_ip
-                        db.commit()
-                    if vm.network_phase == "network_converted":
-                        vm.status = "registered"
-                    if zone.team_role == "blue":
-                        _assign_blue_modules(db, vm, event)
-                    else:
-                        vm.status = "active"
-                    next_host += 1
+                    vm.network_phase = "provider_created"
+                    db.commit()
+                if vm.public_ip or not vm.vpc_ip or not vm.vpc_mac:
+                    raise GameNetProviderError("missing VPC attachment metadata or unexpected public endpoint address")
+                gateway_vm = db.get(VM, site.team.vpn_gateway.vm_id)
+                if vm.network_phase in {None, "provider_created"}:
+                    add_deterministic_endpoint_address(vm, site, gateway_vm)
+                    vm.network_phase = "address_added"
+                    db.commit()
+                if vm.network_phase == "address_added":
+                    finalize_endpoint_network(vm, site, gateway_vm)
+                    vm.network_phase = "network_converted"
+                    vm.ip_address = vm.private_ip
+                    db.commit()
+                if vm.network_phase == "network_converted":
+                    vm.status = "registered"
+                if zone.team_role == "blue":
+                    _assign_blue_modules(db, vm, event)
+                else:
+                    vm.status = "active"
+                next_host += 1
 
 
 def apply_blue_modules(db, event, infrastructure):
@@ -343,8 +342,7 @@ def certify_private_boot(db, event, infrastructure):
         base_types = {
             endpoint["base_type"]
             for zone in definitions[site.key]["zones"]
-            for endpoint in zone["endpoints"]
-            if endpoint.get("count", 0) > 0
+            for endpoint in zone_endpoint_instances(zone["endpoints"])
         }
         unique_images = {}
         for base_type_id in sorted(base_types):
@@ -652,8 +650,7 @@ def _require_endpoint_prerequisites(db, event, infrastructure):
         required_os = {
             load_base_type(endpoint["base_type"]).os.casefold()
             for zone in definitions[site.key]["zones"]
-            for endpoint in zone["endpoints"]
-            if endpoint.get("count", 0) > 0
+            for endpoint in zone_endpoint_instances(zone["endpoints"])
         }
         valid = db.query(PrivateBootCertification).filter_by(
             site_id=site.id, region=site.region, vpc_id=site.vpc_id,

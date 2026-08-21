@@ -17,7 +17,7 @@
         <a href="/admin/infrastructure" {% if active_nav == 'infrastructure' %}class="active" aria-current="page"{% endif %}>Infrastructure</a>
         <a href="/admin/infrastructure/topology" {% if active_nav == 'topology' %}class="active" aria-current="page"{% endif %}>Topology</a>
       </div>
-      <div class="nav-group"><div class="nav-label">Training Content</div><a href="/admin/modules" {% if active_nav == 'modules' %}class="active" aria-current="page"{% endif %}>Module library</a></div>
+      <div class="nav-group"><div class="nav-label">Training Content</div><a href="/admin/modules" {% if active_nav == 'modules' %}class="active" aria-current="page"{% endif %}>Module library</a><a href="/admin/module-repos" {% if active_nav == 'module_repos' %}class="active" aria-current="page"{% endif %}>Module repositories</a></div>
       <div class="nav-group"><div class="nav-label">Offensive Tools</div>
         <a href="/admin/red-team/operations" {% if active_nav == 'operations' %}class="active" aria-current="page"{% endif %}>Caldera operations</a>
         <a href="/admin/red-team/agent" {% if active_nav == 'agent' %}class="active" aria-current="page"{% endif %}>AI Agent</a>

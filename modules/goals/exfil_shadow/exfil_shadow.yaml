@@ -3,6 +3,7 @@ name: Exfiltrate Shadow File
 description: Read and exfiltrate the /etc/shadow file containing password hashes, demonstrating credential access on the target system.
 type: goal
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 0
 red_points: 400
 defend_points: 250
@@ -18,7 +19,10 @@ caldera:
     name: "Data from Local System"
   exploit:
     description: "Read /etc/shadow and stage it for exfiltration"
+    requirements:
+      - source: ctf.vuln.world_writable_shadow
     command: |
+      [ -n "#{ctf.vuln.world_writable_shadow}" ] || { echo "SKIPPED: shadow file is not world-readable"; exit 0; }
       cat /etc/shadow > /tmp/.exfil_shadow && echo "GOAL_ACHIEVED: shadow file staged at /tmp/.exfil_shadow"
 
 verification:

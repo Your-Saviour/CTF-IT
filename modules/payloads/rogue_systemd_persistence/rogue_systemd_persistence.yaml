@@ -3,6 +3,7 @@ name: Rogue systemd Persistence
 description: Investigate and remove a disguised systemd service that repeatedly writes a persistence marker while preserving legitimate services.
 type: payload
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: incident-response
 tags: [persistence, systemd, investigation]

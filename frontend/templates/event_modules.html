@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Assign Modules — {{ event_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-planner.css?v=3"><link rel="stylesheet" href="/static/event-modules.css?v=3"><link rel="stylesheet" href="/static/event-modules-colours.css?v=6">{% endblock %}
+{% block body_class %}planner-page{% endblock %}
+{% block site_nav %}{% endblock %}
+{% block container_class %}planner-root{% endblock %}
+{% block content %}
+<main class="modules-app" data-event-id="{{ event_id }}" data-read-only="{{ read_only|tojson }}">
+  <header class="planner-toolbar">
+    <div class="planner-context-row">
+      <a class="planner-brand" href="/admin">&gt;_ CTF Platform</a>
+      <div class="planner-identity"><div><h1>{{ event_name }}</h1><p>Canonical module assignments repeated for every team</p></div><span class="planner-event-status">{{ event_status }}</span></div>
+      <div class="planner-account"><span>{{ user.username }}</span><form method="post" action="/auth/logout"><button class="btn" type="submit">Logout</button></form></div>
+    </div>
+    <div class="planner-command-row">
+      <div class="planner-command-start"><a href="/admin/events/{{ event_id }}/plan" class="planner-back">Back to network plan</a><span id="save-state" role="status" aria-live="polite">Loading…</span></div>
+      <div class="planner-actions"><div class="planner-action-group"><button id="preview" class="btn">Preview</button><a class="btn" href="/admin/events/{{ event_id }}/operation">Design operation</a><button id="save" class="btn btn-primary">Save draft</button></div></div>
+    </div>
+  </header>
+  <section id="module-errors" aria-live="polite" class="planner-validation"></section>
+  <div class="modules-workspace">
+    <aside class="modules-rail"><h2>Planned VMs</h2><nav id="vm-list" aria-label="Planned VMs"></nav></aside>
+    <section class="modules-catalogue"><div class="catalogue-head"><h2>Module catalogue</h2><div id="catalogue-filters"><label class="filter-field filter-search"><span>Search</span><input id="module-search" placeholder="Name, description, category, or tag"></label><label class="filter-field"><span>Type</span><select id="module-type"><option value="">All types</option></select></label><label class="filter-field"><span>Difficulty</span><select id="module-difficulty"><option value="">All difficulties</option></select></label><label class="filter-field"><span>Category</span><select id="module-category"><option value="">All categories</option></select></label><label class="filter-field"><span>Assignment</span><select id="module-state"><option value="">All states</option><option value="manual">Manually assigned</option><option value="random">Randomly assigned</option><option value="dependency">Required dependency</option><option value="absent">Not assigned</option></select></label><label class="filter-field"><span>Compatibility</span><select id="module-compatibility"><option value="">All modules</option><option value="compatible">Compatible</option><option value="incompatible">Incompatible</option></select></label><label class="filter-field"><span>Relationship</span><select id="module-relationship"><option value="">All relationships</option><option value="required_by_others">Required by other modules</option><option value="no_requirements">Requires no modules</option></select></label></div><div class="catalogue-filter-meta"><span id="catalogue-result-count" role="status" aria-live="polite"></span><button id="clear-catalogue-filters" type="button">Clear filters</button></div><div id="dependency-focus" hidden><span id="dependency-focus-copy"></span><button id="clear-dependency-focus" type="button">Clear relationship view</button></div></div><div id="catalogue"></div></section>
+    <aside class="module-inspector"><div class="inspector-tabs"><button id="assignment-tab" class="active">Assignment summary</button><button id="details-tab">Module details</button></div><div id="inspector-content"></div></aside>
+  </div>
+</main>
+<script type="module" src="/static/event-modules.js?v=5"></script>
+{% endblock %}

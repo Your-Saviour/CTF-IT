@@ -3,6 +3,7 @@ name: Log4Shell (CVE-2021-44228)
 description: The application bundles Log4j 2.14.1, which is vulnerable to CVE-2021-44228. Upgrade both log4j-core and log4j-api to 2.17.1 or later while keeping the logging service healthy. The historical formatMsgNoLookups flag is not accepted as the root-cause fix.
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: web
 tags: [cve, log4shell, log4j, rce, java, jndi]

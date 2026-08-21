@@ -446,3 +446,75 @@ def serialize_tree(tree: AttackTree) -> dict:
         "paths": tree.paths,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ── Operation result annotation ──
+
+RECON_SUCCESS_MARKER = "VULNERABLE"
+
+
+def annotate_tree_statuses(tree_data: dict, links: list[dict], recon_marker: str = RECON_SUCCESS_MARKER) -> dict:
+    """Annotate serialized tree nodes with operation result statuses.
+
+    ``links`` is a list of annotated operation chain links, each with
+    ``module_id``, ``phase`` ("recon"/"exploit"), ``status`` (Caldera link
+    status), ``finish`` (timestamp), and ``output`` (str).
+
+    Classification per module (exploit status wins over recon):
+      - exploit link finished with status 0            → "succeeded"
+      - exploit link finished with non-zero status     → "failed"
+      - exploit link whose output starts with "SKIPPED:" → "skipped"
+      - exploit link still collecting (status -3)      → "pending"
+      - recon ran but the recon output did not contain the success marker →
+          "skipped"  (exploit was trimmed at planning because the recon fact
+          was absent — the native fact-gating equivalent of a skip)
+      - recon ran and output contains the marker       → "pending"
+      - no link data for the module                    → None
+
+    Returns a new dict with ``nodes`` carrying a ``status`` value.
+    """
+    module_status: dict[str, str] = {}
+    module_exploit_seen: set[str] = set()
+    module_recon_output: dict[str, str] = {}
+
+    for link in links:
+        mid = link.get("module_id")
+        if not mid:
+            continue
+        phase = link.get("phase", "")
+        status = link.get("status")
+        output = link.get("output", "")
+        finish = link.get("finish")
+        if phase == "recon":
+            module_recon_output[mid] = output
+            continue
+        module_exploit_seen.add(mid)
+        if output and output.startswith("SKIPPED:"):
+            module_status[mid] = "skipped"
+        elif finish and status == 0:
+            module_status[mid] = "succeeded"
+        elif finish and status != 0:
+            module_status[mid] = "failed"
+        elif status == -3:
+            module_status[mid] = "pending"
+        else:
+            module_status[mid] = "pending"
+
+    # Infer status for modules that have a recon link but no exploit link.
+    for node in tree_data["nodes"]:
+        mid = node["id"]
+        if mid in module_status:
+            continue
+        recon_out = module_recon_output.get(mid, "")
+        if recon_out:
+            if recon_marker not in recon_out:
+                module_status[mid] = "skipped"
+            else:
+                module_status[mid] = "pending"
+
+    annotated = dict(tree_data)
+    annotated["nodes"] = [
+        dict(node, status=module_status.get(node["id"]))
+        for node in tree_data["nodes"]
+    ]
+    return annotated

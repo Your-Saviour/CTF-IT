@@ -1,0 +1,44 @@
+/* Timeline editor — dark theme, matches the planner shell. */
+.timeline-app { max-width: 1200px; margin: 2rem auto; padding: 0 1.5rem; }
+.timeline-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 1.5rem; }
+.timeline-header h1 { margin-bottom: 0.25rem; }
+.timeline-header-actions { display: flex; gap: 0.5rem; align-items: center; }
+.timeline-brand { color: var(--cyan); text-decoration: none; font-family: 'Share Tech Mono', monospace; }
+.timeline-step { color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.timeline-status { color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; }
+.timeline-message { min-height: 1.5rem; color: var(--amber); font-size: 0.85rem; margin-bottom: 0.5rem; }
+
+.timeline-workspace { display: grid; grid-template-columns: 240px 1fr; gap: 1.5rem; }
+.timeline-rail { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 4px; padding: 1rem; }
+.timeline-rail h2 { font-size: 1rem; }
+.timeline-inject-list { list-style: none; margin-top: 0.75rem; }
+.timeline-inject-list li { padding: 0.5rem; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; justify-content: space-between; gap: 0.5rem; }
+.timeline-inject-list li:hover { background: var(--bg-elevated); }
+.timeline-inject-offset { color: var(--cyan); font-size: 0.75rem; white-space: nowrap; }
+
+.timeline-canvas-wrap { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 4px; padding: 1rem; overflow-x: auto; }
+.timeline-scale { position: relative; height: 22px; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; }
+.timeline-scale .tick { position: absolute; bottom: 0; font-size: 0.65rem; color: var(--text-muted); transform: translateX(-50%); }
+.timeline-canvas { position: relative; min-height: 220px; }
+
+.timeline-phase { position: absolute; border-radius: 3px; opacity: 0.18; top: 0; height: 100%; }
+.timeline-phase-label { position: absolute; top: 4px; left: 6px; font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; }
+.timeline-op { position: absolute; border: 1px solid var(--cyan-dim); background: rgba(0, 229, 255, 0.08); border-radius: 3px; color: var(--cyan); font-size: 0.7rem; padding: 2px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.timeline-inject { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--amber); border: 2px solid var(--bg-surface); box-shadow: 0 0 8px var(--amber-glow); cursor: grab; transform: translate(-50%, 0); }
+.timeline-inject:hover { box-shadow: 0 0 14px var(--amber-glow); }
+.timeline-inject-label { position: absolute; font-size: 0.65rem; color: var(--text-secondary); transform: translateX(-50%); white-space: nowrap; }
+
+.timeline-dialog { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 1.5rem; width: min(480px, 90vw); }
+.timeline-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.timeline-dialog header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.timeline-dialog h2 { margin: 0; }
+.timeline-dialog label { margin-top: 0.75rem; }
+.timeline-dialog footer { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+.inject-payload { margin-top: 0.5rem; }
+.timeline-error { color: var(--red); font-size: 0.8rem; min-height: 1rem; }
+
+.health-issues { margin-top: 0.5rem; }
+.health-issues h3 { font-size: 0.9rem; color: var(--text-secondary); margin: 0.75rem 0 0.25rem; }
+.health-issues ul { list-style: none; padding: 0; }
+.health-issues li { font-size: 0.8rem; color: var(--amber); padding: 0.2rem 0; }
+.health-issues li:first-of-type { color: var(--green); }

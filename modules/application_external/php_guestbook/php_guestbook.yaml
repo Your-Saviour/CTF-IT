@@ -3,6 +3,7 @@ name: PHP Guestbook
 description: A PHP 8.1 guestbook web application running under Apache2 on port 8080. Users can post messages that are stored in a flat file.
 type: application_external
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: web
 tags: [web, php, apache, guestbook]

@@ -3,6 +3,7 @@ name: Defaced Flask Homepage
 description: The Flask app homepage has been defaced with attacker content. Remove the defacement.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [web, defacement, flask]

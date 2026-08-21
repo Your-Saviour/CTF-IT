@@ -3,6 +3,7 @@ name: File Server Running as Root
 description: The systemd service unit does not specify a User directive, causing the file server process to run as root. Any path traversal or upload vulnerability becomes an immediate full system compromise.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: services
 tags: [privilege-escalation, services, misconfiguration, systemd]

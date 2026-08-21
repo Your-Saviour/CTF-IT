@@ -3,6 +3,7 @@ name: Deface Website
 description: Replace the target web application homepage with attacker content, demonstrating successful exploitation of the web stack.
 type: goal
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 0
 red_points: 300
 defend_points: 200

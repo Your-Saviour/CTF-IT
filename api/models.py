@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, inspect, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event, func, inspect, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api.database import Base
@@ -75,6 +75,13 @@ class Event(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     quota: Mapped[str] = mapped_column(Text, nullable=False)
     infrastructure: Mapped[str] = mapped_column(Text, nullable=True)
+    infrastructure_layout: Mapped[str] = mapped_column(Text, nullable=True)
+    module_plan: Mapped[str] = mapped_column(Text, nullable=True)
+    operation_plan: Mapped[str] = mapped_column(Text, nullable=True)
+    timeline: Mapped[str] = mapped_column(Text, nullable=True)
+    scenario_id: Mapped[int] = mapped_column(ForeignKey("scenarios.id"), nullable=True)
+    scenario_version: Mapped[int] = mapped_column(Integer, nullable=True)
+    scenario_fingerprint: Mapped[str] = mapped_column(String(64), nullable=True)
     open: Mapped[bool] = mapped_column(Boolean, default=False)  # kept for SQLite compat; superseded by status
     status: Mapped[str] = mapped_column(String(16), default="draft")
     description: Mapped[str] = mapped_column(Text, nullable=True)
@@ -83,6 +90,9 @@ class Event(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
     expo_sync_status: Mapped[str] = mapped_column(String(24), nullable=True)
     expo_sync_last_error: Mapped[str] = mapped_column(Text, nullable=True)
     expo_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
@@ -96,6 +106,91 @@ class Event(Base):
     teams: Mapped[list["Team"]] = relationship(back_populates="event")
     vms: Mapped[list["VM"]] = relationship(back_populates="event")
     sites: Mapped[list["Site"]] = relationship(back_populates="event", cascade="all, delete-orphan")
+    operations: Mapped[list["EventOperation"]] = relationship(
+        back_populates="event",
+        cascade="all, delete-orphan",
+        order_by="EventOperation.position",
+    )
+
+
+class EventOperation(Base):
+    __tablename__ = "event_operations"
+    __table_args__ = (
+        UniqueConstraint("event_id", "name", name="uq_event_operations_event_name"),
+        Index("ix_event_operations_event_position", "event_id", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    operation_plan: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
+
+    event: Mapped["Event"] = relationship(back_populates="operations")
+
+
+class OperationRun(Base):
+    __tablename__ = "operation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    operation_id: Mapped[int] = mapped_column(ForeignKey("event_operations.id"), nullable=False)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued", nullable=False)
+    plan_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    fact_store: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    trigger: Mapped[str] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
+
+    steps: Mapped[list["OperationRunStep"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class OperationRunStep(Base):
+    __tablename__ = "operation_run_steps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("operation_runs.id", ondelete="CASCADE"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    node_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="queued", nullable=False)
+    result: Mapped[str] = mapped_column(String(16), nullable=True)
+    output: Mapped[str] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    caldera_operation_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    run: Mapped["OperationRun"] = relationship(back_populates="steps")
+
+
+class Scenario(Base):
+    __tablename__ = "scenarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    quota: Mapped[str] = mapped_column(Text, nullable=False)
+    infrastructure: Mapped[str] = mapped_column(Text, nullable=True)
+    infrastructure_layout: Mapped[str] = mapped_column(Text, nullable=True)
+    module_plan: Mapped[str] = mapped_column(Text, nullable=True)
+    operations_json: Mapped[str] = mapped_column(Text, nullable=True)
+    timeline: Mapped[str] = mapped_column(Text, nullable=True)
+    content_fingerprint: Mapped[str] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, server_default=func.current_timestamp(), nullable=False
+    )
 
 
 class Team(Base):
@@ -479,6 +574,23 @@ class VMGoal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     vm: Mapped["VM"] = relationship(back_populates="goals")
+
+
+class ModuleRepo(Base):
+    """An external git repository that contributes additional modules."""
+
+    __tablename__ = "module_repos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    repo_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    branch: Mapped[str] = mapped_column(String(128), nullable=False, default="main")
+    ssh_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    last_sync_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class ServiceCredential(Base):

@@ -3,6 +3,7 @@ name: World-writable cron script
 description: A maintenance script executed by root's crontab is world-writable, allowing any user to inject commands that run as root.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: filesystem
 tags: [cron, permissions, privilege-escalation]

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Scenarios — CTF Platform{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-operations.css?v=1">{% endblock %}
+{% block content %}
+<main class="operations-app" data-active-nav="scenarios">
+  <header class="operations-header">
+    <div><a class="operations-brand" href="/admin">&gt;_ CTF Platform</a><p class="operations-step">Event planning / Scenarios</p><h1>Scenarios</h1><p>Reusable, versioned exercise templates. Instantiate one to create a draft event.</p></div>
+    <div class="operations-header-actions"><a class="btn" href="/admin">Back to admin</a></div>
+  </header>
+
+  <section class="operations-toolbar" aria-label="Save scenario">
+    <div><h2>Save event as scenario</h2><p>Capture an event's network, module assignments, operations, and timeline into a reusable template.</p></div>
+  </section>
+  <form id="scenario-capture-form" class="card">
+    <div class="grid-2">
+      <div>
+        <label for="scenario-source-event">Source event</label>
+        <select id="scenario-source-event" name="event_id" required></select>
+      </div>
+      <div>
+        <label for="scenario-name">Scenario name</label>
+        <input id="scenario-name" name="name" type="text" maxlength="128" required autocomplete="off" placeholder="Locked Shields 2026">
+      </div>
+    </div>
+    <label for="scenario-description">Description</label>
+    <textarea id="scenario-description" name="description" rows="2"></textarea>
+    <p id="scenario-capture-message" class="operations-message" role="status" aria-live="polite"></p>
+    <button class="btn btn-primary" type="submit">Save as scenario</button>
+  </form>
+
+  <section class="operations-toolbar" aria-label="Scenario library">
+    <div><h2>Library</h2><p id="scenarios-count">Loading scenarios…</p></div>
+  </section>
+  <section id="scenarios-list" class="operations-list" aria-label="Scenario library"></section>
+</main>
+<script type="module" src="/static/scenarios.js?v=1"></script>
+{% endblock %}

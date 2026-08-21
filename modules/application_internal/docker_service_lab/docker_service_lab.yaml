@@ -3,6 +3,7 @@ name: Controlled Docker Service Lab
 description: Internal application foundation for container security exercises, providing a local-only training container and controlled image.
 type: application_internal
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: containers
 tags: [docker, foundation, internal]

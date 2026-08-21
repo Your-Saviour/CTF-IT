@@ -3,6 +3,7 @@ name: Node.js Debug Mode Enabled
 description: The systemd service unit file sets DEBUG=true, causing the application to output verbose debug information including internal state and request details.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: web
 tags: [misconfiguration, nodejs, debug, information-disclosure]

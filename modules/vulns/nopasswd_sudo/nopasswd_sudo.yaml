@@ -3,6 +3,7 @@ name: NOPASSWD sudo entry
 description: A sudoers drop-in file grants a user unrestricted passwordless sudo access, allowing full privilege escalation without authentication.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: authentication
 tags: [sudo, privilege-escalation, misconfiguration]
@@ -29,9 +30,14 @@ caldera:
     command: |
       grep -r NOPASSWD /etc/sudoers.d/ 2>/dev/null && echo "VULNERABLE: NOPASSWD sudo entry found" || echo "SECURE: no NOPASSWD entries"
   exploit:
-    description: "Use NOPASSWD sudo to read sensitive files as root"
+    description: "Escalate to root via the NOPASSWD sudo entry"
+    inputs:
+      - ctf.weak_ssh_credentials.shell
+    outputs:
+      - trait: ctf.nopasswd_sudo.root
+        marker: ROOT_SHELL
     command: |
-      sudo -n cat /etc/shadow 2>/dev/null | head -3
+      sudo -n id 2>/dev/null | grep -q "uid=0" && echo "ROOT_SHELL"; sudo -n cat /etc/shadow 2>/dev/null | head -3
 
 references:
   - title: "Ubuntu Server security documentation"

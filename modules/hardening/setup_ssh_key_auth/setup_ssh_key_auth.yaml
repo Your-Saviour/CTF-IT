@@ -4,6 +4,7 @@ description: SSH is using password authentication, which is vulnerable to brute-
 type: hardening
 stage: preapplied
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: authentication
 tags: [ssh, keys, authentication, access-control]

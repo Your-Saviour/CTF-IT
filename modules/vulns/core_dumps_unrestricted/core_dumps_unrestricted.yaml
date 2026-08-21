@@ -3,6 +3,7 @@ name: Unrestricted Core Dumps
 description: Core dump restrictions have been removed from /etc/security/limits.conf and fs.suid_dumpable is set to 2. This allows SUID processes to produce core dumps containing sensitive memory — including passwords, cryptographic keys, and other credentials that were in-memory at crash time.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: configuration
 tags: [configuration, kernel, credentials, core-dump, information-disclosure]

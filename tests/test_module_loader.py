@@ -69,6 +69,29 @@ class TestLoadGoalModule:
             assert g.stage is None, f"Goal {g.id} should have stage=None"
 
 
+class TestPhasesAndNarrative:
+    def test_phases_and_narrative_default_empty(self):
+        m = Module(
+            id="x", name="X", description="", type="vulnerability",
+            difficulty="easy", points=0, category="test",
+        )
+        assert m.phases == []
+        assert m.narrative == ""
+
+    def test_phases_and_narrative_load_from_yaml(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        (tmp_path / "m.yaml").write_text(
+            "id: sample\nname: Sample\ndescription: d\ntype: vulnerability\n"
+            "difficulty: easy\npoints: 10\ncategory: web\n"
+            "phases: [recon, impact]\nnarrative: An attacker pivots through the web tier.\n"
+        )
+        monkeypatch.setattr(ml, "MODULES_DIR", tmp_path)
+        modules = ml.load_all_modules()
+        sample = next(m for m in modules if m.id == "sample")
+        assert sample.phases == ["recon", "impact"]
+        assert sample.narrative == "An attacker pivots through the web tier."
+
+
 class TestRepositoryDefinitions:
     def test_every_yaml_definition_parses(self):
         definitions = [
@@ -117,3 +140,62 @@ class TestRepositoryDefinitions:
                     raise AssertionError(f"Unsupported base step: {step!r}")
                 source = base.source_dir / relative
                 assert source.exists(), f"{base.id} references missing source {source}"
+
+    def test_all_modules_declare_supported_bases(self):
+        bases = {base.id for base in load_all_bases()}
+        for module in load_all_modules():
+            assert module.supported_bases, f"{module.id} must declare supported_bases"
+            unknown = set(module.supported_bases) - bases
+            assert not unknown, f"{module.id} declares unknown base types: {sorted(unknown)}"
+
+    def test_unmapped_tactics_declare_phase_override(self):
+        from builder.attack_tree import TACTIC_PHASE
+        for module in load_all_modules():
+            cal = module.caldera or {}
+            tactic = cal.get("tactic")
+            if not tactic or module.type == "goal":
+                continue
+            assert tactic in TACTIC_PHASE or "phase_override" in cal, (
+                f"{module.id} uses unmapped tactic '{tactic}' and must declare phase_override"
+            )
+
+    def test_known_phase_overrides_resolve(self):
+        from builder.attack_tree import build_attack_tree
+        tree = build_attack_tree(load_all_modules())
+        assert tree.nodes["monitord_writable_logdir"].phase == 3
+        assert tree.nodes["ip_forwarding_enabled"].phase == 4
+
+
+class TestExternalRepos:
+    def test_loads_modules_from_extra_roots(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        repo = tmp_path / "repo"
+        (repo / "vulns" / "secret_backdoor").mkdir(parents=True)
+        (repo / "vulns" / "secret_backdoor" / "secret_backdoor.yaml").write_text(
+            "id: secret_backdoor\nname: Secret Backdoor\ndescription: d\n"
+            "type: vulnerability\ndifficulty: hard\npoints: 200\ncategory: persistence\n"
+        )
+        monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
+        ids = {m.id for m in ml.load_all_modules()}
+        assert "secret_backdoor" in ids
+
+    def test_skips_dot_git(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        repo = tmp_path / "repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "config.yaml").write_text("id: should_not_load\n")
+        monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
+        ids = {m.id for m in ml.load_all_modules()}
+        assert "should_not_load" not in ids
+
+    def test_skips_dot_sync_dirs(self, tmp_path, monkeypatch):
+        import builder.module_loader as ml
+        repo = tmp_path / "repo"
+        (repo / ".sync-deadbeef" / "vulns" / "secret_backdoor").mkdir(parents=True)
+        (repo / ".sync-deadbeef" / "vulns" / "secret_backdoor" / "secret_backdoor.yaml").write_text(
+            "id: secret_backdoor\nname: Secret Backdoor\ndescription: d\n"
+            "type: vulnerability\ndifficulty: hard\npoints: 200\ncategory: persistence\n"
+        )
+        monkeypatch.setattr(ml, "MODULE_REPOS_DIR", repo)
+        ids = {m.id for m in ml.load_all_modules()}
+        assert "secret_backdoor" not in ids

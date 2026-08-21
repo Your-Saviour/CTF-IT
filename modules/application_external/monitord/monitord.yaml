@@ -3,6 +3,7 @@ name: Bash Monitoring Daemon
 description: A lightweight system monitoring daemon written in bash. Collects CPU, memory, and disk metrics from /proc and serves them over a TCP socket on port 9000 using netcat.
 type: application_external
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: services
 tags: [services, bash, monitoring, daemon]

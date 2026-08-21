@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
@@ -96,6 +97,8 @@ class Module:
     learning_objectives: list[str] = field(default_factory=list)
     estimated_minutes: int = 0
     prerequisites: list[str] = field(default_factory=list)
+    phases: list[str] = field(default_factory=list)
+    narrative: str = ""
     references: list[Reference] = field(default_factory=list)
     debrief: dict = field(default_factory=dict)
     suggested_fix: Optional[str] = None
@@ -146,46 +149,66 @@ class Module:
 
 
 MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
+MODULE_REPOS_DIR = Path(os.environ.get("MODULE_REPOS_DIR", "/app/module_repos"))
+
+
+def module_from_yaml(yaml_path: Path) -> Module:
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+    module_type = data["type"]
+    return Module(
+        id=data["id"],
+        name=data["name"],
+        description=data["description"],
+        type=module_type,
+        difficulty=data["difficulty"],
+        points=data["points"],
+        category=data["category"],
+        tags=data.get("tags", []),
+        conflicts=data.get("conflicts", []),
+        requires=data.get("requires", []),
+        script=data.get("script"),
+        steps=_parse_steps(data),
+        verification=data.get("verification", {}),
+        hints=data.get("hints", []),
+        learning_objectives=data.get("learning_objectives", []),
+        estimated_minutes=data.get("estimated_minutes", 0),
+        prerequisites=data.get("prerequisites", data.get("requires", [])),
+        phases=data.get("phases", []),
+        narrative=data.get("narrative", ""),
+        references=_parse_references(data.get("references", [])),
+        debrief=data.get("debrief", {}),
+        suggested_fix=data.get("suggested_fix"),
+        caldera=data.get("caldera"),
+        source_dir=yaml_path.parent,
+        disabled=bool(data.get("disabled", False)),
+        min_ram_mb=data.get("min_ram_mb", 0),
+        min_vcpu=data.get("min_vcpu", 0),
+        supported_bases=data.get("supported_bases", []),
+        stage=data.get("stage"),
+        red_points=data.get("red_points", 0),
+        defend_points=data.get("defend_points", 0),
+        revert_verification=data.get("revert_verification", {}),
+    )
+
+
+def _module_roots() -> list[Path]:
+    roots = [MODULES_DIR]
+    if MODULE_REPOS_DIR.is_dir():
+        roots.extend(sorted(
+            p for p in MODULE_REPOS_DIR.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        ))
+    return roots
 
 
 def load_all_modules() -> list[Module]:
     modules = []
-    for yaml_path in sorted(MODULES_DIR.rglob("*.yaml")):
-        with open(yaml_path) as f:
-            data = yaml.safe_load(f)
-        module_type = data["type"]
-        modules.append(Module(
-            id=data["id"],
-            name=data["name"],
-            description=data["description"],
-            type=module_type,
-            difficulty=data["difficulty"],
-            points=data["points"],
-            category=data["category"],
-            tags=data.get("tags", []),
-            conflicts=data.get("conflicts", []),
-            requires=data.get("requires", []),
-            script=data.get("script"),
-            steps=_parse_steps(data),
-            verification=data.get("verification", {}),
-            hints=data.get("hints", []),
-            learning_objectives=data.get("learning_objectives", []),
-            estimated_minutes=data.get("estimated_minutes", 0),
-            prerequisites=data.get("prerequisites", data.get("requires", [])),
-            references=_parse_references(data.get("references", [])),
-            debrief=data.get("debrief", {}),
-            suggested_fix=data.get("suggested_fix"),
-            caldera=data.get("caldera"),
-            source_dir=yaml_path.parent,
-            disabled=bool(data.get("disabled", False)),
-            min_ram_mb=data.get("min_ram_mb", 0),
-            min_vcpu=data.get("min_vcpu", 0),
-            supported_bases=data.get("supported_bases", []),
-            stage=data.get("stage"),
-            red_points=data.get("red_points", 0),
-            defend_points=data.get("defend_points", 0),
-            revert_verification=data.get("revert_verification", {}),
-        ))
+    for root in _module_roots():
+        for yaml_path in sorted(root.rglob("*.yaml")):
+            if ".git" in yaml_path.parts:
+                continue
+            modules.append(module_from_yaml(yaml_path))
     # Dependent remediation must preserve its application foundation. Compose
     # that health contract automatically so catalogue authors cannot silently
     # ship a file-only check that rewards breaking the service.

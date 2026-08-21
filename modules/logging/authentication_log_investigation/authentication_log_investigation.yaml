@@ -3,6 +3,7 @@ name: Authentication Log Investigation
 description: Attribute a simulated password-spray sequence in the authentication log and preserve a concise incident finding.
 type: payload
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: incident-response
 tags: [authentication, logs, investigation]

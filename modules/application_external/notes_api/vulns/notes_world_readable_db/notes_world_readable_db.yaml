@@ -3,6 +3,7 @@ name: World-Readable Notes Database
 description: The SQLite database file is readable by any user on the system, exposing all stored notes and any sensitive data they contain.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: filesystem
 tags: [permissions, filesystem, sqlite, data-exposure]

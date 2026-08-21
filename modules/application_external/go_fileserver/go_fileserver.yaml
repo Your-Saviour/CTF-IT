@@ -3,6 +3,7 @@ name: Go File Server
 description: A lightweight HTTPS file server written in Go. Serves files from /opt/fileserver/files/ on port 8000. Configured via config.toml and run as a systemd service.
 type: application_external
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 0
 category: web
 tags: [web, go, fileserver, https]

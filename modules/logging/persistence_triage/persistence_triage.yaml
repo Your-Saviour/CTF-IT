@@ -3,6 +3,7 @@ name: Persistence Triage and Removal
 description: Triage multiple persistence surfaces, remove an incident marker, and leave a documented scope record.
 type: payload
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: incident-response
 tags: [persistence, triage, logging]

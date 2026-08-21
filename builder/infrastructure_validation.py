@@ -9,6 +9,16 @@ from ipaddress import ip_network
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 TEAM_ROLES = {"blue", "red"}
+PLANNER_ICONS = {
+    "server", "desktop", "laptop", "mobile", "appliance",
+    "gateway", "router", "switch", "firewall", "vpn", "proxy", "load_balancer",
+    "web", "database", "dns", "mail", "directory", "file_share", "storage",
+    "certificate_authority", "identity", "attacker", "target", "siem", "ids",
+    "monitoring", "logging", "honeypot", "malware", "bastion", "vulnerable",
+    "cloud", "container", "kubernetes", "backup", "git", "cicd", "linux",
+    "ubuntu", "debian", "kali", "redhat", "windows", "macos", "freebsd",
+    "opnsense", "pfsense", "aws", "azure", "gcp",
+}
 VPC_LIMIT_PER_REGION = 5
 
 
@@ -68,11 +78,20 @@ def validate_infrastructure(
             region_counts[region] += max(team_count, 0)
             if valid_regions is not None and region not in valid_regions:
                 errors.append(f"{path}.region references unavailable region '{region}'")
+        firewall_team = site.get("firewall_team", "blue")
+        if firewall_team not in TEAM_ROLES:
+            errors.append(f"{path}.firewall_team must be one of: blue, red")
+        firewall_zone_address_range = site.get("firewall_zone_address_range")
+        if firewall_zone_address_range is not None and not isinstance(firewall_zone_address_range, str):
+            errors.append(f"{path}.firewall_zone_address_range must be a string")
         firewall = site.get("firewall")
         if not isinstance(firewall, dict):
             errors.append(f"{path}.firewall is required and must be an object")
         else:
             _validate_machine(firewall, f"{path}.firewall", valid_base_ids, errors)
+            firewall_address = firewall.get("address")
+            if firewall_address is not None and not isinstance(firewall_address, str):
+                errors.append(f"{path}.firewall.address must be a string")
         zones = site.get("zones")
         if not isinstance(zones, list) or not zones:
             errors.append(f"{path}.zones must be a non-empty array")
@@ -90,6 +109,9 @@ def validate_infrastructure(
                 errors.append(f"{zpath}.name is required")
             if zone.get("team") not in TEAM_ROLES:
                 errors.append(f"{zpath}.team must be one of: blue, red")
+            address_range = zone.get("address_range")
+            if address_range is not None and not isinstance(address_range, str):
+                errors.append(f"{zpath}.address_range must be a string")
             endpoints = zone.get("endpoints")
             if not isinstance(endpoints, list):
                 errors.append(f"{zpath}.endpoints must be an array")
@@ -103,8 +125,15 @@ def validate_infrastructure(
                     continue
                 _key(endpoint.get("key"), f"{epath}.key", endpoint_keys, errors)
                 _validate_machine(endpoint, epath, valid_base_ids, errors)
+                address = endpoint.get("address")
+                if address is not None and not isinstance(address, str):
+                    errors.append(f"{epath}.address must be a string")
                 count = endpoint.get("count")
-                if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+                if count is None:
+                    if not isinstance(endpoint.get("name"), str) or not endpoint["name"].strip():
+                        errors.append(f"{epath}.name is required")
+                    addresses += 1
+                elif not isinstance(count, int) or isinstance(count, bool) or count < 1:
                     errors.append(f"{epath}.count must be a positive integer")
                 else:
                     addresses += count
@@ -124,7 +153,7 @@ def validate_infrastructure(
 def infrastructure_summary(infrastructure: dict, team_count: int = 1) -> dict:
     sites = infrastructure.get("sites", [])
     endpoint_count = sum(
-        endpoint.get("count", 0)
+        endpoint.get("count", 1)
         for site in sites for zone in site.get("zones", []) for endpoint in zone.get("endpoints", [])
     )
     per_region = Counter(site.get("region") for site in sites if site.get("region"))
@@ -162,6 +191,10 @@ def _validate_machine(spec: dict, path: str, bases: set[str], errors: list[str],
     prompt = spec.get("ust_prompt")
     if prompt is not None and (not isinstance(prompt, str) or len(prompt) > 8000):
         errors.append(f"{path}.ust_prompt must be a string of at most 8000 characters")
+    for field in ("primary_icon", "icon"):
+        icon = spec.get(field)
+        if icon is not None and (not isinstance(icon, str) or icon not in PLANNER_ICONS):
+            errors.append(f"{path}.{field} must reference a supported planner icon")
     base = spec.get("base_type")
     if not isinstance(base, str) or base not in bases:
         errors.append(f"{path}.base_type references unknown or disabled base type '{base}'")

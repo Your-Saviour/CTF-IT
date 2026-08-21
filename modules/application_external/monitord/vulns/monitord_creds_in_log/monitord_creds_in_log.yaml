@@ -3,6 +3,7 @@ name: Credentials Leaked in Monitord Logs
 description: The monitoring daemon script logs the DB_PASSWORD environment variable in plaintext to its log file when the service starts, leaking credentials to anyone who can read the logs.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: authentication
 tags: [credentials, logging, information-disclosure, bash]

@@ -3,6 +3,7 @@ name: World-Writable /etc/passwd
 description: The /etc/passwd file has world-write permissions (666), allowing any local user to add new root-level accounts or modify existing accounts without requiring sudo or root access.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: filesystem
 tags: [permissions, privilege-escalation, filesystem, passwd]

@@ -39,8 +39,9 @@ def vm_dns_name(vm) -> str | None:
         ordinal = peers.index(vm) + 1
     except ValueError:
         return None
+    host_label = dns_label(vm.vm_type) if len(peers) == 1 else f"{dns_label(vm.vm_type)}-{ordinal}"
     return ".".join((
-        f"{dns_label(vm.vm_type)}-{ordinal}", dns_label(vm.zone.key),
+        host_label, dns_label(vm.zone.key),
         site_dns_zone(vm.zone.site),
     ))
 

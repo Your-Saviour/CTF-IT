@@ -3,6 +3,7 @@ name: Exposed Spring Boot Actuator
 description: The Spring Boot Actuator management endpoints are exposed at /actuator/** with wildcard inclusion (exposure.include=*). This leaks heap dumps, environment variables, configuration properties, and internal metrics to unauthenticated callers.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [information-disclosure, spring-boot, actuator, java, configuration]

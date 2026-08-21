@@ -3,6 +3,7 @@ name: Invalid SUID Bit on Daemon Script
 description: The monitord.sh shell script has an unnecessary SUID bit. Linux ignores SUID on interpreted scripts, so this is an audit and configuration-hygiene finding rather than an executable privilege-escalation path.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: compliance
 tags: [suid, permissions, audit, bash]

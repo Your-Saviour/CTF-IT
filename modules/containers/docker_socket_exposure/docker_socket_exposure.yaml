@@ -3,6 +3,7 @@ name: Exposed Docker Socket
 description: Remove a TCP proxy exposing the Docker control socket while keeping the Docker engine available locally.
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: containers
 tags: [docker, socket, exposure]

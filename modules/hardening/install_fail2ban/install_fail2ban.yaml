@@ -4,6 +4,7 @@ description: fail2ban is not installed. It should be installed and running to pr
 type: hardening
 stage: preapplied
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: services
 tags: [brute-force, authentication, network]

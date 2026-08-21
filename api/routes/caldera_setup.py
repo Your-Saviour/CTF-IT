@@ -147,7 +147,7 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             return JSONResponse({"error": "Invalid quota", "details": errors}, status_code=422)
         quota = body["quota"]
     else:
-        return JSONResponse({"error": "Provide 'quota' or 'event_id'"}, status_code=400)
+        return JSONResponse({"error": "Provide 'event_id' or 'quota'"}, status_code=400)
 
     # Step 1: Load and validate Caldera config
     try:
@@ -162,11 +162,32 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
             status_code=400,
         )
 
-    # Step 2: Generate export
+    # Step 2: Generate export.
+    # Event-based setup generates per-VM attack-path adversaries when VMs have
+    # module assignments; quota-only setup falls back to flat generation.
     export_id = f"caldera_{uuid.uuid4().hex[:12]}"
-    from builder.caldera import generate_caldera_export
+    from builder.caldera import generate_caldera_export, generate_caldera_event_export
+    from builder.module_loader import load_all_modules
+
+    vm_module_map: dict[str, list] = {}
+    if _event_id:
+        event_vms = db.query(VM).filter(VM.event_id == _event_id).all()
+        module_library = {m.id: m for m in load_all_modules()}
+        for ev_vm in event_vms:
+            if not ev_vm.hostname:
+                continue
+            vm_mods = db.query(VMModule).filter(VMModule.vm_id == ev_vm.id).all()
+            vm_modules = [module_library[vmm.module_id] for vmm in vm_mods if vmm.module_id in module_library]
+            vm_modules = [m for m in vm_modules if m.caldera]
+            if vm_modules:
+                vm_module_map[ev_vm.hostname] = vm_modules
+
     try:
-        output_dir = generate_caldera_export(quota, export_id)
+        if vm_module_map:
+            output_dir, per_vm_trees = generate_caldera_event_export(vm_module_map, export_id)
+        else:
+            output_dir = generate_caldera_export(quota, export_id)
+            per_vm_trees = {}
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=422)
 
@@ -223,9 +244,17 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
                     status_code=500,
                 )
 
-            # Step 9: Ensure basic fact source exists
+            # Step 9: Ensure basic fact source exists and seed known VM facts
             try:
                 await caldera.ensure_source()
+                if _event_id:
+                    from api.services.caldera import vm_source_facts
+                    event_vms = db.query(VM).filter(VM.event_id == _event_id).all()
+                    all_facts = []
+                    for ev_vm in event_vms:
+                        all_facts.extend(vm_source_facts(ev_vm))
+                    if all_facts:
+                        await caldera.seed_facts(all_facts)
             except Exception as e:
                 return JSONResponse({"error": f"Failed to ensure basic source: {e}"}, status_code=502)
 
@@ -254,17 +283,20 @@ async def caldera_setup(request: Request, db: Session = Depends(get_db)):
 
         # Store attack trees on VMs for this event
         if _event_id:
-            from builder.attack_tree import build_attack_tree, serialize_tree
-            from builder.module_loader import load_all_modules
-            all_library = {m.id: m for m in load_all_modules()}
+            import json as _json
+            from builder.attack_tree import serialize_tree
             event_vms = db.query(VM).filter(VM.event_id == _event_id).all()
             for ev_vm in event_vms:
-                vm_mods = db.query(VMModule).filter(VMModule.vm_id == ev_vm.id).all()
-                vm_module_objects = [all_library.get(vmm.module_id) for vmm in vm_mods]
-                vm_module_objects = [m for m in vm_module_objects if m]
-                if vm_module_objects:
-                    tree = build_attack_tree(vm_module_objects)
-                    import json as _json
+                tree = per_vm_trees.get(ev_vm.hostname) if ev_vm.hostname else None
+                if tree is None:
+                    from builder.attack_tree import build_attack_tree
+                    from builder.module_loader import load_all_modules
+                    all_library = {m.id: m for m in load_all_modules()}
+                    vm_mods = db.query(VMModule).filter(VMModule.vm_id == ev_vm.id).all()
+                    vm_module_objects = [all_library.get(vmm.module_id) for vmm in vm_mods]
+                    vm_module_objects = [m for m in vm_module_objects if m]
+                    tree = build_attack_tree(vm_module_objects) if vm_module_objects else None
+                if tree is not None:
                     ev_vm.attack_tree_json = _json.dumps(serialize_tree(tree))
             db.commit()
 

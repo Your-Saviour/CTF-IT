@@ -3,6 +3,7 @@ name: Hardcoded Admin API Token
 description: The application source code contains a hardcoded admin API token used to authenticate privileged endpoints. Anyone who can read the source file obtains admin access.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: authentication
 tags: [hardcoded-credentials, authentication, nodejs]

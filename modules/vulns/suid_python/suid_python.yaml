@@ -3,6 +3,7 @@ name: SUID Bit on Python3
 description: The SUID bit is set on /usr/bin/python3, allowing any local user to execute Python with root effective UID. This is a trivial privilege escalation path — one Python line spawns a root shell.
 type: vulnerability
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: filesystem
 tags: [suid, permissions, privilege-escalation, python]

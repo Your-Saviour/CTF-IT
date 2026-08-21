@@ -13,8 +13,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from api.database import engine, get_db, init_db
-from api.models import Event, User, VM, utcnow
-from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, service_credentials, vm, vm_goals
+from api.models import Event, EventOperation, User, VM, utcnow
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, module_repos, scenarios, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
 
 _log = logging.getLogger(__name__)
@@ -174,6 +174,9 @@ async def lifespan(app: FastAPI):
         from api.services.opnsense_images import interrupt_running_jobs
         interrupt_running_jobs(db)
 
+        from api.services.operation_runner import mark_interrupted_runs
+        mark_interrupted_runs(db)
+
         # Create default event if none exists
         if not db.query(Event).first():
             quota = os.environ.get(
@@ -185,6 +188,9 @@ async def lifespan(app: FastAPI):
             # consistently by POST /admin/events/{id}/start.
             db.add(Event(name="Default CTF Event", quota=quota, status="draft"))
             db.commit()
+
+        # Seed the draft operation-chaining showcase event (idempotent)
+        seed_showcase_event(db)
 
         # Seed default service credentials if none exist
         from api.services.secrets import encrypt_secret
@@ -339,6 +345,56 @@ async def lifespan(app: FastAPI):
         engine.dispose()
 
 
+def seed_showcase_event(db) -> None:
+    from api.models import Event, EventOperation
+    if db.query(Event).filter(Event.name == "Operation Chaining Demo").first():
+        return
+    infrastructure = {"version": 1, "sites": [{"key": "demo", "name": "Demo", "zones": [{
+        "key": "site", "name": "Demo Site", "team": "blue", "endpoints": [{
+            "key": "box", "name": "Demo Box", "base_type": "ubuntu_24_server",
+        }],
+    }]}]}
+    module_plan = {"version": 1, "assignments": {"vm:demo/site/box": {
+        "mode": "manual_only",
+        "pinned_module_ids": ["weak_ssh_credentials", "nopasswd_sudo", "malicious_cron_beacon"],
+        "resolved_module_ids": ["weak_ssh_credentials", "nopasswd_sudo", "malicious_cron_beacon"],
+    }}}
+    plan = {
+        "version": 1,
+        "policy": {"time_limit_minutes": 60, "max_concurrency": 1, "default_timeout_seconds": 120,
+                   "default_retries": 0, "default_retry_delay_seconds": 5, "instructor_approval": False},
+        "nodes": [
+            {"id": "trigger", "type": "manual_trigger", "label": "Manual Trigger", "config": {}},
+            {"id": "recon", "type": "ability", "label": "Foothold Recon (weak SSH)",
+             "config": {"module_id": "weak_ssh_credentials", "ability": "recon", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "foothold", "type": "ability", "label": "Foothold (weak SSH)",
+             "config": {"module_id": "weak_ssh_credentials", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "privesc", "type": "ability", "label": "Privilege Escalation (NOPASSWD sudo)",
+             "config": {"module_id": "nopasswd_sudo", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "implant", "type": "ability", "label": "Implant (cron beacon)",
+             "config": {"module_id": "malicious_cron_beacon", "ability": "exploit", "target_vm_id": "vm:demo/site/box"}},
+            {"id": "finish", "type": "finish", "label": "Finish", "config": {}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "trigger", "target": "recon", "condition": "always"},
+            {"id": "e2", "source": "recon", "target": "foothold", "condition": "success"},
+            {"id": "e3", "source": "foothold", "target": "privesc", "condition": "success"},
+            {"id": "e4", "source": "privesc", "target": "implant", "condition": "success"},
+            {"id": "e5", "source": "implant", "target": "finish", "condition": "success"},
+        ],
+    }
+    event = Event(name="Operation Chaining Demo", status="draft",
+                  quota='{"vulnerability":{"easy":2,"medium":1,"hard":0}}',
+                  infrastructure=json.dumps(infrastructure),
+                  module_plan=json.dumps(module_plan))
+    db.add(event)
+    db.flush()
+    db.add(EventOperation(event_id=event.id, name="RCE → Privilege Escalation → Implant",
+                          description="Chained sweep: foothold → privesc → implant",
+                          position=0, operation_plan=json.dumps(plan)))
+    db.commit()
+
+
 app = FastAPI(title="CTF Training Platform", lifespan=lifespan)
 
 
@@ -374,6 +430,8 @@ app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
 app.include_router(event_dashboard.router)
 app.include_router(learner.router)
+app.include_router(module_repos.router)
+app.include_router(scenarios.router)
 app.include_router(service_credentials.router)
 app.include_router(vm.router)
 app.include_router(vm_goals.router)
@@ -523,6 +581,19 @@ async def modules_page(request: Request, db: Session = Depends(get_db)):
     return await _admin_resource_page("modules", request, db)
 
 
+@app.get("/admin/module-repos", response_class=HTMLResponse)
+async def module_repos_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+
+    return templates.TemplateResponse(request, "module_repos.html", {
+        "user": user, "page_title": "Module repositories", "active_nav": "module_repos",
+        "page_description": "Attach private git repositories that contribute additional modules.",
+        "breadcrumbs": [{"label": "Module repositories"}],
+    })
+
+
 @app.get("/admin/module/{module_id}", response_class=HTMLResponse)
 async def module_detail_page(module_id: str, request: Request, db: Session = Depends(get_db)):
     return RedirectResponse(f"/admin/modules/{module_id}", status_code=308)
@@ -623,9 +694,89 @@ async def event_plan_page(event_id: int, request: Request, db: Session = Depends
         return RedirectResponse("/admin", status_code=303)
     return templates.TemplateResponse(request, "event_plan.html", {
         "user": user, "event_id": event_id, "event_name": event.name,
+        "event_status": event.status, "read_only": event.status != "draft",
         "active_nav": "events",
         "breadcrumbs": [{"label": "Events", "href": "/admin/events"}, {"label": event.name}, {"label": "Plan"}],
     })
+
+
+@app.get("/admin/events/{event_id}/modules", response_class=HTMLResponse)
+async def event_modules_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_modules.html", {"user": user, "event_id": event.id,
+        "event_name": event.name, "event_status": event.status, "read_only": event.status != "draft"})
+
+
+@app.get("/admin/events/{event_id}/operation", response_class=HTMLResponse)
+async def event_operation_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_operations.html", {"user": user, "event_id": event.id,
+        "event_name": event.name, "event_status": event.status, "read_only": event.status != "draft"})
+
+
+@app.get("/admin/events/{event_id}/operations/{operation_id}", response_class=HTMLResponse)
+async def event_operation_designer_page(event_id: int, operation_id: int, request: Request,
+                                        db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = db.query(EventOperation).filter(
+        EventOperation.id == operation_id, EventOperation.event_id == event_id
+    ).first()
+    if not event or not operation:
+        return RedirectResponse(f"/admin/events/{event_id}/operation", status_code=303)
+    return templates.TemplateResponse(request, "event_operation.html", {"user": user,
+        "event_id": event.id, "event_name": event.name, "event_status": event.status,
+        "operation_id": operation.id, "operation_name": operation.name,
+        "read_only": event.status != "draft"})
+
+
+@app.get("/admin/events/{event_id}/operations/{operation_id}/runs/{run_id}", response_class=HTMLResponse)
+async def operation_run_page(event_id: int, operation_id: int, run_id: int, request: Request,
+                             db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = db.query(EventOperation).filter(
+        EventOperation.id == operation_id, EventOperation.event_id == event_id
+    ).first()
+    if not event or not operation:
+        return RedirectResponse(f"/admin/events/{event_id}/operation", status_code=303)
+    return templates.TemplateResponse(request, "operation_run.html", {"user": user,
+        "event_id": event.id, "operation_id": operation.id, "run_id": run_id})
+
+
+@app.get("/admin/scenarios", response_class=HTMLResponse)
+async def scenarios_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "scenarios.html", {"user": user, "active_nav": "scenarios"})
+
+
+@app.get("/admin/events/{event_id}/timeline", response_class=HTMLResponse)
+async def event_timeline_page(event_id: int, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user or not user.is_admin:
+        return RedirectResponse("/", status_code=303)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "event_timeline.html", {"user": user,
+        "event_id": event.id, "event_name": event.name, "event_status": event.status,
+        "read_only": event.status != "draft", "time_limit_minutes": event.time_limit_minutes})
 
 
 @app.get("/admin/events/{event_id}/dashboard", response_class=HTMLResponse)

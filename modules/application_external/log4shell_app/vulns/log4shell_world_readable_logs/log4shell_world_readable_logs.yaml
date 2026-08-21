@@ -3,6 +3,7 @@ name: Sensitive Logs World-Readable
 description: The application log directory /var/log/logapp is world-readable. Log files contain request bodies submitted to the /log endpoint, which may include JNDI strings, internal user data, or other sensitive content.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: filesystem
 tags: [permissions, filesystem, logging, information-disclosure]

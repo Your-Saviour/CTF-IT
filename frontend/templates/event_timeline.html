@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Timeline — {{ event_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/event-timeline.css?v=1">{% endblock %}
+{% block content %}
+<main class="timeline-app" data-event-id="{{ event_id }}" data-event-minutes="{{ time_limit_minutes or 0 }}" data-read-only="{{ read_only|tojson }}">
+  <header class="timeline-header">
+    <div><a class="timeline-brand" href="/admin">&gt;_ CTF Platform</a><p class="timeline-step">Event planning / Timeline</p><h1>{{ event_name }}</h1><p>Plan the exercise story: phases, operations, and timed injects.</p></div>
+    <div class="timeline-header-actions"><span class="timeline-status">{{ event_status }}</span><a class="btn" href="/admin/events/{{ event_id }}/operation">Operations</a><button id="timeline-health" class="btn">Plan health</button></div>
+  </header>
+  <section id="timeline-message" class="timeline-message" role="status" aria-live="polite"></section>
+  <div class="timeline-workspace">
+    <aside class="timeline-rail" aria-label="Inject list">
+      <h2>Injects</h2>
+      <button id="inject-add" class="btn btn-primary btn-sm" type="button"{% if read_only %} disabled{% endif %}>+ New inject</button>
+      <ul id="inject-list" class="timeline-inject-list"></ul>
+    </aside>
+    <section class="timeline-canvas-wrap" aria-label="Timeline canvas">
+      <div id="timeline-scale" class="timeline-scale"></div>
+      <div id="timeline-canvas" class="timeline-canvas"></div>
+    </section>
+  </div>
+</main>
+
+<dialog id="inject-dialog" class="timeline-dialog">
+  <form id="inject-form">
+    <header><h2 id="inject-dialog-title">New inject</h2><button type="button" data-close-inject aria-label="Close">Close</button></header>
+    <label>Name<input id="inject-name" maxlength="128" required autocomplete="off"></label>
+    <label>Offset (minutes from start)<input id="inject-offset" type="number" min="0" required></label>
+    <label>Kind<select id="inject-kind">
+      <option value="apply_module">Apply module</option>
+      <option value="start_operation">Start operation</option>
+      <option value="notify">Notify instructor</option>
+      <option value="milestone">Milestone</option>
+    </select></label>
+    <div id="inject-payload-module" class="inject-payload">
+      <label>Module<select id="inject-module"></select></label>
+      <label>Target VM<select id="inject-target"></select></label>
+    </div>
+    <div id="inject-payload-operation" class="inject-payload" hidden>
+      <label>Operation<select id="inject-operation"></select></label>
+    </div>
+    <div id="inject-payload-notify" class="inject-payload" hidden>
+      <label>Severity<select id="inject-severity"><option value="info">Info</option><option value="warning">Warning</option><option value="critical">Critical</option></select></label>
+      <label>Message<textarea id="inject-message" rows="3"></textarea></label>
+    </div>
+    <label>Description<textarea id="inject-description" rows="2"></textarea></label>
+    <p id="inject-error" class="timeline-error" role="alert"></p>
+    <footer><button type="button" class="btn" data-close-inject>Cancel</button><button class="btn btn-primary" type="submit">Save inject</button></footer>
+  </form>
+</dialog>
+
+<dialog id="health-dialog" class="timeline-dialog">
+  <form method="dialog">
+    <header><h2>Plan health</h2><button value="cancel" aria-label="Close">Close</button></header>
+    <div id="health-content"></div>
+    <footer><button value="cancel" class="btn">Close</button></footer>
+  </form>
+</dialog>
+<script type="module" src="/static/event-timeline.js?v=1"></script>
+{% endblock %}

@@ -3,6 +3,7 @@ name: Default Admin Credentials
 description: The inventory dashboard has default admin credentials, allowing anyone to log in. Change or remove the default account.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: authentication
 tags: [web, credentials, authentication]

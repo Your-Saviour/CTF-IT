@@ -3,21 +3,35 @@ import json
 import os
 import secrets
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urljoin
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import AccountToken, AdminAudit, Event, OpnsenseImage, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
+from api.models import AccountToken, AdminAudit, Event, EventOperation, OpnsenseImage, OperationRun, OperationRunStep, PlatformSettings, Team, User, VerificationAttempt, VM, VMModule, utcnow
+from builder.fact_contract import fact_summary
+from builder.module_loader import load_all_modules
 from api.routes.auth import _token_digest, get_current_user
+from api.services.operation_runner import launch_run
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
+
+
+def _utc_instant(value) -> datetime:
+    """Parse a revision timestamp and normalize it for semantic comparison."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not isinstance(value, datetime):
+        raise ValueError("revision must be an ISO-8601 timestamp")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 async def _live_vpc_counts() -> dict[str, int]:
@@ -657,6 +671,8 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "ends_at": e.ends_at.isoformat() if e.ends_at else None,
             "quota": json.loads(e.quota),
             "infrastructure": json.loads(e.infrastructure) if e.infrastructure else None,
+            "infrastructure_layout": json.loads(e.infrastructure_layout) if e.infrastructure_layout else None,
+            "updated_at": e.updated_at.isoformat(),
             "user_count": user_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
             "expo_sync_status": e.expo_sync_status,
@@ -688,6 +704,8 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "ends_at": event.ends_at.isoformat() if event.ends_at else None,
         "quota": json.loads(event.quota),
         "infrastructure": json.loads(event.infrastructure) if event.infrastructure else None,
+        "infrastructure_layout": json.loads(event.infrastructure_layout) if event.infrastructure_layout else None,
+        "updated_at": event.updated_at.isoformat(),
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
         "expo_sync_status": event.expo_sync_status,
@@ -695,6 +713,447 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "expo_sync_attempts": event.expo_sync_attempts,
         "expo_sync_completed_at": event.expo_sync_completed_at.isoformat() if event.expo_sync_completed_at else None,
     }
+
+
+@router.get("/events/{event_id}/module-plan")
+async def get_module_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    from builder.infrastructure_planner import normalize_infrastructure
+    from builder.module_loader import load_all_modules
+    from builder.module_plan import assignable_endpoints, empty_module_plan, reconcile_module_plan
+    infrastructure = normalize_infrastructure(json.loads(event.infrastructure))
+    plan, issues = reconcile_module_plan(json.loads(event.module_plan) if event.module_plan else empty_module_plan(), infrastructure)
+    modules = load_all_modules()
+    return {"module_plan": plan, "vms": assignable_endpoints(infrastructure), "issues": issues,
+            "updated_at": event.updated_at.isoformat(), "quota": json.loads(event.quota),
+            "modules": [{"id": m.id, "name": m.name, "description": m.description, "type": m.type,
+                         "difficulty": m.difficulty, "category": m.category, "tags": m.tags,
+                         "stage": m.stage, "points": m.points, "requires": m.requires,
+                         "conflicts": m.conflicts, "supported_bases": m.supported_bases,
+                          "disabled": m.disabled, "learning_objectives": m.learning_objectives,
+                          "estimated_minutes": m.estimated_minutes, "prerequisites": m.prerequisites,
+                          "phases": m.phases, "narrative": m.narrative,
+                          "verification_type": (m.verification or {}).get("type")} for m in modules]}
+
+
+@router.put("/events/{event_id}/module-plan")
+async def save_module_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "module assignments are read only"}, status_code=409)
+    body = await request.json()
+    try:
+        if _utc_instant(body.get("expected_updated_at")) != _utc_instant(event.updated_at):
+            return JSONResponse({"error": "event draft has changed", "current_updated_at": event.updated_at.isoformat()}, status_code=409)
+        from builder.module_plan import normalize_module_plan
+        plan = normalize_module_plan(body.get("module_plan"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    event.module_plan = json.dumps(plan); event.updated_at = utcnow(); db.commit(); db.refresh(event)
+    return {"status": "saved", "updated_at": event.updated_at.isoformat()}
+
+
+@router.post("/events/{event_id}/module-plan/resolve")
+async def resolve_module_plan(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event or event.status != "draft":
+        return JSONResponse({"error": "draft event not found"}, status_code=404)
+    body = await request.json()
+    from builder.infrastructure_planner import normalize_infrastructure
+    from builder.module_loader import load_all_modules
+    from builder.module_plan import assignable_endpoints, resolve_assignment
+    endpoints = {row["id"]: row for row in assignable_endpoints(normalize_infrastructure(json.loads(event.infrastructure)))}
+    endpoint = endpoints.get(body.get("vm_id"))
+    if not endpoint:
+        return JSONResponse({"error": "planned VM not found"}, status_code=404)
+    refill = bool(body.get("refill", False))
+    if endpoint["role"] == "red" and refill:
+        return JSONResponse({"error": "red-team VMs are manual-only"}, status_code=422)
+    return resolve_assignment(endpoint, body.get("assignment", {}), json.loads(event.quota), load_all_modules(), refill=refill)
+
+
+def _operation_context(event):
+    from builder.infrastructure_planner import default_infrastructure, normalize_infrastructure
+    from builder.module_plan import empty_module_plan
+    from builder.module_loader import load_all_modules
+    infrastructure = normalize_infrastructure(json.loads(event.infrastructure) if event.infrastructure else default_infrastructure())
+    module_plan = json.loads(event.module_plan) if event.module_plan else empty_module_plan()
+    return infrastructure, module_plan, load_all_modules()
+
+
+def _event_operation(db: Session, event_id: int, operation_id: int):
+    return db.query(EventOperation).filter(
+        EventOperation.id == operation_id, EventOperation.event_id == event_id
+    ).first()
+
+
+def _operation_name(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("operation name is required")
+    name = value.strip()
+    if len(name) > 128:
+        raise ValueError("operation name must be 128 characters or fewer")
+    return name
+
+
+def _operation_summary(operation: EventOperation, event: Event, context=None):
+    from builder.operation_plan import normalize_operation_plan, validate_operation_plan
+    plan = normalize_operation_plan(json.loads(operation.operation_plan))
+    trigger = next((node for node in plan["nodes"] if node["type"].endswith("_trigger") and not node["disabled"]), None)
+    issues = None
+    if context is not None:
+        infrastructure, module_plan, modules = context
+        issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    return {
+        "id": operation.id,
+        "event_id": operation.event_id,
+        "name": operation.name,
+        "description": operation.description,
+        "position": operation.position,
+        "trigger_type": trigger["type"] if trigger else None,
+        "valid": not issues if issues is not None else None,
+        "issue_count": len(issues) if issues is not None else None,
+        "created_at": operation.created_at.isoformat(),
+        "updated_at": operation.updated_at.isoformat(),
+    }
+
+
+@router.get("/events/{event_id}/operations")
+async def list_event_operations(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    context = _operation_context(event)
+    rows = db.query(EventOperation).filter(EventOperation.event_id == event_id).order_by(
+        EventOperation.position, EventOperation.id
+    ).all()
+    return {"operations": [_operation_summary(row, event, context) for row in rows],
+            "read_only": event.status != "draft"}
+
+
+@router.post("/events/{event_id}/operations", status_code=201)
+async def create_event_operation(event_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "operations are read only"}, status_code=409)
+    body = await request.json()
+    try:
+        name = _operation_name(body.get("name"))
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    if db.query(EventOperation).filter(EventOperation.event_id == event_id, EventOperation.name == name).first():
+        return JSONResponse({"error": "operation name already exists"}, status_code=409)
+    from builder.operation_plan import empty_operation_plan
+    maximum = db.query(EventOperation.position).filter(EventOperation.event_id == event_id).order_by(
+        EventOperation.position.desc()
+    ).first()
+    operation = EventOperation(event_id=event_id, name=name,
+        description=(str(body.get("description") or "").strip() or None),
+        position=(maximum[0] + 1 if maximum else 0), operation_plan=json.dumps(empty_operation_plan()))
+    db.add(operation); db.commit(); db.refresh(operation)
+    return _operation_summary(operation, event)
+
+
+@router.patch("/events/{event_id}/operations/{operation_id}")
+async def update_event_operation(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "operations are read only"}, status_code=409)
+    body = await request.json()
+    if "name" in body:
+        try:
+            name = _operation_name(body["name"])
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        duplicate = db.query(EventOperation).filter(EventOperation.event_id == event_id,
+            EventOperation.name == name, EventOperation.id != operation_id).first()
+        if duplicate:
+            return JSONResponse({"error": "operation name already exists"}, status_code=409)
+        operation.name = name
+    if "description" in body:
+        operation.description = str(body.get("description") or "").strip() or None
+    operation.updated_at = utcnow(); db.commit(); db.refresh(operation)
+    return _operation_summary(operation, event)
+
+
+@router.post("/events/{event_id}/operations/{operation_id}/duplicate", status_code=201)
+async def duplicate_event_operation(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    source = _event_operation(db, event_id, operation_id)
+    if not event or not source:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "operations are read only"}, status_code=409)
+    names = {row[0] for row in db.query(EventOperation.name).filter(EventOperation.event_id == event_id)}
+    name = f"{source.name} (copy)"
+    suffix = 2
+    while name in names:
+        name = f"{source.name} (copy {suffix})"; suffix += 1
+    db.query(EventOperation).filter(EventOperation.event_id == event_id,
+        EventOperation.position > source.position).update(
+            {EventOperation.position: EventOperation.position + 1}, synchronize_session=False)
+    copy = EventOperation(event_id=event_id, name=name, description=source.description,
+        position=source.position + 1, operation_plan=source.operation_plan)
+    db.add(copy); db.commit(); db.refresh(copy)
+    return _operation_summary(copy, event)
+
+
+@router.delete("/events/{event_id}/operations/{operation_id}", status_code=204)
+async def delete_event_operation(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "operations are read only"}, status_code=409)
+    position = operation.position
+    db.delete(operation)
+    db.query(EventOperation).filter(EventOperation.event_id == event_id,
+        EventOperation.position > position).update(
+            {EventOperation.position: EventOperation.position - 1}, synchronize_session=False)
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/events/{event_id}/operations/{operation_id}/plan")
+async def get_operation_plan(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    from builder.operation_plan import (operation_catalogue, operation_input_fingerprint, validate_operation_plan)
+    infrastructure, module_plan, modules = _operation_context(event)
+    plan = json.loads(operation.operation_plan)
+    fingerprint = operation_input_fingerprint(infrastructure, module_plan, modules)
+    issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    if plan.get("input_fingerprint") and plan["input_fingerprint"] != fingerprint:
+        issues.insert(0, {"code": "stale_inputs", "message": "Network or module assignments changed after this operation draft was saved"})
+    return {"operation_plan": plan, "catalogue": operation_catalogue(infrastructure, module_plan, modules),
+            "issues": issues, "input_fingerprint": fingerprint, "updated_at": operation.updated_at.isoformat(),
+            "event_minutes": event.time_limit_minutes, "read_only": event.status != "draft"}
+
+
+@router.put("/events/{event_id}/operations/{operation_id}/plan")
+async def save_operation_plan(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "operation plan is read only"}, status_code=409)
+    body = await request.json()
+    try:
+        if _utc_instant(body.get("expected_updated_at")) != _utc_instant(operation.updated_at):
+            return JSONResponse({"error": "operation draft has changed", "current_updated_at": operation.updated_at.isoformat()}, status_code=409)
+        from builder.operation_plan import normalize_operation_plan, operation_input_fingerprint
+        infrastructure, module_plan, modules = _operation_context(event)
+        plan = normalize_operation_plan(body.get("operation_plan"))
+        plan["input_fingerprint"] = operation_input_fingerprint(infrastructure, module_plan, modules)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    operation.operation_plan = json.dumps(plan); operation.updated_at = utcnow(); db.commit(); db.refresh(operation)
+    return {"status": "saved", "operation_plan": plan, "updated_at": operation.updated_at.isoformat()}
+
+
+@router.post("/events/{event_id}/operations/{operation_id}/plan/validate")
+async def validate_event_operation_plan(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    body = await request.json()
+    from builder.operation_plan import validate_operation_plan
+    infrastructure, module_plan, modules = _operation_context(event)
+    issues = validate_operation_plan(body.get("operation_plan"), infrastructure, module_plan, modules, event.time_limit_minutes)
+    return {"valid": not issues, "issues": issues}
+
+
+@router.post("/events/{event_id}/operations/{operation_id}/plan/preview")
+async def preview_event_operation_plan(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    body = await request.json()
+    from builder.operation_plan import compile_team_preview, validate_operation_plan
+    infrastructure, module_plan, modules = _operation_context(event)
+    plan = body.get("operation_plan")
+    issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    if issues:
+        return JSONResponse({"error": "operation plan is invalid", "issues": issues}, status_code=422)
+    team = None
+    if body.get("team_id") is not None:
+        team = db.query(Team).filter(Team.id == body["team_id"], Team.event_id == event_id).first()
+        if not team:
+            return JSONResponse({"error": "Team not found"}, status_code=404)
+    team_data = {"id": team.id, "name": team.name} if team else {"id": None, "name": "Canonical team"}
+    return compile_team_preview(plan, infrastructure, module_plan, modules, team_data)
+
+
+@router.post("/events/{event_id}/operations/{operation_id}/run")
+async def run_event_operation(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.query(Event).filter(Event.id == event_id).first()
+    operation = _event_operation(db, event_id, operation_id)
+    if not event or not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+    body = await request.json()
+    from builder.operation_plan import validate_operation_plan
+    infrastructure, module_plan, modules = _operation_context(event)
+    plan = json.loads(operation.operation_plan)
+    issues = validate_operation_plan(plan, infrastructure, module_plan, modules, event.time_limit_minutes)
+    if issues:
+        return JSONResponse({"error": "operation plan is invalid", "issues": issues}, status_code=422)
+
+    team_ids = []
+    if body.get("team_id") is not None:
+        team = db.query(Team).filter(Team.id == body["team_id"], Team.event_id == event_id).first()
+        if not team:
+            return JSONResponse({"error": "Team not found"}, status_code=404)
+        team_ids = [team.id]
+    else:
+        team_ids = [t.id for t in db.query(Team).filter(Team.event_id == event_id).all()]
+
+    created = []
+    for team_id in team_ids:
+        run = OperationRun(event_id=event_id, operation_id=operation_id, team_id=team_id,
+                           status="queued", plan_snapshot=operation.operation_plan,
+                           fact_store="{}", trigger="{}")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        created.append(run.id)
+        asyncio.create_task(launch_run(run.id))
+    return {"status": "started", "run_ids": created}
+
+
+@router.get("/events/{event_id}/operations/{operation_id}/runs")
+async def list_event_operation_runs(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    runs = db.query(OperationRun).filter(OperationRun.operation_id == operation_id).all()
+    return {"runs": [{"id": r.id, "status": r.status, "team_id": r.team_id,
+                      "started_at": r.started_at.isoformat() if r.started_at else None,
+                      "finished_at": r.finished_at.isoformat() if r.finished_at else None} for r in runs]}
+
+
+@router.get("/operation-runs/{run_id}")
+async def get_operation_run(run_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    run = db.query(OperationRun).get(run_id)
+    if not run:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    steps = db.query(OperationRunStep).filter(OperationRunStep.run_id == run_id).all()
+    return {"id": run.id, "status": run.status, "team_id": run.team_id,
+            "fact_store": json.loads(run.fact_store or "{}"),
+            "steps": [{"id": s.id, "node_id": s.node_id, "node_type": s.node_type, "status": s.status,
+                       "result": s.result, "output": s.output, "attempts": s.attempts}
+                      for s in steps]}
+
+
+@router.get("/events/{event_id}/operations/{operation_id}/ability-facts")
+async def get_event_operation_ability_facts(event_id: int, operation_id: int, request: Request, db: Session = Depends(get_db)):
+    """Return structured input/output facts for each ability in the event operation plan."""
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    operation = db.query(EventOperation).filter(
+        EventOperation.event_id == event_id, EventOperation.id == operation_id
+    ).first()
+    if not operation:
+        return JSONResponse({"error": "Operation not found"}, status_code=404)
+
+    plan = json.loads(operation.operation_plan or "{}")
+    modules_by_id = {m.id: m for m in load_all_modules()}
+
+    fact_data = []
+    for node in plan.get("nodes", []):
+        if node.get("type") != "ability":
+            continue
+        config = node.get("config") or {}
+        module_id = config.get("module_id")
+        phase = config.get("ability")
+        module = modules_by_id.get(module_id)
+        if not module or phase not in ("recon", "exploit"):
+            continue
+        fact_data.append({
+            "node_id": node["id"],
+            "module_id": module_id,
+            "module_name": module.name,
+            "phase": phase,
+            **fact_summary(module, phase),
+        })
+
+    return {"fact_data": fact_data}
+
+
+@router.post("/operation-runs/{run_id}/steps/{step_id}/approve")
+async def approve_run_step(run_id: int, step_id: int, request: Request, db: Session = Depends(get_db)):
+    return await _approve_reject_run_step(run_id, step_id, request, db, approve=True)
+
+
+@router.post("/operation-runs/{run_id}/steps/{step_id}/reject")
+async def reject_run_step(run_id: int, step_id: int, request: Request, db: Session = Depends(get_db)):
+    return await _approve_reject_run_step(run_id, step_id, request, db, approve=False)
+
+
+async def _approve_reject_run_step(run_id, step_id, request, db, approve):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    step = db.query(OperationRunStep).filter(OperationRunStep.id == step_id,
+                                             OperationRunStep.run_id == run_id).first()
+    if not step or step.status != "awaiting_approval":
+        return JSONResponse({"error": "step not awaiting approval"}, status_code=409)
+    step.status = "queued" if approve else "rejected"
+    db.commit()
+    return {"status": "approved" if approve else "rejected"}
+
+
+@router.post("/operation-runs/{run_id}/cancel")
+async def cancel_operation_run(run_id: int, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    run = db.query(OperationRun).get(run_id)
+    if not run:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    run.status = "cancelled"
+    db.commit()
+    return {"status": "cancelled"}
 
 
 @router.post("/events")
@@ -734,10 +1193,12 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
                 status_code=422,
             )
 
+    from builder.infrastructure_planner import default_infrastructure
+    infrastructure = body.get("infrastructure", default_infrastructure())
     event = Event(
         name=body.get("name", "CTF Event"),
         quota=json.dumps(body.get("quota", {})),
-        infrastructure=json.dumps(body["infrastructure"]) if "infrastructure" in body else None,
+        infrastructure=json.dumps(infrastructure),
         status="draft",
         description=body.get("description"),
         welcome_message=body.get("welcome_message"),
@@ -762,11 +1223,31 @@ async def update_event(
         return JSONResponse({"error": "Event not found"}, status_code=404)
 
     body = await request.json()
-    if event.status != "draft" and "infrastructure" in body:
+    planner_fields = {"infrastructure", "infrastructure_layout"} & set(body)
+    original_updated_at = event.updated_at
+    if event.status != "draft" and planner_fields:
         return JSONResponse(
             {"error": "infrastructure cannot be edited after provisioning begins; destroy and reprovision the GameNet"},
             status_code=409,
         )
+    expected_updated_at = body.get("expected_updated_at")
+    if planner_fields and expected_updated_at is None:
+        return JSONResponse({
+            "error": "expected_updated_at is required for planner updates",
+            "current_updated_at": event.updated_at.isoformat(),
+        }, status_code=409)
+    try:
+        revision_matches = (
+            expected_updated_at is None
+            or _utc_instant(expected_updated_at) == _utc_instant(event.updated_at)
+        )
+    except (TypeError, ValueError):
+        revision_matches = False
+    if not revision_matches:
+        return JSONResponse({
+            "error": "event draft has changed",
+            "current_updated_at": event.updated_at.isoformat(),
+        }, status_code=409)
 
     time_limit = body.get("time_limit_minutes")
     if "time_limit_minutes" in body and time_limit is not None and (
@@ -802,6 +1283,22 @@ async def update_event(
                 )
             event.infrastructure = json.dumps(body["infrastructure"])
 
+    if "infrastructure_layout" in body:
+        from builder.infrastructure_planner import normalize_infrastructure, validate_infrastructure_layout
+        infrastructure = body.get("infrastructure")
+        if infrastructure is None:
+            infrastructure = json.loads(event.infrastructure) if event.infrastructure else None
+        if infrastructure is None:
+            return JSONResponse({"error": "layout requires infrastructure"}, status_code=422)
+        layout_errors = validate_infrastructure_layout(
+            body["infrastructure_layout"], normalize_infrastructure(infrastructure)
+        )
+        if layout_errors:
+            return JSONResponse(
+                {"error": "Invalid infrastructure layout", "details": layout_errors}, status_code=422
+            )
+        event.infrastructure_layout = json.dumps(body["infrastructure_layout"])
+
     if "name" in body:
         event.name = body["name"]
     if "description" in body:
@@ -811,8 +1308,36 @@ async def update_event(
     if "time_limit_minutes" in body:
         event.time_limit_minutes = body["time_limit_minutes"]
 
+    event.updated_at = utcnow()
+    if planner_fields:
+        # Detach the mutated ORM instance before issuing the compare-and-swap,
+        # otherwise an autoflush could defeat the revision predicate.
+        values = {
+            "quota": event.quota,
+            "infrastructure": event.infrastructure,
+            "infrastructure_layout": event.infrastructure_layout,
+            "name": event.name,
+            "description": event.description,
+            "welcome_message": event.welcome_message,
+            "time_limit_minutes": event.time_limit_minutes,
+            "updated_at": event.updated_at,
+        }
+        new_updated_at = event.updated_at
+        db.expunge(event)
+        changed = db.query(Event).filter(
+            Event.id == event_id, Event.updated_at == original_updated_at,
+        ).update(values, synchronize_session=False)
+        if changed != 1:
+            db.rollback()
+            current = db.query(Event).filter(Event.id == event_id).first()
+            return JSONResponse({
+                "error": "event draft has changed",
+                "current_updated_at": current.updated_at.isoformat(),
+            }, status_code=409)
+        db.commit()
+        return {"status": "updated", "updated_at": new_updated_at.isoformat()}
     db.commit()
-    return {"status": "updated"}
+    return {"status": "updated", "updated_at": event.updated_at.isoformat()}
 
 
 @router.post("/events/{event_id}/start")
@@ -829,6 +1354,9 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
             {"error": f"Event is already {event.status}; only draft events can be started"},
             status_code=409,
         )
+
+    from api.routes.module_repos import sync_all_repos
+    await asyncio.to_thread(sync_all_repos, db)
 
     # A GameNet event is not public until lockdown and connectivity checks pass.
     if event.infrastructure:
@@ -1056,6 +1584,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     from builder.attack_tree import build_attack_tree, serialize_tree
     from builder.base_loader import load_base_type
     from builder.infrastructure_validation import gamenet_hostname
+    from builder.infrastructure_planner import zone_endpoint_instances
 
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
@@ -1115,13 +1644,13 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             "hostname": lambda team, index, site_key=site["key"]: gamenet_hostname(event_id, team.id, site_key, "fw"),
         })
         for zone in site["zones"]:
-            for endpoint in zone["endpoints"]:
+            for endpoint in zone_endpoint_instances(zone["endpoints"]):
                 machine_types.append({
                     "type_key": f"{site['key']}_{zone['key']}_{endpoint['key']}",
                     "role": "attacker" if zone["team"] == "red" else "target",
-                    "count": endpoint["count"], "spec": endpoint, "region": site["region"],
+                    "count": 1, "spec": endpoint, "region": site["region"],
                     "hostname": lambda team, index, site_key=site["key"], zone_key=zone["key"], endpoint_key=endpoint["key"]:
-                        gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key, index + 1),
+                        gamenet_hostname(event_id, team.id, site_key, zone_key, endpoint_key),
                 })
 
     for definition in machine_types:
@@ -1248,24 +1777,37 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
 
 
 async def _cleanup_caldera_operations_for_event(event_id: int) -> dict:
-    """Delete all Caldera operations belonging to an event group. Returns summary."""
+    """Stop and delete all Caldera operations belonging to an event group.
+
+    Running/paused operations are first transitioned to ``finished`` so their
+    background planner loops exit cleanly before the operation is removed.
+    Returns a summary dict.
+    """
     from api.services.caldera import CalderaClient
     group = f"event-{event_id}"
     deleted = 0
+    stopped = 0
     errors = []
     try:
         async with CalderaClient() as caldera:
             operations = await caldera.list_operations()
             for op in operations:
-                if op.get("group") == group:
-                    try:
-                        await caldera.delete_operation(op["id"])
-                        deleted += 1
-                    except Exception as e:
-                        errors.append(f"Failed to delete operation {op.get('id')}: {e}")
+                if op.get("group") != group:
+                    continue
+                try:
+                    if op.get("state") in ("running", "paused"):
+                        await caldera.update_operation(op["id"], state="finished")
+                        stopped += 1
+                except Exception as e:
+                    errors.append(f"Failed to stop operation {op.get('id')}: {e}")
+                try:
+                    await caldera.delete_operation(op["id"])
+                    deleted += 1
+                except Exception as e:
+                    errors.append(f"Failed to delete operation {op.get('id')}: {e}")
     except Exception as e:
         errors.append(f"Caldera unavailable: {e}")
-    return {"deleted": deleted, "errors": errors}
+    return {"deleted": deleted, "stopped": stopped, "errors": errors}
 
 
 @router.post("/events/{event_id}/stop")

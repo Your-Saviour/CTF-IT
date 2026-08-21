@@ -5,6 +5,21 @@
   technique:
     attack_id: {{ technique_attack_id }}
     name: "{{ technique_name }}"
+{%- if requirements %}
+  requirements:
+{%- for req in requirements %}
+  - {{ req.module }}:
+{%- for mapping in req.mappings %}
+    - source: {{ mapping.source }}
+{%- if mapping.edge %}
+      edge: {{ mapping.edge }}
+{%- endif %}
+{%- if mapping.target %}
+      target: {{ mapping.target }}
+{%- endif %}
+{%- endfor %}
+{%- endfor %}
+{%- endif %}
   platforms:
     linux:
       sh:
@@ -13,6 +28,27 @@
 {%- if cleanup %}
         cleanup: |
 {{ cleanup | indent(10, first=True) }}
+{%- endif %}
+{%- if parsers %}
+        parsers:
+{%- for parser in parsers %}
+          {{ parser.module }}:
+{%- for mapping in parser.mappings %}
+            - source: {{ mapping.source }}
+{%- if mapping.edge %}
+              edge: {{ mapping.edge }}
+{%- endif %}
+{%- if mapping.target %}
+              target: {{ mapping.target }}
+{%- endif %}
+{%- if mapping.custom_parser_vals %}
+              custom_parser_vals:
+{%- for key, value in mapping.custom_parser_vals.items() %}
+                {{ key }}: {{ value }}
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endfor %}
 {%- endif %}
 {%- if payloads %}
         payloads:

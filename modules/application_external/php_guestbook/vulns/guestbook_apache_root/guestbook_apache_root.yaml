@@ -3,6 +3,7 @@ name: Apache Running as Root
 description: The Apache global configuration sets User root and Group root, causing all worker processes to run with full root privileges. Any web vulnerability becomes an immediate root compromise.
 type: vulnerability
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: services
 tags: [privilege-escalation, apache, misconfiguration, services]
