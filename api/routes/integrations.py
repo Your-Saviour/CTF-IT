@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -31,7 +31,7 @@ class DestinationRequest(StrictRequest):
     credential_id: int
     enabled: bool = True
     allow_insecure_http: bool = False
-    config: dict = {}
+    config: dict = Field(default_factory=dict)
 
 
 class BindingRequest(StrictRequest):
@@ -69,11 +69,17 @@ def destination_payload(item: IntegrationDestination) -> dict:
 
 
 def binding_payload(item: EventIntegration) -> dict:
+    job = max(item.jobs, key=lambda value: value.id, default=None)
     return {
         "id": item.id, "event_id": item.event_id, "destination_id": item.destination_id,
         "enabled": item.enabled, "last_status": item.last_status or ("disabled" if not item.enabled else "pending"),
         "last_success_at": item.last_success_at.isoformat() if item.last_success_at else None,
         "last_error_code": item.last_error_code, "last_error_message": item.last_error_message,
+        "job": None if job is None else {
+            "status": job.status, "attempt_count": job.attempt_count,
+            "trigger_reason": job.trigger_reason,
+            "next_attempt_at": job.next_attempt_at.isoformat() if job.next_attempt_at else None,
+        },
         "destination": destination_payload(item.destination),
     }
 
@@ -166,6 +172,8 @@ def upsert_event_integration(event_id: int, body: BindingRequest, request: Reque
     event = db.get(Event, event_id); destination = db.get(IntegrationDestination, body.destination_id)
     if not event or not destination:
         raise HTTPException(404, "event or destination not found")
+    if body.enabled and event.status != "open":
+        raise HTTPException(409, "only an open event can enable synchronization")
     if body.enabled and not destination.enabled:
         raise HTTPException(409, "destination is disabled")
     item = db.query(EventIntegration).filter_by(event_id=event_id, destination_id=body.destination_id).first()
@@ -176,10 +184,22 @@ def upsert_event_integration(event_id: int, body: BindingRequest, request: Reque
         conflict = db.query(EventIntegration).join(IntegrationDestination).filter(
             EventIntegration.enabled.is_(True), EventIntegration.id != item.id,
             IntegrationDestination.adapter_key == destination.adapter_key,
-            ((EventIntegration.event_id == event_id) | (EventIntegration.destination_id == destination.id)),
+            EventIntegration.destination_id == destination.id,
         ).first()
         if conflict:
             raise HTTPException(409, f"destination is active for event {conflict.event_id}")
+        replaced = db.query(EventIntegration).join(IntegrationDestination).filter(
+            EventIntegration.enabled.is_(True), EventIntegration.id != item.id,
+            EventIntegration.event_id == event_id,
+            IntegrationDestination.adapter_key == destination.adapter_key,
+        ).all()
+        for previous in replaced:
+            previous.enabled = False
+            previous.last_status = "disabled"
+            db.query(IntegrationSyncJob).filter(
+                IntegrationSyncJob.binding_id == previous.id,
+                IntegrationSyncJob.status.in_(("pending", "retrying")),
+            ).update({IntegrationSyncJob.status: "cancelled"}, synchronize_session=False)
     item.enabled = body.enabled
     item.last_status = "pending" if body.enabled else "disabled"
     if not body.enabled:
@@ -200,5 +220,5 @@ def sync_event_integration(event_id: int, binding_id: int, request: Request, db:
         raise HTTPException(404, "enabled binding not found")
     if not event or event.status != "open":
         raise HTTPException(409, "only an open event can synchronize")
-    enqueue_event_sync(event_id, "manual", priority=100)
+    enqueue_event_sync(event_id, "manual", priority=100, binding_id=binding_id)
     return {"status": "pending", "binding_id": binding_id}

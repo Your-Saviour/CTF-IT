@@ -280,10 +280,13 @@
         var state = document.getElementById('integration-sync-state');
         try {
             var response = await fetch('/admin/api/events/' + EVENT_ID + '/integrations', {headers:{'Accept':'application/json'}});
-            var data = await response.json(), binding = data[0];
+            var data = await response.json(), binding = data.find(function(item){ return item.enabled; }) || data[0];
             if (!binding) { state.textContent = 'No integration configured for this event.'; return; }
             state.dataset.bindingId = binding.id;
-            state.textContent = binding.destination.name + ' · ' + binding.last_status +
+            var job = binding.job;
+            state.textContent = binding.destination.name + ' · ' + (job ? job.status : binding.last_status) +
+              (job ? ' · attempt ' + job.attempt_count + ' · ' + job.trigger_reason : '') +
+              (job && job.status === 'retrying' && job.next_attempt_at ? ' · next retry ' + job.next_attempt_at : '') +
               (binding.last_success_at ? ' · Last success ' + binding.last_success_at : '') +
               (binding.last_error_message ? ' · ' + binding.last_error_message : '');
         } catch (error) { state.textContent = 'Unable to load synchronization state'; }
@@ -301,8 +304,9 @@
     loadIntegrationSync();
     pollTimer = window.setInterval(poll, 10000);
     analyticsTimer = window.setInterval(pollAnalytics, 30000);
+    var integrationTimer = window.setInterval(loadIntegrationSync, 5000);
     window.setInterval(updateClock, 1000);
-    window.addEventListener('beforeunload', function(){ window.clearInterval(pollTimer); window.clearInterval(analyticsTimer); });
+    window.addEventListener('beforeunload', function(){ window.clearInterval(pollTimer); window.clearInterval(analyticsTimer); window.clearInterval(integrationTimer); });
 })();
 </script>
 {% endblock %}

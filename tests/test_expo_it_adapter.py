@@ -69,7 +69,11 @@ def test_build_snapshot_maps_timeline_scores_and_safe_vm_fields():
         db.add(VMGoal(vm_id=vm.id, module_id="g", defend_points=25, defend_count=2))
         db.commit()
         snapshot = build_owned_snapshot(db, event.id, datetime(2026, 8, 21, 9, 30, tzinfo=timezone.utc))
-    assert snapshot["phases"] == [{"number": 0, "time_range": "09:00Z–10:00Z", "current": True}]
+    assert snapshot["phases"] == [{
+        "number": 0,
+        "time_range": "2026-08-21T09:00:00Z/2026-08-21T10:00:00Z",
+        "current": True,
+    }]
     assert snapshot["scoring"][0]["defense"] == 150
     assert snapshot["scoring"][0]["reverts"] == 50
     system = snapshot["systems"][0]
@@ -88,6 +92,23 @@ def test_merge_refuses_to_remove_system_referenced_by_ticket():
     }]
     with pytest.raises(ExpoContractError, match="referenced"):
         merge_remote(remote, {"phases": [], "scoring": [], "systems": []}, 7)
+
+
+def test_merge_applies_preserved_collaboration_points_to_owned_scores():
+    remote = deepcopy(REMOTE)
+    remote["collaboration_points"] = [
+        {"id": 1, "team_from": "BT02", "team_to": "BT01", "points": 5,
+         "phase": "phase-1", "reason": "Shared analysis", "created_time": "now"},
+        {"id": 2, "team_from": "BT03", "team_to": "BT01", "points": 10,
+         "phase": "phase-1", "reason": "Shared evidence", "created_time": "now"},
+    ]
+    score = {
+        "team": "BT01", "defense": 0, "usability": 0, "availability": 0,
+        "reverts": 0, "ctirep": 0, "sitrep": 0, "forensics": 0, "legal": 0,
+        "stratcom": 0, "stratex": 0, "xpoints": 0, "collaboration": 0,
+    }
+    merged = merge_remote(remote, {"phases": [], "scoring": [score], "systems": []}, 7)
+    assert merged["scoring"][0]["collaboration"] == 15
 
 
 @pytest.mark.asyncio

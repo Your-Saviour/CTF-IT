@@ -109,7 +109,8 @@ def test_general_integration_migration_replaces_obsolete_event_sync_columns():
         "expo_sync_status", "expo_sync_last_error",
         "expo_sync_attempts", "expo_sync_completed_at",
     ):
-        assert f'drop_column("{column}")' in migration
+        assert f'"{column}"' in migration
+    assert "batch_op.drop_column(column)" in migration
 
     startup = Path("api/main.py").read_text()
     assert "expo_sync_status" not in startup

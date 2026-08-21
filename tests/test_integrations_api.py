@@ -82,7 +82,7 @@ def test_event_binding_and_manual_sync_are_queued(client, database):
     with patch("api.routes.integrations.enqueue_event_sync", return_value=True) as enqueue:
         sync = client.post(f"/admin/api/events/{event_id}/integrations/{response.json()['id']}/sync")
     assert sync.status_code == 202
-    enqueue.assert_called_once_with(event_id, "manual", priority=100)
+    enqueue.assert_called_once_with(event_id, "manual", priority=100, binding_id=response.json()["id"])
 
 
 def test_connection_test_is_non_mutating_and_sanitized(client, database):
@@ -119,3 +119,42 @@ def test_disabling_binding_cancels_queued_delivery(client, database):
     assert response.status_code == 200
     with Sessions() as db:
         assert db.query(IntegrationSyncJob).one().status == "cancelled"
+
+
+def test_switching_destination_disables_previous_binding(client, database):
+    _, event_id, credential_id = database
+    first = client.post(
+        "/admin/api/integrations/destinations", json=destination_payload(credential_id)
+    ).json()
+    second = client.post("/admin/api/integrations/destinations", json=destination_payload(
+        credential_id, name="Expo production", base_url="https://expo-production.example"
+    )).json()
+    assert client.put(f"/admin/api/events/{event_id}/integrations", json={
+        "destination_id": first["id"], "enabled": True,
+    }).status_code == 200
+    assert client.put(f"/admin/api/events/{event_id}/integrations", json={
+        "destination_id": second["id"], "enabled": True,
+    }).status_code == 200
+    bindings = client.get(f"/admin/api/events/{event_id}/integrations").json()
+    assert [(item["destination_id"], item["enabled"]) for item in bindings] == [
+        (first["id"], False), (second["id"], True),
+    ]
+
+
+def test_draft_event_can_be_configured_but_not_enabled(client, database):
+    _, event_id, credential_id = database
+    with Sessions() as db:
+        event = db.get(Event, event_id)
+        event.status = "draft"; event.open = False
+        db.commit()
+    destination = client.post(
+        "/admin/api/integrations/destinations", json=destination_payload(credential_id)
+    ).json()
+    configured = client.put(f"/admin/api/events/{event_id}/integrations", json={
+        "destination_id": destination["id"], "enabled": False,
+    })
+    assert configured.status_code == 200
+    enabled = client.put(f"/admin/api/events/{event_id}/integrations", json={
+        "destination_id": destination["id"], "enabled": True,
+    })
+    assert enabled.status_code == 409

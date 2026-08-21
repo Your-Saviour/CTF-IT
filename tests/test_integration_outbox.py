@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from api.database import Base
@@ -130,6 +131,38 @@ def test_claim_cancels_job_when_event_has_stopped(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_periodically_recovers_stale_claims(monkeypatch):
+    import api.services.integration_outbox as outbox
+
+    stop = __import__("asyncio").Event()
+    recovered = []
+    monkeypatch.setattr(outbox, "recover_stale_claims", lambda: recovered.append(True) or 0)
+    monkeypatch.setattr(outbox, "claim_due_job", lambda: stop.set() or None)
+    await outbox.worker_loop(stop, poll_seconds=0.001)
+    assert recovered == [True]
+
+
+@pytest.mark.asyncio
+async def test_worker_survives_transient_claim_failure(monkeypatch):
+    import api.services.integration_outbox as outbox
+
+    stop = __import__("asyncio").Event()
+    calls = []
+
+    def claim():
+        calls.append(True)
+        if len(calls) == 1:
+            raise SQLAlchemyError("database temporarily unavailable")
+        stop.set()
+        return None
+
+    monkeypatch.setattr(outbox, "recover_stale_claims", lambda: 0)
+    monkeypatch.setattr(outbox, "claim_due_job", claim)
+    await outbox.worker_loop(stop, poll_seconds=0.001)
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_run_job_records_success_without_secret(monkeypatch):
     sessions, event_id, binding_id = integration_database(monkeypatch)
     from api.services.integration_outbox import claim_due_job, enqueue_event_sync, run_job
@@ -147,6 +180,33 @@ async def test_run_job_records_success_without_secret(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stale_worker_cannot_commit_after_claim_is_recovered(monkeypatch):
+    sessions, event_id, _ = integration_database(monkeypatch)
+    from api.services.integration_outbox import claim_due_job, enqueue_event_sync, run_job
+
+    enqueue_event_sync(event_id, "manual")
+    job_id = claim_due_job()
+
+    async def lose_claim(*_args):
+        with sessions() as other:
+            job = other.get(IntegrationSyncJob, job_id)
+            job.status = "retrying"
+            job.claim_token = None
+            job.claimed_at = None
+            other.commit()
+        return SyncResult(True, "ok", "Synchronized", 200, False)
+
+    monkeypatch.setattr(QueueAdapter, "synchronize", lose_claim)
+    with patch("api.services.integration_outbox.decrypt_secret", return_value="private-key"):
+        await run_job(job_id)
+    with sessions() as db:
+        job = db.get(IntegrationSyncJob, job_id)
+        assert job.status == "retrying"
+        assert job.attempt_count == 0
+        assert job.attempts == []
+
+
+@pytest.mark.asyncio
 async def test_run_job_retries_transient_result(monkeypatch):
     sessions, event_id, _ = integration_database(monkeypatch)
     from api.services.integration_outbox import claim_due_job, enqueue_event_sync, run_job
@@ -161,6 +221,44 @@ async def test_run_job_retries_transient_result(monkeypatch):
         assert job.status == "retrying"
         assert job.attempt_count == 1
         assert job.next_attempt_at > job.claimed_at
+
+
+@pytest.mark.asyncio
+async def test_invalid_adapter_configuration_fails_without_stale_retry(monkeypatch):
+    sessions, event_id, binding_id = integration_database(monkeypatch)
+    from api.services.integration_outbox import claim_due_job, enqueue_event_sync, run_job
+
+    with sessions() as db:
+        db.get(EventIntegration, binding_id).destination.adapter_key = "missing-adapter"
+        db.commit()
+    enqueue_event_sync(event_id, "manual")
+    job_id = claim_due_job()
+    await run_job(job_id)
+    with sessions() as db:
+        job = db.get(IntegrationSyncJob, job_id)
+        assert job.status == "failed"
+        assert job.binding.last_error_code == "invalid_configuration"
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_exhausts_after_five_attempts(monkeypatch):
+    sessions, event_id, _ = integration_database(monkeypatch)
+    from api.services.integration_outbox import claim_due_job, enqueue_event_sync, run_job
+
+    QueueAdapter.result = SyncResult(False, "timeout", "Timed out", None, True)
+    enqueue_event_sync(event_id, "manual")
+    for attempt in range(1, 6):
+        with sessions() as db:
+            job = db.query(IntegrationSyncJob).one()
+            job.next_attempt_at = utcnow()
+            db.commit()
+        job_id = claim_due_job()
+        with patch("api.services.integration_outbox.decrypt_secret", return_value="private-key"):
+            await run_job(job_id)
+        with sessions() as db:
+            job = db.get(IntegrationSyncJob, job_id)
+            assert job.attempt_count == attempt
+            assert job.status == ("retrying" if attempt < 5 else "failed")
 
 
 @pytest.mark.asyncio

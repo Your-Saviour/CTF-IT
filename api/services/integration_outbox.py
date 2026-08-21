@@ -24,7 +24,7 @@ ACTIVE_STATUSES = ("pending", "running", "retrying")
 RETRY_DELAYS_SECONDS = (5, 15, 45, 135, 300)
 
 
-def enqueue_event_sync(event_id: int, reason: str, priority: int = 0) -> bool:
+def enqueue_event_sync(event_id: int, reason: str, priority: int = 0, binding_id: int | None = None) -> bool:
     with SessionLocal() as db:
         try:
             bindings = (
@@ -36,6 +36,7 @@ def enqueue_event_sync(event_id: int, reason: str, priority: int = 0) -> bool:
                     EventIntegration.enabled.is_(True),
                     IntegrationDestination.enabled.is_(True),
                     Event.status == "open",
+                    *([EventIntegration.id == binding_id] if binding_id is not None else []),
                 )
                 .all()
             )
@@ -153,20 +154,30 @@ async def run_job(job_id: int) -> None:
         job = db.get(IntegrationSyncJob, job_id)
         if not job or job.status != "running":
             return
+        claim_token = job.claim_token
         binding = job.binding
         destination = binding.destination
-        adapter = get_adapter(destination.adapter_key)
-        secret = decrypt_secret(destination.credential.password)
         attempt_number = job.attempt_count + 1
         started_at = utcnow()
         began = monotonic()
+        secret = ""
         try:
-            result = await adapter.synchronize(binding, destination, secret)
+            adapter = get_adapter(destination.adapter_key)
+            secret = decrypt_secret(destination.credential.password)
         except Exception:
-            result = SyncResult(False, "unexpected_error", "Integration adapter failed", None, True)
+            result = SyncResult(False, "invalid_configuration", "Integration configuration is invalid", None, False)
+        else:
+            try:
+                result = await adapter.synchronize(binding, destination, secret)
+            except Exception:
+                result = SyncResult(False, "unexpected_error", "Integration adapter failed", None, True)
         finally:
             secret = ""
         finished_at = utcnow()
+        db.refresh(job)
+        if job.status != "running" or job.claim_token != claim_token:
+            db.rollback()
+            return
         job.attempt_count = attempt_number
         db.add(IntegrationSyncAttempt(
             job_id=job.id,
@@ -215,14 +226,37 @@ async def run_job(job_id: int) -> None:
                 next_attempt_at=finished_at,
             ))
         db.commit()
+        try:
+            with SessionLocal() as cleanup:
+                retained_ids = [row[0] for row in (
+                    cleanup.query(IntegrationSyncAttempt.id)
+                    .filter_by(binding_id=binding.id)
+                    .order_by(IntegrationSyncAttempt.created_at.desc(), IntegrationSyncAttempt.id.desc())
+                    .limit(100)
+                )]
+                if retained_ids:
+                    cleanup.query(IntegrationSyncAttempt).filter(
+                        IntegrationSyncAttempt.binding_id == binding.id,
+                        ~IntegrationSyncAttempt.id.in_(retained_ids),
+                    ).delete(synchronize_session=False)
+                    cleanup.commit()
+        except SQLAlchemyError:
+            pass
 
 
 async def worker_loop(stop: asyncio.Event, poll_seconds: float = 1.0) -> None:
+    last_recovery = monotonic() - 60
     while not stop.is_set():
-        job_id = claim_due_job()
-        if job_id is not None:
-            await run_job(job_id)
-            continue
+        try:
+            if monotonic() - last_recovery >= 60:
+                recover_stale_claims()
+                last_recovery = monotonic()
+            job_id = claim_due_job()
+            if job_id is not None:
+                await run_job(job_id)
+                continue
+        except Exception:
+            pass
         try:
             await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
         except asyncio.TimeoutError:

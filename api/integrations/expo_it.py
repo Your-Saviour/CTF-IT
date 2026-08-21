@@ -36,7 +36,11 @@ def _phase_rows(event: Event, now: datetime) -> list[dict]:
         phase_end = start + timedelta(minutes=phase["end_offset_minutes"])
         rows.append({
             "number": number,
-            "time_range": f"{phase_start:%H:%MZ}–{phase_end:%H:%MZ}",
+            "time_range": (
+                phase_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                + "/"
+                + phase_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            ),
             "current": event.status == "open" and phase_start <= current < phase_end,
         })
     return rows
@@ -130,7 +134,7 @@ def merge_remote(remote: dict, owned: dict, event_id: int) -> dict:
     }
     referenced = {ticket.get("system_expo_id") for ticket in merged.get("ust", [])}
     if stale_ids & referenced:
-        raise ExpoContractError("a stale CTF-IT system is still referenced by an Expo-IT ticket")
+        raise ExpoContractError("remote_reference_conflict: a stale CTF-IT system is still referenced by an Expo-IT ticket")
     old_owned = {
         system["expo_id"]: system for system in merged["infrastructure"]["systems"]
         if system["expo_id"].startswith(prefix)
@@ -145,7 +149,13 @@ def merge_remote(remote: dict, owned: dict, event_id: int) -> dict:
         systems.append(system)
     preserved = [system for system in merged["infrastructure"]["systems"] if not system["expo_id"].startswith(prefix)]
     merged["phases"] = deepcopy(owned["phases"])
-    merged["scoring"] = deepcopy(owned["scoring"])
+    collaboration = {}
+    for point in merged.get("collaboration_points", []):
+        collaboration[point["team_to"]] = collaboration.get(point["team_to"], 0) + point["points"]
+    scoring = deepcopy(owned["scoring"])
+    for row in scoring:
+        row["collaboration"] = collaboration.get(row["team"], 0)
+    merged["scoring"] = scoring
     merged["infrastructure"]["systems"] = preserved + deepcopy(systems)
     try:
         return ExpoData.model_validate(merged).model_dump(exclude_none=True)
@@ -191,7 +201,9 @@ class ExpoITAdapter:
             status = exc.response.status_code
             return SyncResult(False, "authentication_failed" if status in {401, 403} else "http_error", "Expo-IT rejected synchronization", status, status == 429 or status >= 500)
         except ExpoContractError as exc:
-            return SyncResult(False, "contract_error", str(exc), None, False)
+            message = str(exc)
+            code = "remote_reference_conflict" if message.startswith("remote_reference_conflict:") else "contract_error"
+            return SyncResult(False, code, message.removeprefix("remote_reference_conflict: "), None, False)
         except (httpx.TimeoutException, httpx.NetworkError):
             return SyncResult(False, "connection_failed", "Could not reach Expo-IT", None, True)
         except (httpx.HTTPError, ValidationError, ValueError):
