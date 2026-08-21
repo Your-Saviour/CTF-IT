@@ -553,7 +553,7 @@ def opnsense_config_fingerprint(*, site: Site, vm: VM, expected_version: str, la
 
 def snapshot_site_validation_command(*, token: str, expected_version: str, public_ip: str, private_ip: str,
                                      wan_interface: str, lan_interface: str, lan_mac: str,
-                                     management_cidr: str) -> str:
+                                     management_cidr: str, site_cidr: str) -> str:
     management_source = str(ip_network(management_cidr).network_address)
     return (
         f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready && "
@@ -564,7 +564,7 @@ def snapshot_site_validation_command(*, token: str, expected_version: str, publi
         f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {private_ip}' >/dev/null && "
         f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
-        f"pfctl -sr | grep -F 'pass in quick on {lan_interface} inet from ({lan_interface}:network) to any' >/dev/null && "
+        f"pfctl -sr | grep -F {shlex.quote(f'pass in quick on {lan_interface} inet from {site_cidr} to any')} >/dev/null && "
         "pfctl -sn | grep -E 'nat on' >/dev/null && "
         f"pfctl -sr | grep -F {shlex.quote('from ' + management_source + ' to')} | "
         "grep -E 'port = (ssh|22)' >/dev/null && opnsense-version -v"
@@ -635,7 +635,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     wan_interface, lan_interface = _snapshot_interface_mapping(vm, lan_mac)
     gateway = site.team.vpn_gateway
     gateway_vm = db.get(VM, gateway.vm_id)
-    management_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32")
+    management_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR") or "127.0.0.1/32"
     fingerprint = opnsense_config_fingerprint(
         site=site, vm=vm, expected_version=expected_version, lan_mac=lan_mac,
         wan_interface=wan_interface, lan_interface=lan_interface, gateway_vm=gateway_vm,
@@ -655,7 +655,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     validation = snapshot_site_validation_command(
         token=token, expected_version=expected_version, public_ip=vm.public_ip,
         private_ip=vm.private_ip, wan_interface=wan_interface, lan_interface=lan_interface,
-        lan_mac=lan_mac, management_cidr=management_cidr,
+        lan_mac=lan_mac, management_cidr=management_cidr, site_cidr=site.allocated_cidr,
     )
     if vm.opnsense_config_status in {"applying", "applied"}:
         try:
@@ -711,6 +711,21 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
                 timeout=60, connect_timeout=60,
             )
             if code == 0 and expected_version in output:
+                break
+            ready_check = f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready"
+            ready, _, _ = ssh_command(vm, "/bin/sh -c " + shlex.quote(ready_check), timeout=30)
+            if ready == 0:
+                _, diagnostic_output, diagnostic_error = ssh_command(
+                    vm,
+                    f"printf '%s\\n' 'filter:'; pfctl -sr; printf '%s\\n' 'nat:'; pfctl -sn; "
+                    f"printf '%s\\n' 'interfaces:'; ifconfig {shlex.quote(wan_interface)}; "
+                    f"ifconfig {shlex.quote(lan_interface)}",
+                    timeout=30,
+                )
+                error = (
+                    "configuration applied but semantic validation failed:\n"
+                    + (diagnostic_error or diagnostic_output or "no diagnostic output")
+                )[-2000:]
                 break
             failure_check = f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-failed"
             failed, _, _ = ssh_command(vm, "/bin/sh -c " + shlex.quote(failure_check), timeout=30)

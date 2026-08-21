@@ -52,9 +52,9 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
         token="generation-token",
         expected_version="26.7", public_ip="198.51.100.12", private_ip="10.128.0.1",
         wan_interface="vtnet0", lan_interface="vtnet1", lan_mac="00:11:22:33:44:55",
-        management_cidr="192.0.2.8/32",
+        management_cidr="192.0.2.8/32", site_cidr="10.128.0.0/20",
     )
-    assert "pass in quick on vtnet1 inet from (vtnet1:network) to any" in command
+    assert "pass in quick on vtnet1 inet from 10.128.0.0/20 to any" in command
     assert "nat on" in command and "from 192.0.2.8 to" in command
     assert "Allow management SSH" not in command
     assert "printf '%s\\n' generation-token" in command
