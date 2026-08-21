@@ -111,6 +111,9 @@ class Event(Base):
         cascade="all, delete-orphan",
         order_by="EventOperation.position",
     )
+    integrations: Mapped[list["EventIntegration"]] = relationship(
+        back_populates="event", cascade="all, delete-orphan"
+    )
 
 
 class EventOperation(Base):
@@ -607,3 +610,112 @@ class ServiceCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    integration_destinations: Mapped[list["IntegrationDestination"]] = relationship(
+        back_populates="credential"
+    )
+
+
+class IntegrationDestination(Base):
+    __tablename__ = "integration_destinations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    adapter_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    credential_id: Mapped[int] = mapped_column(
+        ForeignKey("service_credentials.id", ondelete="RESTRICT"), nullable=False
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    allow_insecure_http: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    last_test_status: Mapped[str] = mapped_column(String(24), nullable=True)
+    last_test_error: Mapped[str] = mapped_column(Text, nullable=True)
+    last_tested_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    credential: Mapped["ServiceCredential"] = relationship(back_populates="integration_destinations")
+    bindings: Mapped[list["EventIntegration"]] = relationship(back_populates="destination")
+
+
+class EventIntegration(Base):
+    __tablename__ = "event_integrations"
+    __table_args__ = (
+        UniqueConstraint("event_id", "destination_id", name="uq_event_integration_destination"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    destination_id: Mapped[int] = mapped_column(
+        ForeignKey("integration_destinations.id", ondelete="RESTRICT"), nullable=False
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_success_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    last_status: Mapped[str] = mapped_column(String(24), nullable=True)
+    last_error_code: Mapped[str] = mapped_column(String(64), nullable=True)
+    last_error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    event: Mapped["Event"] = relationship(back_populates="integrations")
+    destination: Mapped["IntegrationDestination"] = relationship(back_populates="bindings")
+    jobs: Mapped[list["IntegrationSyncJob"]] = relationship(
+        back_populates="binding", cascade="all, delete-orphan"
+    )
+    attempts: Mapped[list["IntegrationSyncAttempt"]] = relationship(
+        back_populates="binding", cascade="all, delete-orphan"
+    )
+
+
+class IntegrationSyncJob(Base):
+    __tablename__ = "integration_sync_jobs"
+    __table_args__ = (
+        Index("ix_integration_jobs_due", "status", "next_attempt_at", "priority"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    binding_id: Mapped[int] = mapped_column(
+        ForeignKey("event_integrations.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    trigger_reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    claimed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    claim_token: Mapped[str] = mapped_column(String(64), nullable=True)
+    follow_up_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    binding: Mapped["EventIntegration"] = relationship(back_populates="jobs")
+    attempts: Mapped[list["IntegrationSyncAttempt"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan"
+    )
+
+
+class IntegrationSyncAttempt(Base):
+    __tablename__ = "integration_sync_attempts"
+    __table_args__ = (
+        Index("ix_integration_attempts_binding_created", "binding_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("integration_sync_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    binding_id: Mapped[int] = mapped_column(
+        ForeignKey("event_integrations.id", ondelete="CASCADE"), nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    result: Mapped[str] = mapped_column(String(24), nullable=False)
+    http_status: Mapped[int] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[str] = mapped_column(String(64), nullable=True)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    job: Mapped["IntegrationSyncJob"] = relationship(back_populates="attempts")
+    binding: Mapped["EventIntegration"] = relationship(back_populates="attempts")
