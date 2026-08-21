@@ -109,6 +109,9 @@ class Event(Base):
     integrations: Mapped[list["EventIntegration"]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
+    green_deployment_facts: Mapped[list["GreenDeploymentFact"]] = relationship(
+        back_populates="event", cascade="all, delete-orphan"
+    )
 
 
 class EventOperation(Base):
@@ -356,7 +359,14 @@ class TeamTrainingCredential(Base):
 
 class VM(Base):
     __tablename__ = "vms"
-    __table_args__ = (Index("ix_vms_event_team", "event_id", "team_id"),)
+    __table_args__ = (
+        Index("ix_vms_event_team", "event_id", "team_id"),
+        Index(
+            "uq_vms_event_green_key", "event_id", "green_key", unique=True,
+            sqlite_where=text("green_key IS NOT NULL"),
+            postgresql_where=text("green_key IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     hostname: Mapped[str] = mapped_column(String(256), nullable=True)
@@ -368,8 +378,9 @@ class VM(Base):
     ssh_host_key: Mapped[str] = mapped_column(String(512), nullable=True)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     ust_prompt: Mapped[str] = mapped_column(Text, nullable=True)
-    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False)
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False)
+    green_key: Mapped[str] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # Provisioning state
@@ -416,6 +427,58 @@ class VM(Base):
     modules: Mapped[list["VMModule"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
     goals: Mapped[list["VMGoal"]] = relationship(back_populates="vm", cascade="all, delete-orphan")
     zone: Mapped["Zone"] = relationship(back_populates="vms")
+    green_deployments: Mapped[list["GreenDeploymentState"]] = relationship(
+        back_populates="vm", cascade="all, delete-orphan"
+    )
+    owned_service_credentials: Mapped[list["ServiceCredential"]] = relationship(
+        back_populates="owner_green_vm", foreign_keys="ServiceCredential.owner_green_vm_id"
+    )
+    owned_integration_destinations: Mapped[list["IntegrationDestination"]] = relationship(
+        back_populates="owner_green_vm", foreign_keys="IntegrationDestination.owner_green_vm_id"
+    )
+
+
+class GreenDeploymentFact(Base):
+    __tablename__ = "green_deployment_facts"
+    __table_args__ = (
+        UniqueConstraint("event_id", "vm_key", "trait", name="uq_green_fact_scope"),
+        Index("ix_green_facts_event_vm", "event_id", "vm_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    vm_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    trait: Mapped[str] = mapped_column(String(128), nullable=False)
+    encrypted_value: Mapped[str] = mapped_column(Text, nullable=False)
+    secret: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+    event: Mapped["Event"] = relationship(back_populates="green_deployment_facts")
+
+
+class GreenDeploymentState(Base):
+    __tablename__ = "green_deployment_states"
+    __table_args__ = (
+        UniqueConstraint("vm_id", "module_id", name="uq_green_deployment_module"),
+        Index("ix_green_deployments_vm", "vm_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vm_id: Mapped[int] = mapped_column(ForeignKey("vms.id", ondelete="CASCADE"), nullable=False)
+    module_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
+    current_step: Mapped[str] = mapped_column(String(128), nullable=True)
+    resolved_commit: Mapped[str] = mapped_column(String(64), nullable=True)
+    service_url: Mapped[str] = mapped_column(String(512), nullable=True)
+    health_status: Mapped[str] = mapped_column(String(24), nullable=True)
+    error_code: Mapped[str] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+
+    vm: Mapped["VM"] = relationship(back_populates="green_deployments")
 
 
 class PlatformSettings(Base):
@@ -605,8 +668,14 @@ class ServiceCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=True)
+    owner_green_vm_id: Mapped[int] = mapped_column(
+        ForeignKey("vms.id", ondelete="SET NULL"), nullable=True
+    )
     integration_destinations: Mapped[list["IntegrationDestination"]] = relationship(
         back_populates="credential"
+    )
+    owner_green_vm: Mapped["VM"] = relationship(
+        back_populates="owned_service_credentials", foreign_keys=[owner_green_vm_id]
     )
 
 
@@ -620,6 +689,9 @@ class IntegrationDestination(Base):
     credential_id: Mapped[int] = mapped_column(
         ForeignKey("service_credentials.id", ondelete="RESTRICT"), nullable=False
     )
+    owner_green_vm_id: Mapped[int] = mapped_column(
+        ForeignKey("vms.id", ondelete="SET NULL"), nullable=True
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     allow_insecure_http: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     config_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
@@ -630,6 +702,9 @@ class IntegrationDestination(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
 
     credential: Mapped["ServiceCredential"] = relationship(back_populates="integration_destinations")
+    owner_green_vm: Mapped["VM"] = relationship(
+        back_populates="owned_integration_destinations", foreign_keys=[owner_green_vm_id]
+    )
     bindings: Mapped[list["EventIntegration"]] = relationship(back_populates="destination")
 
 
