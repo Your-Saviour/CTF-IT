@@ -3,7 +3,6 @@ import io
 import json
 import logging
 import os
-import re
 import shutil
 import socket
 import tempfile
@@ -27,10 +26,6 @@ _log = logging.getLogger(__name__)
 SHARED_PLAYBOOK_DIR = os.environ.get("SHARED_PLAYBOOK_DIR", "/shared/playbooks")
 CALDERA_INTERNAL_URL = os.environ.get("CALDERA_INTERNAL_URL", "http://ctf-caldera:8888")
 CALDERA_AGENT_URL = os.environ.get("CALDERA_AGENT_URL", "http://localhost:8888")
-VULTR_API_KEY = os.environ.get("VULTR_API_KEY", "")
-VULTR_DEFAULT_REGION = os.environ.get("VULTR_DEFAULT_REGION", "ewr")
-CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-CLOUDFLARE_DOMAIN = os.environ.get("CLOUDFLARE_DOMAIN", "")
 
 # Path to the bundled VM provisioning playbooks (relative to project root)
 _HERE = Path(__file__).parent.parent.parent
@@ -73,22 +68,10 @@ def _record_vm_failure(vm_id: int, error: str, *, agent: bool = False) -> None:
         failure_db.close()
 
 
-def _vultr_safe_hostname(value: str, fallback: str) -> str:
-    """Return a hostname that is also safe to use as a DNS record label.
-
-    Vultr rejects hostnames containing spaces and Cloudflare record labels have
-    the same practical restriction. Team names are user-controlled, so never
-    pass them through to either provider unchanged.
-    """
-    hostname = re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
-    hostname = hostname[:63].rstrip("-")
-    return hostname or fallback
-
-
 def _wait_for_tcp_port(host: str, port: int, timeout_seconds: int = 600) -> None:
     """Wait for a newly-created cloud VM to accept connections.
 
-    Vultr returns an instance IP before its operating system has completed its
+    EC2 returns an instance address before its operating system has completed its
     first boot. Starting Ansible immediately turns that normal delay into an
     avoidable provisioning failure.
     """
@@ -271,10 +254,15 @@ async def get_vm(vm_id: int, request: Request, db: Session = Depends(get_db), in
         "modules": modules,
         "created_at": vm.created_at.isoformat() if vm.created_at else None,
         "updated_at": vm.updated_at.isoformat() if vm.updated_at else None,
-        # Vultr provisioning fields
-        "vultr_id": vm.vultr_id,
-        "vultr_plan": vm.vultr_plan,
-        "vultr_region": vm.vultr_region,
+        "cloud_instance_id": vm.cloud_instance_id,
+        "instance_type": vm.instance_type,
+        "cloud_region": vm.cloud_region,
+        "availability_zone": vm.availability_zone,
+        "primary_eni_id": vm.primary_eni_id,
+        "wan_eni_id": vm.wan_eni_id,
+        "lan_eni_id": vm.lan_eni_id,
+        "subnet_id": vm.subnet_id,
+        "eip_allocation_id": vm.eip_allocation_id,
         "cloudflare_record_id": vm.cloudflare_record_id,
         "provision_step": vm.provision_step,
         "provision_error": vm.provision_error,
@@ -1130,1179 +1118,162 @@ async def agent_status(vm_id: int, request: Request, db: Session = Depends(get_d
     return result
 
 
-# ── Vultr Reference Data ───────────────────────────────────────────────────────
+# ── AWS compute lifecycle ─────────────────────────────────────────────────────
 
-@router.get("/vultr/plans")
-async def vultr_plans(request: Request, db: Session = Depends(get_db)):
-    """Return Vultr vc2 plans for the VM creation dropdown."""
+def _cloud_providers():
+    """Build AWS lifecycle dependencies without accepting explicit credentials."""
+    from api.database import SessionLocal
+    from api.services.aws import AwsComputeProvider, AwsConfig, AwsSessionFactory
+    from api.services.cloud_provisioning import CloudProviders
+    from api.services.ssh_keys import get_or_create_platform_keypair
+
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    key_db = SessionLocal()
+    try:
+        _, public_key = get_or_create_platform_keypair(key_db)
+    finally:
+        key_db.close()
+    return CloudProviders(
+        config=config,
+        compute=AwsComputeProvider(sessions.client("ec2")),
+        session_factory=SessionLocal,
+        key_name=config.key_pair_name,
+        public_key=public_key,
+        security_group_ids=config.standard_security_group_ids,
+        configure_guest=_run_provision,
+        wait_for_ssh=lambda vm: _wait_for_tcp_port(vm.public_ip, vm.ssh_port or 22),
+        reconcile_dns=lambda vm: None,
+        delete_dns=lambda vm: None,
+    )
+
+
+def _run_cloud_create(vm_id: int) -> None:
+    from api.services.cloud_provisioning import create_cloud_vm
+    try:
+        create_cloud_vm(vm_id, providers=_cloud_providers())
+    except Exception:
+        _log.exception("AWS VM creation failed for VM %d", vm_id)
+
+
+def _run_cloud_destroy(vm_id: int) -> None:
+    from api.services.cloud_provisioning import destroy_cloud_vm
+    try:
+        destroy_cloud_vm(vm_id, providers=_cloud_providers())
+    except Exception:
+        _log.exception("AWS VM destruction failed for VM %d", vm_id)
+
+
+@router.get("/aws/instance-types")
+async def aws_instance_types(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    if not VULTR_API_KEY:
-        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
-
     try:
-        import httpx as _httpx
-        resp = _httpx.get(
-            "https://api.vultr.com/v2/plans",
-            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
-            params={"type": "vc2", "per_page": 500},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        plans = resp.json().get("plans", [])
-        result = sorted(
-            [
-                {
-                    "id": p["id"],
-                    "vcpu_count": p["vcpu_count"],
-                    "ram": p["ram"],
-                    "disk": p["disk"],
-                    "monthly_cost": p["monthly_cost"],
-                    "label": (
-                        f"{p['id']} — {p['vcpu_count']} vCPU, "
-                        f"{p['ram'] / 1024:g}GB RAM, {p['disk']}GB disk "
-                        f"(${p['monthly_cost']}/mo)"
-                    ),
-                }
-                for p in plans
-                if p.get("id", "").startswith("vc2-")
-            ],
-            key=lambda x: x["monthly_cost"],
-        )
-        return {"plans": result}
+        from api.services.aws import AwsConfig
+        config = AwsConfig.from_env()
+        return {"instance_types": [{"id": value, "label": value} for value in config.instance_types]}
     except Exception as exc:
-        return JSONResponse({"error": f"Failed to fetch Vultr plans: {exc}"}, status_code=502)
+        return JSONResponse({"error": str(exc)}, status_code=503)
 
 
-@router.get("/vultr/os")
-async def vultr_os_list(request: Request, db: Session = Depends(get_db)):
-    """Return Vultr OS options for the VM creation dropdown."""
+@router.get("/aws/amis")
+async def aws_amis(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    if not VULTR_API_KEY:
-        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
-
     try:
-        import httpx as _httpx
-        resp = _httpx.get(
-            "https://api.vultr.com/v2/os",
-            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
-            params={"per_page": 500},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        os_list = resp.json().get("os", [])
-        result = sorted(
-            [{"id": o["id"], "name": o["name"], "family": o.get("family", "")} for o in os_list],
-            key=lambda x: x["name"],
-        )
-        return {"os": result}
+        from api.services.aws import AwsConfig
+        config = AwsConfig.from_env()
+        return {"amis": [
+            {"region": region, "ami_id": ami_id, "family": "ubuntu"}
+            for region, ami_id in sorted(config.ubuntu_amis.items())
+        ]}
     except Exception as exc:
-        return JSONResponse({"error": f"Failed to fetch Vultr OS list: {exc}"}, status_code=502)
+        return JSONResponse({"error": str(exc)}, status_code=503)
 
 
-# ── Shared Vultr Semaphore project ─────────────────────────────────────────────
-
-_VULTR_PROJECT_ID_KEY = "vultr_semaphore_project_id"
-_VULTR_KEY_ID_KEY = "vultr_semaphore_key_id"
-_VULTR_PROJECT_LOCK = threading.Lock()
-
-
-def _get_or_create_vultr_semaphore_project(db, client, private_key: str) -> tuple[int, int]:
-    """Return (project_id, key_id) for the shared 'CTF Vultr Operations' Semaphore project.
-
-    Creates the project and SSH key on first call and persists their IDs in
-    PlatformSettings so subsequent calls reuse the same project.
-    """
-    from api.models import PlatformSettings
-
-    # Event provisioning creates several VMs concurrently. Serialize the
-    # shared Semaphore bootstrap so only one worker creates the project/key;
-    # later workers then reuse the committed settings.
-    with _VULTR_PROJECT_LOCK:
-        proj_row = db.query(PlatformSettings).filter_by(key=_VULTR_PROJECT_ID_KEY).first()
-        key_row = db.query(PlatformSettings).filter_by(key=_VULTR_KEY_ID_KEY).first()
-
-        if proj_row and key_row:
-            return int(proj_row.value), int(key_row.value)
-
-        project_id = client.create_project("CTF Vultr Operations")
-        key_id = client.create_key(project_id, "platform-key", private_key)
-
-        db.add(PlatformSettings(key=_VULTR_PROJECT_ID_KEY, value=str(project_id)))
-        db.add(PlatformSettings(key=_VULTR_KEY_ID_KEY, value=str(key_id)))
-        db.commit()
-
-        return project_id, key_id
-
-
-# ── VPC Creation ───────────────────────────────────────────────────────────────
-
-def _create_team_vpc(team_id: int, event_id: int, region: str) -> None:
-    """Create a Vultr VPC for a team and store the VPC ID on the team record.
-
-    Uses the Vultr REST API directly (no Semaphore needed for a single API call).
-    VPC description format: "ctf-event-{event_id}-team-{team_index}"
-    Subnet format: "10.{team_index}.1.0/24"
-    """
-    import httpx as _httpx
-
-    from api.database import SessionLocal
-
-    if not VULTR_API_KEY:
-        _log.error("_create_team_vpc: VULTR_API_KEY is not configured — skipping VPC creation for team %d", team_id)
-        return
-
-    db = SessionLocal()
-    try:
-        team = db.query(Team).filter(Team.id == team_id).first()
-        if not team or team.team_index is None:
-            _log.error("_create_team_vpc: team %d not found or missing team_index", team_id)
-            return
-
-        vpc_description = f"ctf-event-{event_id}-team-{team.team_index}"
-        v4_subnet = f"10.{team.team_index}.1.0"
-
-        _log.info(
-            "Creating VPC '%s' (%s/24) in region %s for team %d",
-            vpc_description, v4_subnet, region, team_id,
-        )
-
-        resp = _httpx.post(
-            "https://api.vultr.com/v2/vpcs",
-            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
-            json={
-                "region": region,
-                "v4_subnet": v4_subnet,
-                "v4_subnet_mask": 24,
-                "description": vpc_description,
-            },
-            timeout=30.0,
-        )
-        resp.raise_for_status()
-
-        vpc_id = resp.json()["vpc"]["id"]
-        team.vpc_id = vpc_id
-        db.commit()
-
-        _log.info("VPC '%s' created with ID %s", vpc_description, vpc_id)
-
-    except Exception as exc:
-        _log.exception("Failed to create VPC for team %d: %s", team_id, exc)
-    finally:
-        db.close()
-
-
-# ── OPNsense Firewall Provisioning ─────────────────────────────────────────────
-
-def _run_firewall_create(vm_id: int) -> None:
-    """Synchronous background task: create a Vultr FreeBSD VM, attach it to the team VPC,
-    then bootstrap it into OPNsense.
-
-    Stores admin password on vm.admin_password.
-    Sets vm.status = "active" on success, "failed" on error.
-    """
-    import re as _re
-    import shutil as _shutil
-
-    import bcrypt as _bcrypt
-
-    from api.database import SessionLocal
-    from api.models import utcnow
-    from api.services.semaphore import SemaphoreClient
-    from api.services.ssh_keys import get_or_create_platform_keypair
-
-    db = SessionLocal()
-    playbook_dir = None
-    try:
-        vm = db.query(VM).filter(VM.id == vm_id).first()
-        if not vm:
-            return
-        team = db.query(Team).filter(Team.id == vm.team_id).first()
-        if not team:
-            raise RuntimeError(f"Team {vm.team_id} not found for firewall VM {vm_id}")
-
-        # ── Stage 1: Create Vultr VM via create-firewall.yml ────────────────
-        _update_provision_step(db, vm, "staging_playbook")
-
-        export_id = f"firewall_{vm_id}_{uuid.uuid4().hex[:8]}"
-        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
-        playbook_dir.mkdir(parents=True, exist_ok=True)
-
-        _shutil.copy(PLAYBOOKS_DIR / "create-firewall.yml", playbook_dir / "create-firewall.yml")
-        collections_dir = playbook_dir / "collections"
-        collections_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            PLAYBOOKS_DIR / "collections" / "requirements.yml",
-            collections_dir / "requirements.yml",
-        )
-
-        _update_provision_step(db, vm, "configuring_semaphore")
-
-        private_key, public_key = get_or_create_platform_keypair(db)
-
-        vpc_description = f"ctf-event-{vm.event_id}-team-{team.team_index}"
-
-        extra_vars: dict = {
-            "vm_hostname": _vultr_safe_hostname(vm.hostname or "", f"ctf-fw-{vm_id}"),
-            "vm_plan": vm.vultr_plan or "vc2-2c-4gb",
-            "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
-            "ssh_key_name": "ctf-platform",
-            "ssh_public_key": public_key,
-            "vultr_api_key": VULTR_API_KEY,
-            "vpc_description": vpc_description,
-        }
-        if CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
-            extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
-            extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
-
-        _update_provision_step(db, vm, "creating_instance")
-
-        with SemaphoreClient() as client:
-            client.login()
-            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
-            inv_id = client.create_localhost_inventory(project_id, f"localhost-fw-{vm_id}", key_id)
-            repo_id = client.create_repository(
-                project_id, f"create-fw-{vm_id}", str(playbook_dir), key_id
-            )
-            tmpl_id = client.create_template(
-                project_id, f"create-fw-{vm_id}", "create-firewall.yml",
-                inv_id, repo_id, key_id, extra_vars=extra_vars,
-            )
-            task_id = client.run_task(project_id, tmpl_id)
-            vm.semaphore_task_id = task_id
-            vm.updated_at = utcnow()
-            db.commit()
-
-            while True:
-                status = client.get_task_status(project_id, task_id)
-                if status == "success":
-                    break
-                elif status in ("error", "stopped"):
-                    output_lines = client.get_task_output(project_id, task_id)
-                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
-                    raise RuntimeError(f"create-firewall.yml failed:\n{tail}")
-                time.sleep(10)
-
-            output_lines = client.get_task_output(project_id, task_id)
-
-        # Parse IP from output
-        _update_provision_step(db, vm, "extracting_results")
-        _ansi = _re.compile(r'\x1b\[[0-9;]*[mGKHF]')
-        cleaned = " ".join(_ansi.sub('', line).strip() for line in output_lines)
-
-        # Use non-greedy match with character class to avoid catastrophic backtracking
-        match = _re.search(r'VULTR_RESULT=(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})', cleaned)
-        if not match:
-            raise RuntimeError("Could not extract firewall VM IP from playbook output")
-        try:
-            vultr_result = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            vultr_result = None
-        if not vultr_result or not vultr_result.get("ip"):
-            raise RuntimeError("Could not extract firewall VM IP from playbook output")
-
-        vm.ip_address = vultr_result["ip"]
-        vm.vultr_id = vultr_result.get("vultr_id", "")
-        vm.cloudflare_record_id = vultr_result.get("dns_record_id") or None
-        vm.status = "registered"
-        vm.provision_step = "bootstrapping_opnsense"
-        vm.updated_at = utcnow()
-        db.commit()
-
-        # ── Stage 2: Bootstrap OPNsense ──────────────────────────────────────
-        _update_provision_step(db, vm, "waiting_for_ssh")
-        _wait_for_tcp_port(vm.ip_address, 22)
-
-        # Generate admin credentials in Python (no Ansible passlib dependency needed)
-        import secrets as _secrets
-        import string as _string
-
-        # Use cryptographically secure random generation for admin password
-        alphabet = _string.ascii_letters + _string.digits
-        admin_password = ''.join(_secrets.choice(alphabet) for _ in range(20))
-
-        # OPNsense expects bcrypt $2y$ format; Python bcrypt produces $2b$ which OPNsense accepts
-        password_hash = _bcrypt.hashpw(
-            admin_password.encode(), _bcrypt.gensalt(rounds=10)
-        ).decode()
-
-        # Persist the encrypted credential immediately to prevent plaintext exposure
-        vm.admin_password = encrypt_secret(admin_password)
-        vm.updated_at = utcnow()
-        db.commit()
-
-        bootstrap_dir = playbook_dir / "bootstrap"
-        bootstrap_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            PLAYBOOKS_DIR / "bootstrap-opnsense.yml",
-            bootstrap_dir / "bootstrap-opnsense.yml",
-        )
-        # Stage templates/ subdirectory so Ansible finds opnsense_config.xml.j2
-        bootstrap_templates_dir = bootstrap_dir / "templates"
-        bootstrap_templates_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            TEMPLATES_DIR / "opnsense_config.xml.j2",
-            bootstrap_templates_dir / "opnsense_config.xml.j2",
-        )
-        bootstrap_collections_dir = bootstrap_dir / "collections"
-        bootstrap_collections_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            PLAYBOOKS_DIR / "collections" / "requirements.yml",
-            bootstrap_collections_dir / "requirements.yml",
-        )
-
-        team_index = team.team_index or 1
-        bootstrap_extra_vars = {
-            "opnsense_hostname": _vultr_safe_hostname(vm.hostname or "", f"ctf-fw-{vm_id}"),
-            "opnsense_lan_ip": f"10.{team_index}.1.1",
-            "opnsense_lan_subnet": 24,
-            "opnsense_admin_password_hash": password_hash,
-            "opnsense_ssh_pubkey": public_key,
-            "opnsense_release": "25.1",
-        }
-
-        firewall_ip = vm.ip_address
-        with SemaphoreClient() as client:
-            client.login()
-            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
-            # Remote inventory pointing to the firewall's public IP
-            fw_inv_id = client.create_inventory(
-                project_id, f"fw-host-{vm_id}", firewall_ip,
-                ssh_user="root", ssh_port=22, key_id=key_id,
-            )
-            repo_id = client.create_repository(
-                project_id, f"bootstrap-fw-{vm_id}", str(bootstrap_dir), key_id
-            )
-            tmpl_id = client.create_template(
-                project_id, f"bootstrap-fw-{vm_id}", "bootstrap-opnsense.yml",
-                fw_inv_id, repo_id, key_id, extra_vars=bootstrap_extra_vars,
-            )
-            task_id = client.run_task(project_id, tmpl_id)
-            vm.semaphore_task_id = task_id
-            vm.updated_at = utcnow()
-            db.commit()
-
-            # Bootstrap takes 10-15 minutes; poll patiently
-            while True:
-                status = client.get_task_status(project_id, task_id)
-                if status == "success":
-                    break
-                elif status in ("error", "stopped"):
-                    output_lines = client.get_task_output(project_id, task_id)
-                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
-                    raise RuntimeError(f"bootstrap-opnsense.yml failed:\n{tail}")
-                time.sleep(15)
-
-        # Store credentials and mark active
-        vm.vpc_ip = f"10.{team_index}.1.1"
-        vm.status = "active"
-        vm.provision_step = "completed"
-        vm.updated_at = utcnow()
-        db.commit()
-
-        _log.info("Firewall VM %d (%s) provisioned and active at %s", vm_id, vm.hostname, vm.ip_address)
-
-    except Exception as exc:
-        _log.exception("Firewall VM creation failed for VM %d", vm_id)
-        db.rollback()
-        _record_vm_failure(vm_id, str(exc))
-    finally:
-        db.close()
-        if playbook_dir and playbook_dir.exists():
-            shutil.rmtree(playbook_dir, ignore_errors=True)
-
-
-# ── VPC Interface Configuration ───────────────────────────────────────────────
-
-def _run_configure_vpc_interface(vm_id: int) -> None:
-    """Configure the VPC network interface on a target Ubuntu VM after provisioning.
-
-    Deploys a netplan config for the VPC secondary NIC (ens7 on Vultr), assigns the
-    static VPC IP (stored in vm.vpc_ip), and applies it.
-    """
-    import shutil as _shutil
-
-    from api.database import SessionLocal
-    from api.models import utcnow
-    from api.services.semaphore import SemaphoreClient
-    from api.services.ssh_keys import get_or_create_platform_keypair
-
-    db = SessionLocal()
-    playbook_dir = None
-    try:
-        vm = db.query(VM).filter(VM.id == vm_id).first()
-        if not vm or not vm.vpc_ip or not vm.ip_address:
-            return
-        team = db.query(Team).filter(Team.id == vm.team_id).first()
-
-        _update_provision_step(db, vm, "configuring_vpc_interface")
-
-        export_id = f"vpcif_{vm_id}_{uuid.uuid4().hex[:8]}"
-        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
-        playbook_dir.mkdir(parents=True, exist_ok=True)
-
-        _shutil.copy(
-            PLAYBOOKS_DIR / "configure-vpc-interface.yml",
-            playbook_dir / "configure-vpc-interface.yml",
-        )
-        templates_dir = playbook_dir / "templates"
-        templates_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            TEMPLATES_DIR / "vpc-netplan.yaml.j2",
-            templates_dir / "vpc-netplan.yaml.j2",
-        )
-        collections_dir = playbook_dir / "collections"
-        collections_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            PLAYBOOKS_DIR / "collections" / "requirements.yml",
-            collections_dir / "requirements.yml",
-        )
-
-        private_key, _ = get_or_create_platform_keypair(db)
-        team_index = team.team_index if team else 1
-        vpc_gateway = f"10.{team_index}.1.1"
-
-        extra_vars = {
-            "vpc_ip": vm.vpc_ip,
-            "vpc_subnet_mask": 24,
-            "vpc_gateway": vpc_gateway,
-            "vpc_interface": "ens7",
-        }
-
-        with SemaphoreClient() as client:
-            client.login()
-            project_id = vm.event.semaphore_project_id if vm.event and vm.event.semaphore_project_id else None
-            if not project_id:
-                project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
-            else:
-                key_id = vm.event.semaphore_key_id
-
-            inv_id = client.create_inventory(
-                project_id, f"vpcif-{vm_id}", vm.ip_address,
-                ssh_user=vm.ssh_user or "root", ssh_port=vm.ssh_port or 22, key_id=key_id,
-            )
-            repo_id = client.create_repository(
-                project_id, f"vpcif-{vm_id}", str(playbook_dir), key_id
-            )
-            tmpl_id = client.create_template(
-                project_id, f"vpcif-{vm_id}", "configure-vpc-interface.yml",
-                inv_id, repo_id, key_id, extra_vars=extra_vars,
-            )
-            task_id = client.run_task(project_id, tmpl_id)
-            vm.semaphore_task_id = task_id
-            vm.updated_at = utcnow()
-            db.commit()
-
-            while True:
-                status = client.get_task_status(project_id, task_id)
-                if status == "success":
-                    break
-                elif status in ("error", "stopped"):
-                    output_lines = client.get_task_output(project_id, task_id)
-                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
-                    _log.warning("VPC interface config failed for VM %d:\n%s", vm_id, tail)
-                    # Non-fatal: VM is still usable via public IP
-                    return
-                time.sleep(5)
-
-        _log.info("VPC interface configured on VM %d: %s via %s", vm_id, vm.vpc_ip, vpc_gateway)
-
-    except Exception as exc:
-        _log.warning("VPC interface configuration failed for VM %d (non-fatal): %s", vm_id, exc)
-    finally:
-        db.close()
-        if playbook_dir and playbook_dir.exists():
-            _shutil.rmtree(playbook_dir, ignore_errors=True)
-
-
-# ── Vultr VM Creation ──────────────────────────────────────────────────────────
-
-def _run_vultr_create(vm_id: int) -> None:
-    """Synchronous background task: create a Vultr VPS and update the VM record.
-
-    Runs the bundled create-vm.yml Ansible playbook via Semaphore, then
-    parses task output to extract the assigned IP and Vultr instance ID.
-    """
-    import re as _re
-    import shutil as _shutil
-
-    from api.database import SessionLocal
-    from api.models import utcnow
-    from api.services.semaphore import SemaphoreClient
-    from api.services.ssh_keys import get_or_create_platform_keypair
-
-    db = SessionLocal()
-    playbook_dir = None
-    try:
-        vm = db.query(VM).filter(VM.id == vm_id).first()
-        if not vm:
-            return
-
-        # ── Step 1: Stage playbook files ─────────────────────────────────────
-        _update_provision_step(db, vm, "staging_playbook")
-
-        export_id = f"vultr_{vm_id}_{uuid.uuid4().hex[:8]}"
-        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
-        playbook_dir.mkdir(parents=True, exist_ok=True)
-
-        _shutil.copy(PLAYBOOKS_DIR / "create-vm.yml", playbook_dir / "create-vm.yml")
-        collections_dir = playbook_dir / "collections"
-        collections_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            PLAYBOOKS_DIR / "collections" / "requirements.yml",
-            collections_dir / "requirements.yml",
-        )
-
-        # ── Step 2: Build extra vars ──────────────────────────────────────────
-        _update_provision_step(db, vm, "configuring_semaphore")
-
-        private_key, public_key = get_or_create_platform_keypair(db)
-
-        extra_vars: dict = {
-            "vm_hostname": _vultr_safe_hostname(vm.hostname or "", f"ctf-vm-{vm_id}"),
-            "vm_plan": vm.vultr_plan or "vc2-1c-1gb",
-            "vm_os": vm.os or "Ubuntu 24.04 LTS x64",
-            "vm_region": vm.vultr_region or VULTR_DEFAULT_REGION,
-            "ssh_key_name": "ctf-platform",
-            "ssh_public_key": public_key,
-            "vultr_api_key": VULTR_API_KEY,
-        }
-        if CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
-            extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
-            extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
-
-        # Attach this VM to the team VPC if it has a private IP assigned (firewall
-        # events). Without this, create-vm.yml omits the `vpcs` param and the VM
-        # never gets the secondary NIC that _run_configure_vpc_interface expects.
-        if vm.vpc_ip:
-            team = db.query(Team).filter(Team.id == vm.team_id).first()
-            if team and team.team_index is not None:
-                extra_vars["vpc_description"] = (
-                    f"ctf-event-{vm.event_id}-team-{team.team_index}"
-                )
-            else:
-                _log.warning(
-                    "VM %d has vpc_ip but team %s lacks team_index — "
-                    "VPC attachment skipped",
-                    vm_id, vm.team_id,
-                )
-
-        # ── Step 3: Create Semaphore project + run playbook ───────────────────
-        _update_provision_step(db, vm, "creating_instance")
-
-        with SemaphoreClient() as client:
-            client.login()
-
-            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
-            inventory_id = client.create_localhost_inventory(project_id, f"localhost-create-{vm_id}", key_id)
-            repo_id = client.create_repository(
-                project_id, f"create-vm-{vm_id}", str(playbook_dir), key_id
-            )
-            template_id = client.create_template(
-                project_id, f"create-vm-{vm_id}", "create-vm.yml",
-                inventory_id, repo_id, key_id,
-                extra_vars=extra_vars,
-            )
-
-            task_id = client.run_task(project_id, template_id)
-            vm.semaphore_task_id = task_id
-            vm.updated_at = utcnow()
-            db.commit()
-
-            # Poll until complete
-            while True:
-                status = client.get_task_status(project_id, task_id)
-                if status == "success":
-                    break
-                elif status in ("error", "stopped"):
-                    output_lines = client.get_task_output(project_id, task_id)
-                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
-                    raise RuntimeError(f"create-vm.yml failed (status={status}):\n{tail}")
-                time.sleep(10)
-
-            output_lines = client.get_task_output(project_id, task_id)
-
-        # ── Step 4: Extract results from playbook output ──────────────────────
-        _update_provision_step(db, vm, "extracting_results")
-
-        # Strip ANSI escape codes and join all lines — Ansible debug output wraps
-        # long messages across multiple lines with embedded colour codes.
-        _ansi = _re.compile(r'\x1b\[[0-9;]*[mGKHF]')
-        cleaned = " ".join(_ansi.sub('', line).strip() for line in output_lines)
-
-        vultr_result = None
-        match = _re.search(r'VULTR_RESULT=(\{.*?\})', cleaned)
-        if match:
-            try:
-                vultr_result = json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        if not vultr_result or not vultr_result.get("ip"):
-            raise RuntimeError(
-                "Could not extract VM IP from playbook output. "
-                "Check Semaphore task logs for details."
-            )
-
-        vm.ip_address = vultr_result["ip"]
-        vm.vultr_id = vultr_result.get("vultr_id", "")
-        vm.cloudflare_record_id = vultr_result.get("dns_record_id") or None
-        vm.status = "registered"
-        vm.provision_step = "completed"
-        vm.updated_at = utcnow()
-        db.commit()
-
-        # Auto-chain module provisioning for quota-created VMs
-        if vm.vm_type:
-            vm_modules = db.query(VMModule).filter(VMModule.vm_id == vm.id).all()
-            if vm_modules:
-                # Target VM with modules — chain into Ansible provisioning
-                _log.info("Auto-chaining provision for target VM %d (%s)", vm_id, vm.vm_type)
-                db.close()
-                if playbook_dir and playbook_dir.exists():
-                    shutil.rmtree(playbook_dir, ignore_errors=True)
-                playbook_dir = None
-                _run_provision(vm_id)
-                return
-            else:
-                # Attacker VM — no modules, mark active immediately
-                vm.status = "active"
-                vm.updated_at = utcnow()
-                db.commit()
-
-    except Exception as exc:
-        _log.exception("Vultr VM creation failed for VM %d", vm_id)
-        db.rollback()
-        detail = str(exc)
-        minimum_memory = _re.search(
-            r"requires a plan with at least\s+(\d+)\s+MB memory", detail,
-            _re.IGNORECASE,
-        )
-        safe_error = (
-            "Vultr rejected this OS and plan combination. Choose a plan with at least "
-            f"{minimum_memory.group(1)} MB of memory and try again."
-            if minimum_memory else
-            "Vultr rejected the instance request. Review the Semaphore task logs for details."
-        )
-        _record_vm_failure(vm_id, safe_error)
-    finally:
-        db.close()
-        if playbook_dir and playbook_dir.exists():
-            shutil.rmtree(playbook_dir, ignore_errors=True)
-
-
-def _provision_event_vms(event_id: int) -> None:
-    """Synchronous background task: create all VMs for an event based on vm_quota.
-
-    If the quota contains a 'firewall' role, provisions in phases:
-      Phase 1: Create Vultr VPCs (one per team, via REST API)
-      Phase 2: Create and bootstrap OPNsense firewall VMs (threads, joined)
-      Phase 3: Create target + attacker VMs (threads, not joined)
-
-    Without a firewall role, all VMs are spawned concurrently as before.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    import httpx as _httpx
-
-    from api.database import SessionLocal
-    from api.models import utcnow
-
-    from builder.base_loader import load_base_type
-    from builder.module_loader import load_all_modules
-    from builder.plan_sizing import plan_for_vm
-    from builder.selector import select_modules
-
-    db = SessionLocal()
-    try:
-        event = db.query(Event).filter(Event.id == event_id).first()
-        if not event or not event.vm_quota:
-            return
-
-        vm_quota = json.loads(event.vm_quota)
-        module_quota = json.loads(event.quota)
-        teams = db.query(Team).filter(Team.event_id == event_id).all()
-        if not teams:
-            _log.warning("No teams for event %d — skipping VM provisioning", event_id)
-            return
-
-        has_firewall = any(spec.get("role") == "firewall" for spec in vm_quota.values())
-
-        # Pre-create Semaphore project for target VM provisioning
-        has_targets = any(spec.get("role") == "target" for spec in vm_quota.values())
-        if has_targets and not event.semaphore_project_id:
-            from api.services.semaphore import SemaphoreClient
-            from api.services.ssh_keys import get_or_create_platform_keypair
-
-            private_key, _ = get_or_create_platform_keypair(db)
-            with SemaphoreClient() as client:
-                client.login()
-                project_id = client.create_project(f"CTF Event {event.id}: {event.name}")
-                key_id = client.create_key(
-                    project_id,
-                    name="platform-key",
-                    private_key_pem=private_key,
-                )
-                event.semaphore_project_id = project_id
-                event.semaphore_key_id = key_id
-                db.commit()
-
-        # Fetch Vultr plans once for plan sizing
-        available_plans = []
-        if VULTR_API_KEY:
-            try:
-                resp = _httpx.get(
-                    "https://api.vultr.com/v2/plans",
-                    headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
-                    params={"type": "vc2", "per_page": 500},
-                    timeout=15.0,
-                )
-                resp.raise_for_status()
-                available_plans = [
-                    {"id": p["id"], "ram": p["ram"], "vcpu_count": p["vcpu_count"], "monthly_cost": p["monthly_cost"]}
-                    for p in resp.json().get("plans", [])
-                    if p.get("id", "").startswith("vc2-")
-                ]
-            except Exception as exc:
-                _log.warning("Failed to fetch Vultr plans for sizing: %s", exc)
-
-        # ── Phase 0: Assign team indexes (only needed when firewall is present) ──
-        if has_firewall:
-            teams_ordered = sorted(teams, key=lambda t: t.id)
-            for idx, team in enumerate(teams_ordered, start=1):
-                team.team_index = idx
-            db.commit()
-            teams = teams_ordered  # use sorted order from here
-
-            # ── Phase 1: Create Vultr VPCs ────────────────────────────────────
-            # Find firewall spec to get the region
-            firewall_region = VULTR_DEFAULT_REGION
-            for spec in vm_quota.values():
-                if spec.get("role") == "firewall":
-                    firewall_region = spec.get("region") or VULTR_DEFAULT_REGION
-                    break
-
-            for team in teams:
-                _log.info("Creating VPC for team %d (index %d)", team.id, team.team_index)
-                _create_team_vpc(team.id, event_id, firewall_region)
-            db.expire_all()  # refresh team objects with vpc_id values
-
-        # ── Create all VM records ─────────────────────────────────────────────
-        library = load_all_modules()
-        firewall_vm_ids = []
-        other_vm_ids = []
-        # Track per-team target VM count for VPC IP assignment
-        team_target_counter: dict[int, int] = {}
-
-        for team in teams:
-            for vm_type_key, vm_spec in vm_quota.items():
-                count = vm_spec.get("count", 1)
-                role = vm_spec.get("role", "target")
-                default_plan = vm_spec.get("default_plan", "vc2-1c-1gb")
-                region = vm_spec.get("region") or VULTR_DEFAULT_REGION
-
-                base_type_id = vm_spec.get("base_type")
-                loaded_base_type = load_base_type(base_type_id) if base_type_id else None
-
-                for i in range(count):
-                    # Keep provider-facing hostnames independent from the
-                    # user-controlled team name: Vultr and DNS labels reject
-                    # spaces and other common team-name characters.
-                    hostname = f"ctf-e{event_id}-t{team.id}-{vm_type_key}-{i + 1}"
-                    vm = VM(
-                        hostname=hostname,
-                        os=loaded_base_type.os if loaded_base_type else "Ubuntu 24.04 LTS x64",
-                        status="creating",
-                        vm_type=vm_type_key,
-                        base_type=base_type_id,
-                        vultr_plan=default_plan,
-                        vultr_region=region,
-                        team_id=team.id,
-                        event_id=event_id,
-                        provision_step="queued",
-                        ssh_user=vm_spec.get("ssh_user", "root"),
-                        created_at=utcnow(),
-                        updated_at=utcnow(),
-                    )
-
-                    if role == "firewall":
-                        # Firewall VMs get the gateway IP on the team VPC
-                        team_idx = team.team_index or 1
-                        vm.vpc_ip = f"10.{team_idx}.1.1"
-                        vm.os = "FreeBSD 14 x64"  # OPNsense base OS
-                        db.add(vm)
-                        db.flush()
-                        db.commit()
-                        firewall_vm_ids.append(vm.id)
-
-                    elif role == "target":
-                        # Select modules for this VM
-                        selected = select_modules(module_quota, library, base_type_id=base_type_id)
-                        db.add(vm)
-                        db.flush()
-                        for mod in selected:
-                            db.add(VMModule(
-                                vm_id=vm.id,
-                                module_id=mod.id,
-                                module_type=mod.type,
-                                difficulty=mod.difficulty,
-                                points=mod.points,
-                                stage=mod.stage,
-                            ))
-                            if mod.type == "goal":
-                                db.add(VMGoal(
-                                    vm_id=vm.id,
-                                    module_id=mod.id,
-                                    status="pending",
-                                    red_points=mod.red_points,
-                                    defend_points=mod.defend_points,
-                                ))
-                        if available_plans and loaded_base_type is not None:
-                            sized_plan = plan_for_vm(
-                                base_type=loaded_base_type,
-                                modules=selected,
-                                vm_quota_override_plan=vm_spec.get("default_plan"),
-                                available_plans=available_plans,
-                            )
-                            if sized_plan != vm.vultr_plan:
-                                vm.vultr_plan = sized_plan
-
-                        # Assign VPC IP if this event has a firewall
-                        if has_firewall:
-                            team_idx = team.team_index or 1
-                            counter = team_target_counter.get(team.id, 0)
-                            vm.vpc_ip = f"10.{team_idx}.1.{10 + counter}"
-                            team_target_counter[team.id] = counter + 1
-
-                        db.commit()
-                        other_vm_ids.append(vm.id)
-
-                    else:
-                        # Attacker (or any other role): no modules, no VPC
-                        db.add(vm)
-                        db.flush()
-                        db.commit()
-                        other_vm_ids.append(vm.id)
-
-        _log.info(
-            "Event %d: queued %d firewall + %d other VMs across %d teams",
-            event_id, len(firewall_vm_ids), len(other_vm_ids), len(teams),
-        )
-
-        if has_firewall and firewall_vm_ids:
-            # ── Phase 2: Create and bootstrap firewall VMs, then wait ────────
-            _log.info("Event %d: starting firewall provisioning (%d VMs)", event_id, len(firewall_vm_ids))
-            with ThreadPoolExecutor(max_workers=min(4, len(firewall_vm_ids))) as executor:
-                list(executor.map(_run_firewall_create, firewall_vm_ids))
-            _log.info("Event %d: all firewall VMs provisioned, starting target/attacker VMs", event_id)
-
-        # ── Phase 3 (or only phase without firewall): target + attacker VMs ──
-        if other_vm_ids:
-            with ThreadPoolExecutor(max_workers=min(8, len(other_vm_ids))) as executor:
-                list(executor.map(_run_vultr_create, other_vm_ids))
-
-    except Exception as exc:
-        _log.exception("Event VM provisioning failed for event %d", event_id)
-        db.rollback()
-        failure_db = SessionLocal()
-        try:
-            unfinished = failure_db.query(VM).filter(
-                VM.event_id == event_id,
-                VM.status.in_(("creating", "provisioning")),
-            ).all()
-            for unfinished_vm in unfinished:
-                unfinished_vm.status = "failed"
-                unfinished_vm.provision_step = "failed"
-                unfinished_vm.provision_error = (
-                    "Event provisioning stopped before this VM completed. "
-                    "Review the API logs and retry the VM operation."
-                )
-                unfinished_vm.updated_at = utcnow()
-            failure_db.commit()
-        except Exception:
-            failure_db.rollback()
-            _log.exception("Could not persist event provisioning failure state")
-        finally:
-            failure_db.close()
-    finally:
-        db.close()
-
-
-@router.post("/vms/create-vultr")
-async def create_vm_on_vultr(request: Request, db: Session = Depends(get_db)):
-    """Create a new Vultr VPS and register it as a VM."""
+@router.post("/vms/create-cloud")
+async def create_vm_on_cloud(request: Request, db: Session = Depends(get_db)):
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    if not VULTR_API_KEY:
-        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
-
+    try:
+        providers = _cloud_providers()
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
     body = await request.json()
-    team_id = body.get("team_id")
-    if not team_id:
-        return JSONResponse({"error": "team_id is required"}, status_code=422)
-
-    team = db.query(Team).filter(Team.id == team_id).first()
+    team = db.get(Team, body.get("team_id")) if body.get("team_id") else None
     if not team:
         return JSONResponse({"error": "Team not found"}, status_code=404)
-
     hostname = (body.get("hostname") or "").strip()
-    if not hostname:
-        return JSONResponse({"error": "hostname is required"}, status_code=422)
-
-    vultr_plan = (body.get("vultr_plan") or "").strip()
-    if not vultr_plan:
-        return JSONResponse({"error": "vultr_plan is required"}, status_code=422)
-
-    from api.models import utcnow
+    instance_type = (body.get("instance_type") or "").strip()
+    region = (body.get("region") or providers.config.default_region).strip()
+    if not hostname or instance_type not in providers.config.instance_types:
+        return JSONResponse({"error": "valid hostname and instance_type are required"}, status_code=422)
+    try:
+        providers.config.ubuntu_ami(region)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
     vm = VM(
-        hostname=hostname,
-        os=body.get("vultr_os") or "Ubuntu 24.04 LTS x64",
-        status="creating",
-        ssh_user=body.get("ssh_user") or "root",
-        ssh_port=22,
-        notes=body.get("notes") or None,
-        team_id=team_id,
-        event_id=team.event_id,
-        vultr_plan=vultr_plan,
-        vultr_region=VULTR_DEFAULT_REGION,
-        provision_step="staging_playbook",
+        hostname=hostname, os="Ubuntu 24.04 LTS", status="creating",
+        ssh_user=body.get("ssh_user") or "ubuntu", ssh_port=22,
+        notes=body.get("notes") or None, team_id=team.id, event_id=team.event_id,
+        instance_type=instance_type, cloud_region=region,
+        subnet_id=providers.config.standard_subnet_id, provision_step="queued",
     )
-    db.add(vm)
-    db.commit()
-    db.refresh(vm)
-
-    asyncio.create_task(asyncio.to_thread(_run_vultr_create, vm.id))
+    db.add(vm); db.commit(); db.refresh(vm)
+    asyncio.create_task(asyncio.to_thread(_run_cloud_create, vm.id))
     return {"status": "creating", "id": vm.id}
+
+
+@router.post("/vms/{vm_id}/retry-cloud")
+async def retry_cloud_create(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    vm = db.get(VM, vm_id)
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+    if vm.status not in ("failed", "destroy_failed"):
+        return JSONResponse({"error": f"VM is {vm.status}; retry is not allowed"}, status_code=409)
+    vm.status, vm.provision_step, vm.provision_error = "creating", "queued", None
+    db.commit()
+    asyncio.create_task(asyncio.to_thread(_run_cloud_create, vm.id))
+    return {"status": "creating", "vm_id": vm.id}
+
+
+@router.post("/vms/{vm_id}/destroy-cloud")
+async def destroy_cloud_instance(vm_id: int, request: Request, db: Session = Depends(get_db)):
+    admin = require_admin(request, db)
+    if not admin:
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    vm = db.get(VM, vm_id)
+    if not vm:
+        return JSONResponse({"error": "VM not found"}, status_code=404)
+    if not vm.cloud_instance_id:
+        return JSONResponse({"error": "VM has no AWS instance associated"}, status_code=422)
+    if vm.status in ("creating", "provisioning", "destroying"):
+        return JSONResponse({"error": f"VM is currently {vm.status}"}, status_code=409)
+    vm.status = "destroying"; db.commit()
+    asyncio.create_task(asyncio.to_thread(_run_cloud_destroy, vm.id))
+    return {"status": "destroying", "vm_id": vm.id}
 
 
 @router.get("/vms/{vm_id}/create-status")
 async def create_status(vm_id: int, request: Request, db: Session = Depends(get_db)):
-    """Poll Vultr VM creation progress."""
     admin = require_admin(request, db)
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    vm = db.query(VM).filter(VM.id == vm_id).first()
+    vm = db.get(VM, vm_id)
     if not vm:
         return JSONResponse({"error": "VM not found"}, status_code=404)
-
     return {
-        "status": vm.status,
-        "provision_step": vm.provision_step,
-        "provision_error": vm.provision_error,
-        "ip_address": vm.ip_address,
-        "vultr_id": vm.vultr_id,
+        "status": vm.status, "provision_step": vm.provision_step,
+        "provision_error": vm.provision_error, "ip_address": vm.ip_address,
+        "cloud_instance_id": vm.cloud_instance_id,
     }
 
-
-@router.post("/vms/{vm_id}/retry-create")
-async def retry_vultr_create(vm_id: int, request: Request, db: Session = Depends(get_db)):
-    """Retry cloud creation for a failed VM that never reached the provider."""
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    if not VULTR_API_KEY:
-        return JSONResponse({"error": "VULTR_API_KEY not configured"}, status_code=503)
-
-    vm = db.query(VM).filter(VM.id == vm_id).first()
-    if not vm:
-        return JSONResponse({"error": "VM not found"}, status_code=404)
-    if vm.status != "failed":
-        return JSONResponse(
-            {"error": f"VM is {vm.status}; only failed VM creation can be retried"},
-            status_code=409,
-        )
-    if vm.vultr_id or vm.ip_address:
-        return JSONResponse(
-            {"error": "VM already has cloud resources; inspect it before retrying"},
-            status_code=409,
-        )
-
-    from api.models import utcnow
-
-    vm.status = "creating"
-    vm.provision_step = "queued"
-    vm.provision_error = None
-    vm.semaphore_task_id = None
-    vm.updated_at = utcnow()
-    db.commit()
-
-    asyncio.create_task(asyncio.to_thread(_run_vultr_create, vm_id))
-    return {"status": "creating", "vm_id": vm_id}
-
-
-# ── Vultr VM Destruction ───────────────────────────────────────────────────────
-
-def _maybe_cleanup_team_vpc(db: Session, team_id: int) -> None:
-    """Delete the team's Vultr VPC once no VMs remain attached to it.
-
-    Called after a VPC-attached VM is destroyed. If no other VMs for the team
-    still carry a vpc_ip, the VPC is deleted via the Vultr REST API and
-    team.vpc_id is cleared. Best-effort and non-fatal: concurrent destroys of
-    the last two VMs may race and leave an orphan VPC, which can be removed by
-    re-running a destroy or manually in the Vultr console.
-    """
-    if not VULTR_API_KEY:
-        return
-    import httpx as _httpx
-
-    try:
-        team = db.query(Team).filter(Team.id == team_id).first()
-        if not team or not team.vpc_id:
-            return
-
-        remaining = (
-            db.query(VM)
-            .filter(VM.team_id == team_id, VM.vpc_ip.isnot(None))
-            .count()
-        )
-        if remaining > 0:
-            return
-
-        resp = _httpx.delete(
-            f"https://api.vultr.com/v2/vpcs/{team.vpc_id}",
-            headers={"Authorization": f"Bearer {VULTR_API_KEY}"},
-            timeout=30.0,
-        )
-        # 204 = deleted, 404 = already gone — both are success for our purposes
-        if resp.status_code not in (204, 404):
-            resp.raise_for_status()
-
-        _log.info("Deleted VPC %s for team %d", team.vpc_id, team_id)
-        team.vpc_id = None
-        db.commit()
-
-    except Exception as exc:
-        _log.warning("VPC cleanup failed for team %d (non-fatal): %s", team_id, exc)
-
-
-def _run_vultr_destroy(vm_id: int) -> None:
-    """Synchronous background task: destroy a Vultr VPS and clean up DNS."""
-    import shutil as _shutil
-
-    from api.database import SessionLocal
-    from api.models import utcnow
-    from api.services.semaphore import SemaphoreClient
-    from api.services.ssh_keys import get_or_create_platform_keypair
-
-    db = SessionLocal()
-    playbook_dir = None
-    try:
-        vm = db.query(VM).filter(VM.id == vm_id).first()
-        if not vm:
-            return
-
-        if not vm.vultr_id and not vm.hostname:
-            raise ValueError("VM has no Vultr ID or hostname — cannot destroy")
-
-        export_id = f"vultr_destroy_{vm_id}_{uuid.uuid4().hex[:8]}"
-        playbook_dir = Path(SHARED_PLAYBOOK_DIR) / export_id
-        playbook_dir.mkdir(parents=True, exist_ok=True)
-
-        _shutil.copy(PLAYBOOKS_DIR / "destroy-vm.yml", playbook_dir / "destroy-vm.yml")
-        collections_dir = playbook_dir / "collections"
-        collections_dir.mkdir(exist_ok=True)
-        _shutil.copy(
-            PLAYBOOKS_DIR / "collections" / "requirements.yml",
-            collections_dir / "requirements.yml",
-        )
-
-        private_key, _ = get_or_create_platform_keypair(db)
-
-        extra_vars: dict = {
-            "instance_label": vm.hostname or f"ctf-vm-{vm_id}",
-            "instance_region": vm.vultr_region or VULTR_DEFAULT_REGION,
-            "vultr_api_key": VULTR_API_KEY,
-        }
-        if vm.cloudflare_record_id and CLOUDFLARE_API_TOKEN and CLOUDFLARE_DOMAIN:
-            extra_vars["dns_hostname"] = vm.hostname or ""
-            extra_vars["domain_name"] = CLOUDFLARE_DOMAIN
-            extra_vars["cloudflare_api_key"] = CLOUDFLARE_API_TOKEN
-
-        with SemaphoreClient() as client:
-            client.login()
-
-            project_id, key_id = _get_or_create_vultr_semaphore_project(db, client, private_key)
-            inventory_id = client.create_localhost_inventory(project_id, f"localhost-destroy-{vm_id}", key_id)
-            repo_id = client.create_repository(
-                project_id, f"destroy-vm-{vm_id}", str(playbook_dir), key_id
-            )
-            template_id = client.create_template(
-                project_id, f"destroy-vm-{vm_id}", "destroy-vm.yml",
-                inventory_id, repo_id, key_id,
-                extra_vars=extra_vars,
-            )
-            task_id = client.run_task(project_id, template_id)
-
-            while True:
-                status = client.get_task_status(project_id, task_id)
-                if status == "success":
-                    break
-                elif status in ("error", "stopped"):
-                    output_lines = client.get_task_output(project_id, task_id)
-                    tail = "\n".join(output_lines[-10:]) if output_lines else "(no output)"
-                    raise RuntimeError(f"destroy-vm.yml failed (status={status}):\n{tail}")
-                time.sleep(10)
-
-        # Capture VPC linkage before the VM row is removed
-        team_id = vm.team_id
-        had_vpc = bool(vm.vpc_ip)
-
-        db.delete(vm)
-        db.commit()
-
-        # Once the last VPC-attached VM for the team is gone, tear down the VPC
-        if had_vpc and team_id:
-            _maybe_cleanup_team_vpc(db, team_id)
-
-    except Exception as exc:
-        _log.exception("Vultr VM destruction failed for VM %d", vm_id)
-        db.rollback()
-        _record_vm_failure(vm_id, str(exc))
-    finally:
-        db.close()
-        if playbook_dir and playbook_dir.exists():
-            shutil.rmtree(playbook_dir, ignore_errors=True)
-
-
-@router.post("/vms/{vm_id}/destroy-vultr")
-async def destroy_vm_on_vultr(vm_id: int, request: Request, db: Session = Depends(get_db)):
-    """Destroy the Vultr VPS backing this VM and delete the VM record."""
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-
-    vm = db.query(VM).filter(VM.id == vm_id).first()
-    if not vm:
-        return JSONResponse({"error": "VM not found"}, status_code=404)
-
-    if not vm.vultr_id and not vm.hostname:
-        return JSONResponse(
-            {"error": "VM has no Vultr instance associated"}, status_code=422
-        )
-
-    if vm.status in ("creating", "destroying"):
-        return JSONResponse(
-            {"error": f"VM is currently {vm.status}, cannot destroy now"}, status_code=409
-        )
-
-    from api.models import utcnow
-    vm.status = "destroying"
-    vm.updated_at = utcnow()
-    db.commit()
-
-    asyncio.create_task(asyncio.to_thread(_run_vultr_destroy, vm_id))
-    return {"status": "destroying", "vm_id": vm_id}
-
-
-# ── Topology Data ─────────────────────────────────────────────────────────────
 
 @router.get("/topology-data")
 async def topology_data(

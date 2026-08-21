@@ -34,16 +34,74 @@ def _utc_instant(value) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-async def _live_vpc_counts() -> dict[str, int]:
-    """Return current Vultr VPC consumption by location for capacity gating."""
-    key = os.environ.get("VULTR_API_KEY")
-    if not key:
-        return {}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get("https://api.vultr.com/v2/vpcs", params={"per_page": 500},
-                                    headers={"Authorization": f"Bearer {key}"})
-    response.raise_for_status()
-    return dict(Counter(vpc.get("region") for vpc in response.json().get("vpcs", []) if vpc.get("region")))
+def _aws_resource_plan(infrastructure: dict, team_count: int):
+    from api.services.aws import ResourcePlan
+    instances = Counter()
+    gateway = infrastructure["vpn_gateway"]
+    instances[gateway["default_plan"]] += team_count
+    sites = infrastructure["sites"]
+    endpoints_per_team = 0
+    for site in sites:
+        instances[site["firewall"]["default_plan"]] += team_count
+        for zone in site["zones"]:
+            for endpoint in zone["endpoints"]:
+                count = int(endpoint.get("count", 0))
+                endpoints_per_team += count
+                instances[endpoint["default_plan"]] += count * team_count
+    firewalls = len(sites) * team_count
+    endpoints = endpoints_per_team * team_count
+    vcpu_defaults = {"t3.small": 2, "t3.medium": 2, "t3.large": 2, "t3.xlarge": 4}
+    return ResourcePlan(
+        vpcs=firewalls,
+        subnets=sum(2 + len(site["zones"]) for site in sites) * team_count,
+        network_interfaces=team_count + firewalls * 2 + endpoints,
+        elastic_ips=team_count + firewalls,
+        instances_by_type=dict(instances),
+        on_demand_vcpus=sum(vcpu_defaults.get(kind, 2) * count for kind, count in instances.items()),
+    )
+
+
+def _check_aws_readiness(plan):
+    from api.services.aws import (
+        AwsCatalogueService, AwsConfig, AwsReadinessService, AwsSessionFactory,
+    )
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    service = AwsReadinessService(
+        sessions.client("sts"), sessions.client("ec2"), sessions.client("service-quotas"),
+        region=config.default_region,
+        availability_zone=config.availability_zone(config.default_region),
+        ami_ids=tuple(dict.fromkeys((*config.ubuntu_amis.values(), *config.freebsd_amis.values()))),
+        vpc_id=config.standard_vpc_id, subnet_id=config.standard_subnet_id,
+        security_group_ids=config.standard_security_group_ids,
+        pricing=AwsCatalogueService(
+            sessions.client("ec2"), sessions.client("pricing", "us-east-1"),
+            region=config.default_region,
+            availability_zone=config.availability_zone(config.default_region),
+        ),
+    )
+    return service.check(plan)
+
+
+def _aws_instance_catalogue():
+    from api.services.aws import AwsCatalogueService, AwsConfig, AwsSessionFactory
+    config = AwsConfig.from_env()
+    sessions = AwsSessionFactory(config)
+    return AwsCatalogueService(
+        sessions.client("ec2"), sessions.client("pricing", "us-east-1"),
+        region=config.default_region,
+        availability_zone=config.availability_zone(config.default_region),
+    ).catalogue(config.instance_types)
+
+
+def _readiness_payload(report):
+    return {
+        "ready": report.ready, "account_id": report.account_id,
+        "region": report.region, "availability_zone": report.availability_zone,
+        "estimated_hourly_cost": report.estimated_hourly_cost,
+        "checks": {name: {"passed": check.passed, "code": check.code, "detail": check.detail}
+                   for name, check in report.checks.items()},
+    }
 
 
 class PlanPreviewRequest(BaseModel):
@@ -166,7 +224,7 @@ async def activate_opnsense_image(image_id: int, request: Request, db: Session =
     image = db.get(OpnsenseImage, image_id)
     if not image:
         return JSONResponse({"error": "image not found"}, status_code=404)
-    if image.status not in {"ready", "active"} or not image.validated_at or not image.snapshot_id:
+    if image.status not in {"ready", "active"} or not image.validated_at or not image.ami_id:
         return JSONResponse({"error": "only a validated ready image can be activated"}, status_code=409)
     for old in db.query(OpnsenseImage).filter(OpnsenseImage.status == "active", OpnsenseImage.id != image.id):
         old.status = old.phase = "ready"; old.activated_at = None
@@ -176,7 +234,7 @@ async def activate_opnsense_image(image_id: int, request: Request, db: Session =
     else:
         setting.value = str(image.id)
     image.status = image.phase = "active"; image.activated_at = utcnow()
-    _audit(db, admin, "opnsense_image_activate", image_id=image.id, snapshot_id=image.snapshot_id); db.commit()
+    _audit(db, admin, "opnsense_image_activate", image_id=image.id, ami_id=image.ami_id); db.commit()
     return {"id": image.id, "status": image.status}
 
 
@@ -199,13 +257,15 @@ async def retire_opnsense_image(image_id: int, body: OpnsenseRetireRequest, requ
     if setting and setting.value == str(image.id):
         db.delete(setting)
     if body.delete_artifacts:
-        from api.services.opnsense_images import VultrImageClient, cleanup_local, cleanup_remote
-        client = VultrImageClient()
-        try:
-            cleanup_remote(image, client, preserve_snapshot=False)
-        finally:
-            client.close()
-        cleanup_local(image)
+        from api.services.aws import AwsConfig, AwsImageProvider, AwsSessionFactory, ownership_tags
+        config = AwsConfig.from_env()
+        provider = AwsImageProvider(AwsSessionFactory(config).client("ec2", image.region))
+        provider.retire_owned(
+            image.ami_id, json.loads(image.backing_snapshot_ids_json or "[]"),
+            ownership_tags(config.environment),
+        )
+        image.ami_id = None
+        image.backing_snapshot_ids_json = None
     image.status = image.phase = "retired"; image.retired_at = utcnow(); image.builder_config_token = None
     _audit(db, admin, "opnsense_image_retire", image_id=image.id, artifacts_deleted=body.delete_artifacts); db.commit()
     return {"id": image.id, "status": image.status}
@@ -1382,15 +1442,19 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
         from builder.base_loader import load_all_bases
         from builder.infrastructure_validation import infrastructure_summary, validate_infrastructure
         valid_base_ids = {base.id for base in load_all_bases() if not base.disabled}
-        try:
-            live_vpcs = await _live_vpc_counts()
-        except Exception:
-            return JSONResponse({"error": "Could not verify live Vultr VPC capacity"}, status_code=502)
-        errors = validate_infrastructure(infrastructure, valid_base_ids, team_count=len(teams),
-                                         live_vpcs_by_region=live_vpcs)
+        errors = validate_infrastructure(infrastructure, valid_base_ids, team_count=len(teams))
         if errors:
             return JSONResponse({"error": "Invalid infrastructure", "details": errors}, status_code=422)
         summary = infrastructure_summary(infrastructure, len(teams))
+        try:
+            readiness = await asyncio.to_thread(
+                _check_aws_readiness, _aws_resource_plan(infrastructure, len(teams)),
+            )
+        except Exception as exc:
+            return JSONResponse({"error": "Could not verify AWS readiness", "detail": str(exc)}, status_code=502)
+        if not readiness.ready:
+            return JSONResponse({"error": "AWS readiness checks failed",
+                                 "aws_capacity": _readiness_payload(readiness)}, status_code=409)
 
         from api.services.gamenet import allocate_event_networks
         from api.services.gamenet_provisioning import ensure_vm_placeholders, provision_event_gamenets
@@ -1589,35 +1653,13 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     library_list = load_all_modules()
     library = {m.id: m for m in library_list}
 
-    # Fetch Vultr plans for sizing + cost estimates (optional)
-    available_plans = []
-    plan_costs = {}
-    vultr_key = os.environ.get("VULTR_API_KEY")
-    if vultr_key:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    "https://api.vultr.com/v2/plans?type=vc2&per_page=500",
-                    headers={"Authorization": f"Bearer {vultr_key}"},
-                )
-            try:
-                plans_data = resp.json()
-                for p in plans_data.get("plans", []):
-                    if p.get("id", "").startswith("vc2-"):
-                        available_plans.append({
-                            "id": p["id"],
-                            "ram": p["ram"],
-                            "vcpu_count": p["vcpu_count"],
-                            "monthly_cost": p["monthly_cost"],
-                        })
-                        plan_costs[p["id"]] = p["monthly_cost"]
-            except (json.JSONDecodeError, KeyError, TypeError):
-                available_plans = []
-                plan_costs = {}
-        except Exception:
-            # A preview remains useful without a live provider price response.
-            available_plans = []
-            plan_costs = {}
+    # Pricing failure is explicitly represented as unavailable; it never
+    # bypasses the independent capacity checks used when an event starts.
+    try:
+        available_plans = await asyncio.to_thread(_aws_instance_catalogue)
+    except Exception:
+        available_plans = []
+    plan_costs = {row["instance_type"]: row["hourly_cost"] for row in available_plans}
 
     team_count = len(teams)
     first_team = teams[0] if teams else None
@@ -1630,7 +1672,7 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
     vm_types = []
     total_modules = 0
     total_attack_paths = 0
-    total_cost = 0.0
+    total_hourly_cost = 0.0 if available_plans else None
 
     machine_types = [{
         "type_key": "vpn_gateway", "role": "infrastructure", "count": 1,
@@ -1676,7 +1718,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                         selected = select_modules(quota, library_list, base_type_id=base_type_id)
                     except ValueError as e:
                         return JSONResponse({"error": str(e)}, status_code=422)
-                    sized_plan = plan_for_vm(base_type, selected, default_plan, available_plans)
+                    sized_plan = plan_for_vm(
+                        base_type, selected, default_plan, available_plans, region=region,
+                    )
                     module_objs = [library[m.id] for m in selected if m.id in library]
                     tree = build_attack_tree(module_objs)
                     serialized_tree = serialize_tree(tree)
@@ -1693,7 +1737,11 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
                     serialized_tree = None
                     module_list = []
 
-                total_cost += plan_costs.get(sized_plan, 0)
+                if total_hourly_cost is not None:
+                    if sized_plan not in plan_costs:
+                        total_hourly_cost = None
+                    else:
+                        total_hourly_cost += plan_costs[sized_plan]
 
                 vm_node_id = f"vm-projected-{type_key}-{team.name}-{i + 1}"
                 # Only include first team's VMs in topology (canonical — all teams identical)
@@ -1762,7 +1810,9 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
             **infrastructure_counts,
             "total_vms": infrastructure_counts["vms"],
             "teams": len(teams),
-            "estimated_monthly_cost": round(total_cost, 2),
+            "estimated_monthly_cost": (
+                round(total_hourly_cost * 730, 2) if total_hourly_cost is not None else None
+            ),
             "total_modules": total_modules,
             "total_attack_paths": total_attack_paths,
         },
@@ -1772,7 +1822,18 @@ async def plan_preview(event_id: int, body: PlanPreviewRequest, request: Request
         "warnings": warnings,
         "address_plan": address_plan,
         "infrastructure": infrastructure,
-        "total_cost": round(total_cost, 2),
+        "total_cost": round(total_hourly_cost * 730, 2) if total_hourly_cost is not None else None,
+        "aws_resources": {
+            "vpcs": _aws_resource_plan(infrastructure, len(teams)).vpcs,
+            "subnets": _aws_resource_plan(infrastructure, len(teams)).subnets,
+            "network_interfaces": _aws_resource_plan(infrastructure, len(teams)).network_interfaces,
+            "elastic_ips": _aws_resource_plan(infrastructure, len(teams)).elastic_ips,
+            "instances_by_type": dict(_aws_resource_plan(infrastructure, len(teams)).instances_by_type),
+        },
+        "aws_capacity": None,
+        "estimated_hourly_cost": (
+            round(total_hourly_cost, 6) if total_hourly_cost is not None else None
+        ),
     }
 
 
@@ -1820,8 +1881,14 @@ async def stop_event(event_id: int, request: Request, db: Session = Depends(get_
     if not event:
         return JSONResponse({"error": "Event not found"}, status_code=404)
 
-    event.status = "stopped"
-    event.open = False
+    from api.services.gamenet_provisioning import cleanup_event_gamenets
+    cleanup = await asyncio.to_thread(cleanup_event_gamenets, event_id)
+    if cleanup.remaining:
+        event.status, event.open = "provision_failed", False
+        db.commit()
+        return JSONResponse({"error": "AWS cleanup incomplete",
+                             "remaining": list(cleanup.remaining)}, status_code=409)
+    event.status, event.open = "stopped", False
     db.commit()
 
     caldera_cleanup = await _cleanup_caldera_operations_for_event(event_id)
@@ -1829,6 +1896,7 @@ async def stop_event(event_id: int, request: Request, db: Session = Depends(get_
     return {
         "status": "stopped",
         "caldera_operations_cleaned": caldera_cleanup["deleted"],
+        "aws_resources_removed": list(cleanup.removed),
     }
 
 
@@ -1870,6 +1938,11 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
         )
 
     caldera_cleanup = await _cleanup_caldera_operations_for_event(event_id)
+    from api.services.gamenet_provisioning import cleanup_event_gamenets
+    cleanup = await asyncio.to_thread(cleanup_event_gamenets, event_id)
+    if cleanup.remaining:
+        return JSONResponse({"error": "AWS cleanup incomplete",
+                             "remaining": list(cleanup.remaining)}, status_code=409)
 
     db.delete(event)
     db.commit()
@@ -1877,6 +1950,7 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
     return {
         "status": "deleted",
         "caldera_operations_cleaned": caldera_cleanup["deleted"],
+        "aws_resources_removed": list(cleanup.removed),
     }
 
 

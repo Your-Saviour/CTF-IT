@@ -1,9 +1,4 @@
-"""Concrete Vultr, WireGuard and remote-host operations for GameNet.
-
-All provider mutations are idempotent: persisted Vultr IDs are preferred and
-resources are also recovered by their deterministic labels after an interrupted
-database commit.
-"""
+"""AWS, WireGuard, and remote-host operations for GameNet."""
 
 from __future__ import annotations
 
@@ -20,260 +15,241 @@ import secrets
 import string
 from ipaddress import ip_network
 
-import httpx
+
+from dataclasses import replace
+
+from api.services.aws import (
+    InstanceSpec, NetworkInterfaceSpec, SecurityGroupSpec, SiteNetworkSpec, ownership_tags,
+)
+
+
+class AwsGameNetProvider:
+    """Map the existing appliance-based GameNet to EC2 and VPC primitives."""
+
+    def __init__(self, compute, network, config):
+        self.compute = compute
+        self.network = network
+        self.config = config
+
+    def close(self):
+        return None
+
+    def _token(self, *parts):
+        if hasattr(self.config, "resource_token"):
+            return self.config.resource_token(*parts)
+        return "-".join(("ctf-it", *(str(part) for part in parts)))
+
+    def _tags(self, site, vm):
+        return ownership_tags(
+            self.config.environment,
+            event_id=site.event_id,
+            team_id=site.team_id,
+            site_id=site.id,
+            vm_id=vm.id,
+        )
+
+    def create_vpc(self, site):
+        tags = ownership_tags(
+            self.config.environment,
+            event_id=site.event_id,
+            team_id=site.team_id,
+            site_id=site.id,
+        )
+        site_network = ip_network(site.allocated_cidr)
+        wan_subnet = str(ip_network((int(site_network.broadcast_address) - 15, 28)))
+        subnets = {"wan": wan_subnet, "infra": site.infrastructure_subnet}
+        subnets.update({zone.key: zone.subnet for zone in site.zones})
+        return self.network.ensure_site_network(SiteNetworkSpec(
+            region=site.region,
+            availability_zone=site.availability_zone,
+            vpc_cidr=site.allocated_cidr,
+            subnets=subnets,
+            tags=tags,
+            secondary_cidrs=(),
+        ))
+
+    def ensure_site_security_groups(self, site, *, temporary_management: bool = False):
+        tags = ownership_tags(
+            self.config.environment, event_id=site.event_id,
+            team_id=site.team_id, site_id=site.id,
+        )
+        all_traffic = lambda *cidrs: ({
+            "IpProtocol": "-1", "IpRanges": [{"CidrIp": cidr} for cidr in cidrs],
+        },)
+        wan_ingress = ()
+        if temporary_management:
+            management_cidr = str(ip_network(os.environ["CTF_CONTROL_PLANE_CIDR"]))
+            wan_ingress = ({
+                "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                "IpRanges": [{"CidrIp": management_cidr}],
+            },)
+        groups = {
+            "wan": self.network.ensure_security_group(SecurityGroupSpec(
+                site.vpc_id, f"ctf-it-site-{site.id}-wan", "GameNet firewall WAN",
+                wan_ingress, ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},),
+                {**tags, "NetworkRole": "wan"},
+            )),
+            "lan": self.network.ensure_security_group(SecurityGroupSpec(
+                site.vpc_id, f"ctf-it-site-{site.id}-lan", "GameNet firewall LAN",
+                all_traffic(site.allocated_cidr), all_traffic(site.allocated_cidr),
+                {**tags, "NetworkRole": "lan"},
+            )),
+        }
+        for zone in site.zones:
+            groups[zone.key] = self.network.ensure_security_group(SecurityGroupSpec(
+                site.vpc_id, f"ctf-it-site-{site.id}-{zone.key}", f"GameNet zone {zone.key}",
+                all_traffic(zone.subnet, "10.64.0.0/10"),
+                # The subnet route table sends this traffic to the OPNsense LAN
+                # ENI, so broad SG egress enables firewall-controlled internet
+                # access without giving private workloads a direct IGW path.
+                all_traffic("0.0.0.0/0"),
+                {**tags, "NetworkRole": zone.key},
+            ))
+        return groups
+
+    def ensure_gateway_security_group(self, event, team, vm, ingress: tuple[dict, ...]):
+        tags = ownership_tags(
+            self.config.environment, event_id=event.id, team_id=team.id, vm_id=vm.id,
+        )
+        return self.network.ensure_security_group(SecurityGroupSpec(
+            self.config.standard_vpc_id, f"ctf-it-event-{event.id}-team-{team.id}-gateway",
+            "GameNet VPN gateway", ingress,
+            ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},), tags,
+        ))
+
+    def create_gateway(self, event, team, vm, *, key_name: str, public_key: str,
+                       ingress: tuple[dict, ...], user_data: str):
+        vm.ssh_user = "ubuntu"
+        tags = ownership_tags(
+            self.config.environment, event_id=event.id, team_id=team.id, vm_id=vm.id,
+        )
+        group_id = self.ensure_gateway_security_group(event, team, vm, ingress)
+        self.compute.ensure_key_pair(key_name, public_key, ownership_tags(self.config.environment))
+        result = self.compute.launch_instance(InstanceSpec(
+            ami_id=self.config.ubuntu_ami(vm.cloud_region),
+            instance_type=vm.instance_type or "t3.small",
+            client_token=self._token("vm", vm.id),
+            network_interfaces=(NetworkInterfaceSpec(
+                0, subnet_id=self.config.standard_subnet_id,
+                security_group_ids=(group_id,), associate_public_ip=False,
+            ),),
+            tags=tags, key_name=key_name, user_data=user_data,
+        ))
+        self.compute.wait_running(result.instance_id)
+        allocation = self.compute.ensure_eip(tags)
+        self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
+        return replace(
+            result, public_ip=allocation.public_ip,
+            eip_allocation_id=allocation.allocation_id,
+        )
+
+    def create_firewall(self, site, vm, *, ami_id: str):
+        tags = self._tags(site, vm)
+        wan = self.network.ensure_eni(
+            site.public_subnet_id, None, [site.wan_security_group_id],
+            {**tags, "NetworkRole": "wan"},
+        )
+        lan = self.network.ensure_eni(
+            site.infrastructure_subnet_id, vm.private_ip, [site.lan_security_group_id],
+            {**tags, "NetworkRole": "lan"},
+        )
+        result = self.compute.launch_instance(InstanceSpec(
+            ami_id=ami_id,
+            instance_type=vm.instance_type or "t3.medium",
+            client_token=self._token("vm", vm.id),
+            network_interfaces=(
+                NetworkInterfaceSpec(0, eni_id=wan.eni_id, delete_on_termination=False),
+                NetworkInterfaceSpec(1, eni_id=lan.eni_id, delete_on_termination=False),
+            ),
+            tags=tags,
+        ))
+        self.compute.wait_running(result.instance_id)
+        self.compute.set_source_dest_check(result.instance_id, enabled=False)
+        allocation = self.compute.ensure_eip(tags)
+        self.compute.associate_eip(allocation.allocation_id, wan.eni_id)
+        return replace(
+            result,
+            public_ip=allocation.public_ip,
+            private_ip=lan.private_ip,
+            wan_eni_id=wan.eni_id,
+            lan_eni_id=lan.eni_id,
+            lan_mac=lan.mac_address,
+            eip_allocation_id=allocation.allocation_id,
+        )
+
+    def configure_private_routes(self, site, lan_eni_id: str) -> None:
+        route_tables = json.loads(site.route_table_ids_json or "{}")
+        for role, route_table_id in route_tables.items():
+            if role != "wan":
+                self.network.ensure_route(
+                    route_table_id, "0.0.0.0/0", eni_id=lan_eni_id,
+                )
+
+    def security_group_rules(self, group_id: str) -> tuple[dict, ...]:
+        return self.network.security_group_rules(group_id)
+
+    def cleanup_vm(self, vm, site=None) -> None:
+        tags = ownership_tags(
+            self.config.environment, event_id=vm.event_id, team_id=vm.team_id,
+            site_id=vm.site_id, vm_id=vm.id,
+        )
+        if vm.cloud_instance_id:
+            self.compute.terminate_owned(vm.cloud_instance_id, tags)
+            self.compute.wait_terminated(vm.cloud_instance_id)
+        if vm.eip_allocation_id:
+            self.compute.release_owned_eip(vm.eip_allocation_id, tags)
+        for eni_id in (vm.wan_eni_id, vm.lan_eni_id):
+            if eni_id:
+                self.network.delete_owned_eni(eni_id, tags)
+        if vm.role == "vpn_gateway":
+            for group_id in json.loads(vm.security_group_ids_json or "[]"):
+                self.network.delete_owned_security_group(group_id, tags)
+
+    def cleanup_site(self, site) -> None:
+        self.network.delete_owned_site(site, ownership_tags(
+            self.config.environment, event_id=site.event_id,
+            team_id=site.team_id, site_id=site.id,
+        ))
+
+    def create_endpoint(self, site, zone, vm, *, ami_id: str,
+                        key_name: str, public_key: str):
+        vm.ssh_user = "ubuntu"
+        self.compute.ensure_key_pair(
+            key_name, public_key, ownership_tags(self.config.environment),
+        )
+        return self.compute.launch_instance(InstanceSpec(
+            ami_id=ami_id,
+            instance_type=vm.instance_type or "t3.small",
+            client_token=self._token("vm", vm.id),
+            network_interfaces=(NetworkInterfaceSpec(
+                0,
+                subnet_id=zone.subnet_id,
+                security_group_ids=(zone.security_group_id,),
+                associate_public_ip=False,
+                private_ip=vm.private_ip,
+            ),),
+            tags=self._tags(site, vm),
+            key_name=key_name,
+        ))
 import paramiko
 import bcrypt
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import object_session
 
-from api.models import Site, TeamVPNGateway, VM, VPNCredential, utcnow
+from api.models import Site, TeamVPNGateway, VM, VPNCredential, Zone, utcnow
 from api.services.secrets import decrypt_secret
 from api.services.ssh_keys import get_or_create_platform_keypair
 from builder.base_loader import load_base_type
 
-API_ROOT = "https://api.vultr.com/v2"
 POLL_SECONDS = int(os.environ.get("GAMENET_PROVIDER_POLL_SECONDS", "10"))
 CREATE_TIMEOUT = int(os.environ.get("GAMENET_INSTANCE_TIMEOUT_SECONDS", "900"))
 WG_INTERFACE = os.environ.get("GAMENET_WG_INTERFACE", "ctf-gamenet")
 OPNSENSE_RELEASE = os.environ.get("GAMENET_OPNSENSE_RELEASE", "26.7")
-OPNSENSE_SITE_CONFIG_SCHEMA = 2
+OPNSENSE_SITE_CONFIG_SCHEMA = 3
 
 
 class GameNetProviderError(RuntimeError):
     pass
-
-
-class VultrGameNetProvider:
-    def __init__(self):
-        key = os.environ.get("VULTR_API_KEY")
-        if not key:
-            raise GameNetProviderError("VULTR_API_KEY is required")
-        self.client = httpx.Client(
-            base_url=API_ROOT, timeout=30.0,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            transport=httpx.HTTPTransport(retries=3),
-        )
-
-    def close(self):
-        self.client.close()
-
-    def _request(self, method: str, path: str, **kwargs) -> dict:
-        response = self.client.request(method, path, **kwargs)
-        if response.status_code not in {200, 201, 202, 204}:
-            raise GameNetProviderError(f"Vultr {method} {path} failed ({response.status_code}): {response.text[:300]}")
-        return response.json() if response.content else {}
-
-    def create_vpc(self, site: Site) -> str:
-        label = self.vpc_label(site)
-        for vpc in self._request("GET", "/vpcs", params={"per_page": 500}).get("vpcs", []):
-            if vpc.get("description") == label:
-                self._verify_vpc(vpc, site)
-                return vpc["id"]
-        network = ip_network(site.allocated_cidr)
-        created = self._request("POST", "/vpcs", json={
-            "region": site.region, "description": label,
-            "v4_subnet": str(network.network_address), "v4_subnet_mask": network.prefixlen,
-        })["vpc"]
-        self._verify_vpc(created, site)
-        return created["id"]
-
-    @staticmethod
-    def vpc_label(site: Site) -> str:
-        return f"gamenet-event-{site.event_id}-team-{site.team_id}-site-{site.key}"
-
-    @staticmethod
-    def _verify_vpc(vpc: dict, site: Site) -> None:
-        actual = f"{vpc.get('v4_subnet')}/{vpc.get('v4_subnet_mask')}"
-        if vpc.get("region") != site.region or actual != site.allocated_cidr:
-            raise GameNetProviderError(f"existing VPC {vpc.get('id')} does not match {site.allocated_cidr} in {site.region}")
-
-    def create_instance(self, vm: VM, *, public: bool, vpc_ids: list[str] | None = None,
-                        user_data: str | None = None, image_source: dict | None = None) -> dict:
-        if vm.vultr_id:
-            instance = self._request("GET", f"/instances/{vm.vultr_id}").get("instance")
-            if instance:
-                return self._instance_with_vpc(self._wait_instance(instance["id"]), vpc_ids)
-        for instance in self._request("GET", "/instances", params={"per_page": 500}).get("instances", []):
-            if instance.get("label") == vm.hostname:
-                vm.vultr_id = instance["id"]
-                object_session(vm).commit()
-                return self._instance_with_vpc(self._wait_instance(instance["id"]), vpc_ids)
-
-        body = {
-            "region": vm.vultr_region, "plan": vm.vultr_plan,
-            "label": vm.hostname, "hostname": vm.hostname,
-            "enable_ipv6": False, "backups": "disabled",
-            "ddos_protection": False,
-        }
-        if image_source and image_source.get("snapshot_id"):
-            body["snapshot_id"] = image_source["snapshot_id"]
-            # Snapshot contains the platform key; Vultr's OS key injection is
-            # intentionally not relied upon for custom snapshots.
-        else:
-            _, public_key = get_or_create_platform_keypair(object_session(vm))
-            ssh_key_id = self._ensure_ssh_key("ctf-platform", public_key)
-            body["sshkey_id"] = [ssh_key_id]
-            base = load_base_type(vm.base_type)
-            body["os_id"] = self._resolve_os_id(base.os)
-        if vpc_ids:
-            body["attach_vpc"] = vpc_ids
-        if not public:
-            # Vultr's VPC-only compute flag removes both public NICs. It is not
-            # equivalent to disable_public_ipv4, which can still expose IPv6.
-            body["vpc_only"] = True
-        if user_data:
-            body["user_data"] = base64.b64encode(user_data.encode()).decode()
-        instance = self._request("POST", "/instances", json=body)["instance"]
-        vm.vultr_id = instance["id"]
-        object_session(vm).commit()
-        result = self._wait_instance(instance["id"])
-        return self._instance_with_vpc(result, vpc_ids)
-
-    def create_private_boot_canary(self, certification, *, hostname: str, db) -> dict:
-        """Create or recover the disposable stock-image VPC-only canary.
-
-        The instance ID is committed immediately after the provider accepts the
-        request, before any readiness polling, so an interrupted worker resumes
-        the same instance instead of creating a duplicate.
-        """
-        if certification.instance_id:
-            result = self._wait_instance(certification.instance_id)
-            return self._instance_with_vpc(result, [certification.vpc_id])
-        for instance in self._request("GET", "/instances", params={"per_page": 500}).get("instances", []):
-            if instance.get("label") == hostname:
-                certification.instance_id = instance["id"]
-                certification.phase = "polling_instance"
-                certification.updated_at = utcnow()
-                db.commit()
-                return self._instance_with_vpc(self._wait_instance(instance["id"]), [certification.vpc_id])
-
-        _, public_key = get_or_create_platform_keypair(db)
-        ssh_key_id = self._ensure_ssh_key("ctf-platform", public_key)
-        body = {
-            "region": certification.region,
-            "plan": certification.plan,
-            "os_id": certification.os_id,
-            "label": hostname,
-            "hostname": hostname,
-            "enable_ipv6": False,
-            "backups": "disabled",
-            "ddos_protection": False,
-            "attach_vpc": [certification.vpc_id],
-            "vpc_only": True,
-            "sshkey_id": [ssh_key_id],
-        }
-        instance = self._request("POST", "/instances", json=body)["instance"]
-        certification.instance_id = instance["id"]
-        certification.phase = "polling_instance"
-        certification.updated_at = utcnow()
-        db.commit()
-        return self._instance_with_vpc(self._wait_instance(instance["id"]), [certification.vpc_id])
-
-    def delete_instance(self, instance_id: str) -> None:
-        self._request("DELETE", f"/instances/{instance_id}")
-
-    def attach_vpc(self, vm: VM, vpc_id: str) -> dict:
-        """Attach a VPC after WAN-only snapshot boot and return its observed NIC metadata."""
-        path = f"/instances/{vm.vultr_id}/vpcs"
-        attached = self._request("GET", path, params={"per_page": 100}).get("vpcs", [])
-        selected = next((row for row in attached if row.get("id") == vpc_id), None)
-        if not selected:
-            self._request("POST", f"{path}/attach", json={"vpc_id": vpc_id})
-            self._wait_instance(vm.vultr_id)
-        deadline = time.monotonic() + CREATE_TIMEOUT
-        while time.monotonic() < deadline:
-            attached = self._request("GET", path, params={"per_page": 100}).get("vpcs", [])
-            selected = next((row for row in attached if row.get("id") == vpc_id), None)
-            if selected and selected.get("mac_address") and selected.get("ip_address"):
-                return selected
-            time.sleep(POLL_SECONDS)
-        raise GameNetProviderError(f"VPC {vpc_id} attachment metadata did not become ready")
-
-    def _instance_with_vpc(self, result: dict, vpc_ids: list[str] | None) -> dict:
-        if vpc_ids:
-            attached = self._request("GET", f"/instances/{result['id']}/vpcs", params={"per_page": 100}).get("vpcs", [])
-            selected = next((row for row in attached if row.get("id") in vpc_ids), None)
-            if not selected or not selected.get("ip_address") or not selected.get("mac_address"):
-                raise GameNetProviderError(
-                    f"missing VPC attachment metadata for instance {result['id']}"
-                )
-            result["internal_ip"] = selected["ip_address"]
-            result["vpc_mac"] = selected["mac_address"]
-        return result
-
-    def _resolve_os_id(self, name: str) -> int:
-        for os_row in self._request("GET", "/os", params={"per_page": 500}).get("os", []):
-            if os_row.get("name", "").casefold() == name.casefold():
-                return int(os_row["id"])
-        raise GameNetProviderError(f"Vultr OS is unavailable: {name}")
-
-    def _ensure_ssh_key(self, name: str, key: str) -> str:
-        def material(value: str) -> str:
-            # Comments are not key material and Vultr may preserve or omit them.
-            parts = value.strip().split()
-            return " ".join(parts[:2])
-
-        expected = material(key)
-        rows = self._request("GET", "/ssh-keys", params={"per_page": 500}).get("ssh_keys", [])
-        matching = next((row for row in rows if material(row.get("ssh_key", "")) == expected), None)
-        if matching:
-            return matching["id"]
-
-        requested_name = name
-        if any(row.get("name") == requested_name for row in rows):
-            fingerprint = hashlib.sha256(expected.encode()).hexdigest()[:12]
-            requested_name = f"{name}-{fingerprint}"
-            existing = next((row for row in rows if row.get("name") == requested_name), None)
-            if existing:
-                raise GameNetProviderError(
-                    f"Vultr SSH key name '{requested_name}' exists with different material"
-                )
-        return self._request("POST", "/ssh-keys", json={
-            "name": requested_name, "ssh_key": key,
-        })["ssh_key"]["id"]
-
-    def _wait_instance(self, instance_id: str) -> dict:
-        deadline = time.monotonic() + CREATE_TIMEOUT
-        while time.monotonic() < deadline:
-            instance = self._request("GET", f"/instances/{instance_id}")["instance"]
-            if instance.get("status") == "active" and instance.get("server_status") in {"ok", "none"}:
-                return instance
-            if instance.get("status") in {"resizing", "reinstalling"} or instance.get("server_status") in {"installing", "locked"}:
-                time.sleep(POLL_SECONDS); continue
-            if instance.get("status") in {"pending", "active"}:
-                time.sleep(POLL_SECONDS); continue
-            raise GameNetProviderError(f"Vultr instance {instance_id} entered state {instance.get('status')}/{instance.get('server_status')}")
-        raise GameNetProviderError(f"timed out waiting for Vultr instance {instance_id}")
-
-    def create_firewall_group(self, label: str, rules: list[dict]) -> str:
-        groups = self._request("GET", "/firewalls", params={"per_page": 500}).get("firewall_groups", [])
-        group = next((item for item in groups if item.get("description") == label), None)
-        if not group:
-            group = self._request("POST", "/firewalls", json={"description": label})["firewall_group"]
-        group_id = group["id"]
-        existing = self._request("GET", f"/firewalls/{group_id}/rules", params={"per_page": 500}).get("firewall_rules", [])
-        canonical_existing = {_canonical_rule(row) for row in existing}
-        canonical_required = {_canonical_rule(row) for row in rules}
-        for row in existing:
-            if _canonical_rule(row) not in canonical_required:
-                self._request("DELETE", f"/firewalls/{group_id}/rules/{row['id']}")
-        for rule in rules:
-            if _canonical_rule(rule) not in canonical_existing:
-                self._request("POST", f"/firewalls/{group_id}/rules", json=rule)
-        return group_id
-
-    def attach_firewall_group(self, vm: VM, group_id: str) -> None:
-        self._request("PATCH", f"/instances/{vm.vultr_id}", json={"firewall_group_id": group_id})
-
-    def get_instance(self, vm: VM) -> dict:
-        return self._request("GET", f"/instances/{vm.vultr_id}")["instance"]
-
-    def firewall_rules(self, group_id: str) -> list[dict]:
-        return self._request("GET", f"/firewalls/{group_id}/rules", params={"per_page": 500}).get("firewall_rules", [])
-
-
-def _canonical_rule(rule: dict) -> tuple:
-    return tuple(str(rule.get(key, "")) for key in ("ip_type", "protocol", "subnet", "subnet_size", "port", "source"))
 
 
 def validate_vpc_only_instance(instance: dict, *, label: str = "instance") -> None:
@@ -390,7 +366,10 @@ def ssh_host_command(db, host: str | None, command: str, *, jump: VM | None = No
         port=ssh_port, sock=sock, connect_timeout=connect_timeout,
     )
     try:
-        _stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+        remote_command = command
+        if ssh_user != "root":
+            remote_command = "sudo -n /bin/sh -c " + shlex.quote(command)
+        _stdin, stdout, stderr = client.exec_command(remote_command, timeout=timeout)
         code = stdout.channel.recv_exit_status()
         return code, stdout.read().decode(errors="replace"), stderr.read().decode(errors="replace")
     finally:
@@ -508,7 +487,7 @@ def validate_snapshot_wan(vm: VM, expected_version: str) -> None:
     command = "/bin/sh -c " + shlex.quote(
         f"set -eu; set -- $(/usr/local/bin/php -r {shlex.quote(php)}); "
         "wan_if=$1; test \"$2\" = nolAN; test \"$3\" = disk; "
-        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
+        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^ena[0-9]+$'); "
         "test \"$#\" -eq 1; test \"$1\" = \"$wan_if\"; "
         + _opnsense_release_test(expected_version) + "; "
         "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
@@ -543,7 +522,7 @@ def _snapshot_interface_mapping(vm: VM, lan_mac: str) -> tuple[str, str]:
     code, output, error = ssh_command(vm, command, timeout=120, connect_timeout=CREATE_TIMEOUT)
     parts = output.strip().split()
     if code or len(parts) != 2:
-        raise GameNetProviderError(f"could not map Vultr VPC MAC inside OPNsense: {(error or output)[:300]}")
+        raise GameNetProviderError(f"could not map the AWS ENI MAC inside OPNsense: {(error or output)[:300]}")
     return parts[0], parts[1]
 
 
@@ -556,8 +535,9 @@ def opnsense_config_fingerprint(*, site: Site, vm: VM, expected_version: str, la
         "schema": OPNSENSE_SITE_CONFIG_SCHEMA,
         "site_id": site.id,
         "site_cidr": site.allocated_cidr,
+        "infrastructure_subnet": getattr(site, "infrastructure_subnet", None),
         "vm_id": vm.id,
-        "vultr_id": vm.vultr_id,
+        "cloud_instance_id": vm.cloud_instance_id,
         "hostname": vm.hostname,
         "release": expected_version,
         "public_ip": vm.public_ip,
@@ -576,17 +556,19 @@ def opnsense_config_fingerprint(*, site: Site, vm: VM, expected_version: str, la
 
 def snapshot_site_validation_command(*, token: str, expected_version: str, public_ip: str, private_ip: str,
                                      wan_interface: str, lan_interface: str, lan_mac: str,
-                                     management_cidr: str) -> str:
+                                     management_cidr: str, site_cidr: str) -> str:
     management_source = str(ip_network(management_cidr).network_address)
     return (
         f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready && "
         f"{_opnsense_release_test(expected_version)} && "
-        f"ifconfig {shlex.quote(wan_interface)} | grep -F 'inet {public_ip}' >/dev/null && "
+        # AWS maps an Elastic IP at the VPC edge; the guest correctly sees the
+        # ENI's private address rather than ``public_ip``.
+        f"ifconfig {shlex.quote(wan_interface)} | grep -E 'inet [0-9]' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -iF 'ether {lan_mac.lower()}' >/dev/null && "
         f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {private_ip}' >/dev/null && "
         f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
-        f"pfctl -sr | grep -F 'pass in quick on {lan_interface} inet from ({lan_interface}:network) to any' >/dev/null && "
-        "pfctl -sn | grep -E 'nat on' >/dev/null && "
+        f"pfctl -sr | grep -F {shlex.quote(f'pass in quick on {lan_interface} inet from {site_cidr} to any')} >/dev/null && "
+        f"pfctl -sn | grep -F {shlex.quote(f'nat on {wan_interface} inet from {site_cidr} to any')} >/dev/null && "
         f"pfctl -sr | grep -F {shlex.quote('from ' + management_source + ' to')} | "
         "grep -E 'port = (ssh|22)' >/dev/null && opnsense-version -v"
     )
@@ -610,6 +592,7 @@ def _opnsense_apply_script(token: str, config_path: str, script_path: str) -> st
         "rm -f /usr/local/etc/rc.syshook.d/start/10-ctf-builder /usr/local/etc/rc.syshook.d/start/99-ctf-builder",
         "/usr/local/sbin/configctl interface reconfigure lan",
         "/usr/local/sbin/configctl interface reconfigure wan",
+        "/usr/local/sbin/configctl webgui restart renew",
         "/usr/local/sbin/configctl openssh restart", "/usr/local/sbin/configctl filter reload",
         f"rm -f {shlex.quote(config_path)}",
         f"printf '%s\\n' {quoted_token} > /conf/ctf-site-ready.tmp",
@@ -656,7 +639,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     wan_interface, lan_interface = _snapshot_interface_mapping(vm, lan_mac)
     gateway = site.team.vpn_gateway
     gateway_vm = db.get(VM, gateway.vm_id)
-    management_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32")
+    management_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR") or "127.0.0.1/32"
     fingerprint = opnsense_config_fingerprint(
         site=site, vm=vm, expected_version=expected_version, lan_mac=lan_mac,
         wan_interface=wan_interface, lan_interface=lan_interface, gateway_vm=gateway_vm,
@@ -676,7 +659,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
     validation = snapshot_site_validation_command(
         token=token, expected_version=expected_version, public_ip=vm.public_ip,
         private_ip=vm.private_ip, wan_interface=wan_interface, lan_interface=lan_interface,
-        lan_mac=lan_mac, management_cidr=management_cidr,
+        lan_mac=lan_mac, management_cidr=management_cidr, site_cidr=site.allocated_cidr,
     )
     if vm.opnsense_config_status in {"applying", "applied"}:
         try:
@@ -733,6 +716,24 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
             )
             if code == 0 and expected_version in output:
                 break
+            ready_check = f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-ready"
+            ready, _, _ = ssh_command(vm, "/bin/sh -c " + shlex.quote(ready_check), timeout=30)
+            if ready == 0:
+                _, diagnostic_output, diagnostic_error = ssh_command(
+                    vm,
+                    "printf '%s\\n' 'persisted-nat:'; "
+                    "grep -A35 -B2 '<snatrules>' /conf/config.xml || true; "
+                    "grep -A3 -B1 '<outbound>' /conf/config.xml || true; "
+                    f"printf '%s\\n' 'filter:'; pfctl -sr; printf '%s\\n' 'nat:'; pfctl -sn; "
+                    f"printf '%s\\n' 'interfaces:'; ifconfig {shlex.quote(wan_interface)}; "
+                    f"ifconfig {shlex.quote(lan_interface)}",
+                    timeout=30,
+                )
+                error = (
+                    "configuration applied but semantic validation failed:\n"
+                    + (diagnostic_error or diagnostic_output or "no diagnostic output")
+                )[-8000:]
+                break
             failure_check = f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-failed"
             failed, _, _ = ssh_command(vm, "/bin/sh -c " + shlex.quote(failure_check), timeout=30)
             if failed == 0:
@@ -745,7 +746,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
             error = str(exc)
         time.sleep(POLL_SECONDS)
     if code != 0 or expected_version not in output:
-        detail = f"snapshot OPNsense validation failed for generation {token}: {(error or output)[:2000]}"
+        detail = f"snapshot OPNsense validation failed for generation {token}: {(error or output)[:8000]}"
         vm.opnsense_config_status = "failed"
         vm.provision_error = detail
         db.commit()
@@ -786,9 +787,10 @@ def configure_snapshot_validation_site(db, *, host: str, private_ip: str, lan_ma
     script_path = f"/tmp/ctf-apply-{token}.sh"
     _, public_key = get_or_create_platform_keypair(db)
     password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
-    # The /28 network and .1 gateway exactly mirror a minimal GameNet site.
-    site = SimpleNamespace(allocated_cidr="172.31.254.0/28")
-    vm = SimpleNamespace(hostname="opnsense-validation-site")
+    # Use the /28 containing the ENI address so network+1 is both the
+    # OPNsense LAN address and an address AWS permits on the ENI.
+    site = SimpleNamespace(allocated_cidr=str(ip_network(f"{private_ip}/28", strict=False)))
+    vm = SimpleNamespace(hostname="opnsense-validation-site", private_ip=private_ip)
     previous_cidr = os.environ.get("CTF_CONTROL_PLANE_CIDR")
     os.environ["CTF_CONTROL_PLANE_CIDR"] = control_plane_cidr
     try:
@@ -835,16 +837,22 @@ def _opnsense_release_test(requested: str) -> str:
 
 
 def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
-                           *, temporary_management: bool, wan_interface: str = "vtnet0",
-                           lan_interface: str = "vtnet1") -> str:
+                           *, temporary_management: bool, wan_interface: str = "ena0",
+                           lan_interface: str = "ena1") -> str:
     templates = FileSystemLoader(os.path.join(os.path.dirname(__file__), "..", "..", "templates"))
     environment = Environment(loader=templates, autoescape=False)
     environment.filters["b64encode"] = lambda value: base64.b64encode(str(value).encode()).decode()
     template = environment.get_template("opnsense_config.xml.j2")
-    network = ip_network(site.allocated_cidr)
+    site_network = ip_network(site.allocated_cidr)
+    infrastructure_cidr = getattr(site, "infrastructure_subnet", None)
+    lan_network = ip_network(infrastructure_cidr or site.allocated_cidr)
+    routed_site_network = str(site_network) if lan_network != site_network else None
+    vpc_gateway = str(lan_network.network_address + 1) if routed_site_network else None
     return template.render(
-        opnsense_hostname=vm.hostname, opnsense_lan_ip=str(network.network_address + 1),
-        opnsense_lan_subnet=network.prefixlen,
+        opnsense_hostname=vm.hostname, opnsense_lan_ip=vm.private_ip,
+        opnsense_lan_subnet=lan_network.prefixlen,
+        opnsense_vpc_gateway=vpc_gateway, opnsense_routed_site_network=routed_site_network,
+        opnsense_site_network=str(site_network),
         opnsense_wan_interface=wan_interface, opnsense_lan_interface=lan_interface,
         opnsense_admin_password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode(),
         opnsense_ssh_pubkey=public_key, temporary_management=temporary_management,
@@ -856,7 +864,8 @@ def _site_unbound_config(site: Site) -> str:
     """Build a resolver bound only to this site's private interfaces."""
     from api.services.gamenet import site_dns_zone, vm_dns_name
     db = object_session(site)
-    lan_address = str(ip_network(site.allocated_cidr).network_address + 1)
+    firewall = db.get(VM, site.firewall_vm_id)
+    lan_address = firewall.private_ip
     records = []
     for endpoint in db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all():
         name = vm_dns_name(endpoint)
@@ -925,9 +934,9 @@ def configure_gateway(gateway: TeamVPNGateway, vm: VM, sites: list[Site], partic
         # expected transient failure only after the interface is configured.
         "systemctl reset-failed unbound && systemctl enable unbound && systemctl restart unbound"
     )
-    code, _, error = ssh_command(vm, command, host=management_host, timeout=300)
+    code, output, error = ssh_command(vm, command, host=management_host, timeout=300)
     if code:
-        raise GameNetProviderError(f"gateway WireGuard configuration failed: {error[:300]}")
+        raise GameNetProviderError(f"gateway WireGuard configuration failed: {(error or output)[:300]}")
 
 
 def configure_site_wireguard(site: Site, firewall: VM, gateway: TeamVPNGateway, gateway_vm: VM,
@@ -1051,11 +1060,11 @@ def validate_site_tunnel(site: Site, firewall: VM, gateway: TeamVPNGateway, gate
 
 
 def add_deterministic_endpoint_address(vm: VM, site: Site, gateway_vm: VM) -> None:
-    """Stage one: add the zone address while retaining Vultr's boot address."""
+    """Stage one: add the deterministic zone address before route conversion."""
     if not vm.vpc_ip or not vm.vpc_mac:
         raise GameNetProviderError("missing VPC attachment metadata for endpoint network conversion")
     network = ip_network(site.allocated_cidr)
-    router = str(network.network_address + 1)
+    router = object_session(site).get(VM, site.firewall_vm_id).private_ip
     mac = vm.vpc_mac.lower()
     command = (
         "set -eu; iface=''; "
@@ -1081,10 +1090,40 @@ def add_deterministic_endpoint_address(vm: VM, site: Site, gateway_vm: VM) -> No
     vm.network_boot_id = output.strip()
 
 
+def verify_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:
+    """Verify the endpoint retains its AWS subnet address and router."""
+    if not vm.vpc_ip or not vm.vpc_mac or not vm.zone_id:
+        raise GameNetProviderError("missing VPC attachment metadata for endpoint network verification")
+    zone = object_session(vm).get(Zone, vm.zone_id)
+    if not zone or not zone.subnet:
+        raise GameNetProviderError("missing zone subnet for endpoint network verification")
+    network = ip_network(zone.subnet)
+    router = str(network.network_address + 1)
+    mac = vm.vpc_mac.lower()
+    command = (
+        "set -eu; cloud-init status --wait; iface=''; "
+        "for path in /sys/class/net/*/address; do "
+        f"if [ \"$(tr A-F a-f < \"$path\")\" = {shlex.quote(mac)} ]; then iface=$(basename \"$(dirname \"$path\")\"); break; fi; done; "
+        "test -n \"$iface\"; "
+        f"ip -4 address show dev \"$iface\" | grep -F {shlex.quote(vm.private_ip + '/' + str(network.prefixlen))}; "
+        f"ip route show default | grep -F {shlex.quote('via ' + router)}; "
+        "getent hosts example.com >/dev/null; "
+        "curl -4fsS --max-time 20 https://example.com/ >/dev/null"
+    )
+    code, output, error = ssh_command(
+        vm, command, host=vm.vpc_ip, jump=gateway_vm,
+        timeout=120, connect_timeout=CREATE_TIMEOUT,
+    )
+    if code:
+        raise GameNetProviderError(
+            f"AWS-native endpoint network verification failed: {(error or output)[:300]}"
+        )
+
+
 def finalize_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:
     """Stage two: persist MAC-matched netplan, remove the boot address, and reboot."""
     network = ip_network(site.allocated_cidr)
-    router = str(network.network_address + 1)
+    router = object_session(site).get(VM, site.firewall_vm_id).private_ip
     mac = vm.vpc_mac.lower()
     netplan = f"""network:
   version: 2

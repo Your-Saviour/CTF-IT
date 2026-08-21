@@ -12,6 +12,7 @@ import bcrypt
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -34,14 +35,20 @@ BOOTSTRAP_SOURCE_URL = (
     "https://raw.githubusercontent.com/opnsense/update/master/"
     "src/bootstrap/opnsense-bootstrap.sh.in"
 )
+BOOTSTRAP_API_URL = (
+    "https://api.github.com/repos/opnsense/update/contents/"
+    "src/bootstrap/opnsense-bootstrap.sh.in?ref=master"
+)
 BUILD_METHOD = "freebsd-bootstrap"
-BUILDER_PLAN = "vc2-2c-4gb"
 RUNNING_STATES = {"creating_builder", "bootstrapping", "validating", "snapshotting"}
 RESUMABLE_STATES = RUNNING_STATES | {"interrupted", "failed"}
 TERMINAL_STATES = {"ready", "active", "retired"}
 ACTIVE_SETTING = "active_opnsense_image_id"
 POLL_SECONDS = int(os.environ.get("OPNSENSE_IMAGE_POLL_SECONDS", "10"))
-POLL_TIMEOUT = int(os.environ.get("OPNSENSE_IMAGE_TIMEOUT_SECONDS", "1800"))
+POLL_TIMEOUT = int(os.environ.get("OPNSENSE_IMAGE_TIMEOUT_SECONDS", "3600"))
+BOOTSTRAP_STALL_TIMEOUT = int(os.environ.get("OPNSENSE_BOOTSTRAP_STALL_SECONDS", "600"))
+
+logger = logging.getLogger(__name__)
 
 
 class ImageWorkflowError(RuntimeError):
@@ -88,9 +95,37 @@ def download_bootstrap(url: str = BOOTSTRAP_SOURCE_URL, *, client: httpx.Client 
     owned = client is None
     http = client or httpx.Client(timeout=60)
     try:
-        response = http.get(url, follow_redirects=False)
+        for attempt in range(4):
+            response = http.get(url, follow_redirects=False)
+            if response.is_redirect:
+                raise ImageWorkflowError("bootstrap download redirect rejected")
+            transient = response.status_code == 429 or response.status_code >= 500
+            if transient and attempt < 3:
+                retry_after = response.headers.get("Retry-After", "")
+                try:
+                    delay = min(60, max(1, int(retry_after)))
+                except ValueError:
+                    delay = 2 ** attempt
+                time.sleep(delay)
+                continue
+            if response.status_code == 429:
+                break
+            response.raise_for_status()
+            content = response.content
+            if not content or len(content) > 1024 * 1024:
+                raise ImageWorkflowError("bootstrap source is empty or unexpectedly large")
+            return content, hashlib.sha256(content).hexdigest()
+        response = http.get(
+            BOOTSTRAP_API_URL,
+            follow_redirects=False,
+            headers={
+                "Accept": "application/vnd.github.raw+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "ctf-it-opnsense-image-builder/1.0",
+            },
+        )
         if response.is_redirect:
-            raise ImageWorkflowError("bootstrap download redirect rejected")
+            raise ImageWorkflowError("bootstrap API download redirect rejected")
         response.raise_for_status()
         content = response.content
         if not content or len(content) > 1024 * 1024:
@@ -101,12 +136,56 @@ def download_bootstrap(url: str = BOOTSTRAP_SOURCE_URL, *, client: httpx.Client 
             http.close()
 
 
+def make_pkgbase_compatible_bootstrap(content: bytes) -> bytes:
+    """Keep pkgbase OS files available until OPNsense replaces base and kernel."""
+    upstream = b"""\tif pkg -N; then
+\t\tpkg unlock -ya
+\t\tpkg delete -fa
+\tfi
+\trm -rf /var/db/pkg/*"""
+    replacement = b"""\tif pkg -N; then
+\t\tpkg unlock -ya
+\t\tif pkg query '%n' | grep -q '^FreeBSD-'; then
+\t\t\tPACKAGES=\"$(pkg query '%n' | grep -v '^FreeBSD-' || true)\"
+\t\t\tif [ -n \"${PACKAGES}\" ]; then
+\t\t\t\tpkg delete -fy ${PACKAGES}
+\t\t\tfi
+\t\telse
+\t\t\tpkg delete -fa
+\t\tfi
+\tfi
+\trm -rf /var/db/pkg/*"""
+    if content.count(upstream) != 1:
+        raise ImageWorkflowError("upstream bootstrap package block changed")
+    content = content.replace(upstream, replacement, 1)
+    upstream_finish = b"\topnsense-update ${DO_VERBOSE} -bkf\n\treboot"
+    replacement_finish = b"""\topnsense-update ${DO_VERBOSE} -bkf
+\tif [ -f /root/ctf-golden-config.xml ]; then
+\t\tinstall -d -m 700 /conf
+\t\tinstall -m 600 /root/ctf-golden-config.xml /conf/config.xml
+\t\tsync
+\tfi
+\treboot"""
+    if content.count(upstream_finish) != 1:
+        raise ImageWorkflowError("upstream bootstrap final block changed")
+    content = content.replace(upstream_finish, replacement_finish, 1)
+    upstream_fetch = b'fetch -o ${WORKDIR}/${REPOSITORY}.tar.gz "${URL}/${SUBFILE}.tar.gz"'
+    cached_fetch = b'''if [ -s /root/opnsense-core.tar.gz ]; then
+\tcp /root/opnsense-core.tar.gz ${WORKDIR}/${REPOSITORY}.tar.gz
+else
+\tfetch -o ${WORKDIR}/${REPOSITORY}.tar.gz "${URL}/${SUBFILE}.tar.gz"
+fi'''
+    if content.count(upstream_fetch) != 1:
+        raise ImageWorkflowError("upstream bootstrap source fetch changed")
+    return content.replace(upstream_fetch, cached_fetch, 1)
+
+
 def active_image(db: Session) -> OpnsenseImage | None:
     setting = db.query(PlatformSettings).filter_by(key=ACTIVE_SETTING).first()
     if not setting or not setting.value.isdigit():
         return None
     image = db.get(OpnsenseImage, int(setting.value))
-    return image if image and image.status == "active" and image.snapshot_id and image.validated_at else None
+    return image if image and image.status == "active" and image.ami_id and image.validated_at else None
 
 
 def interrupt_running_jobs(db: Session) -> int:
@@ -134,11 +213,7 @@ def elapsed_seconds(image: OpnsenseImage) -> int:
 
 
 def redact_error(exc: Exception) -> str:
-    detail = str(exc)
-    key = os.environ.get("VULTR_API_KEY")
-    if key:
-        detail = detail.replace(key, "[redacted]")
-    return detail[:1000]
+    return str(exc)[:1000]
 
 
 def _audit(db: Session, action: str, image: OpnsenseImage, **metadata) -> None:
@@ -153,179 +228,6 @@ def _set_phase(db: Session, image: OpnsenseImage, phase: str) -> None:
     db.commit()
 
 
-class VultrImageClient:
-    """Minimal Vultr v2 adapter with independently mockable lifecycle calls."""
-
-    def __init__(self):
-        key = os.environ.get("VULTR_API_KEY")
-        if not key:
-            raise ImageWorkflowError("VULTR_API_KEY is required")
-        self.client = httpx.Client(
-            base_url="https://api.vultr.com/v2", timeout=30,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
-
-    def close(self):
-        self.client.close()
-
-    def request(self, method: str, path: str, **kwargs) -> dict:
-        response = None
-        for attempt in range(5):
-            response = self.client.request(method, path, **kwargs)
-            if method.upper() != "GET" or response.status_code < 500:
-                break
-            if attempt < 4:
-                time.sleep(2 ** attempt)
-        assert response is not None
-        if response.status_code not in {200, 201, 202, 204}:
-            raise ImageWorkflowError(f"Vultr {method} {path} failed ({response.status_code}): {response.text[:300]}")
-        return response.json() if response.content else {}
-
-    def preflight(self, base_os: str) -> int:
-        region = os.environ.get("VULTR_DEFAULT_REGION", "syd")
-        plans = self.request("GET", "/plans", params={"type": "vc2", "per_page": 500}).get("plans", [])
-        plan = next((row for row in plans if row.get("id") == BUILDER_PLAN), None)
-        if not plan or region not in plan.get("locations", []):
-            raise ImageWorkflowError(f"Vultr plan {BUILDER_PLAN} is unavailable in {region}")
-        rows = self.request("GET", "/os", params={"per_page": 500}).get("os", [])
-        match = next((row for row in rows if row.get("name", "").casefold() == base_os.casefold()), None)
-        if not match:
-            raise ImageWorkflowError(f"Vultr OS is unavailable: {base_os}")
-        # This authenticated read fails early for suspended or inaccessible accounts.
-        self.request("GET", "/account")
-        return int(match["id"])
-
-    def ensure_ssh_key(self, public_key: str) -> str:
-        material = " ".join(public_key.strip().split()[:2])
-        rows = self.request("GET", "/ssh-keys", params={"per_page": 500}).get("ssh_keys", [])
-        found = next((row for row in rows if " ".join(row.get("ssh_key", "").split()[:2]) == material), None)
-        if found:
-            return found["id"]
-        return self.request("POST", "/ssh-keys", json={"name": "ctf-platform", "ssh_key": public_key})["ssh_key"]["id"]
-
-    def create_firewall(self, version: str, cidr: str) -> str:
-        network = ip_network(cidr)
-        group = self.request("POST", "/firewalls", json={
-            "description": f"ctf-opnsense-builder-{version}",
-        })["firewall_group"]
-        self.request("POST", f"/firewalls/{group['id']}/rules", json={
-            "ip_type": "v4", "protocol": "tcp", "subnet": str(network.network_address),
-            "subnet_size": network.prefixlen, "port": "22",
-        })
-        return group["id"]
-
-    def create_builder(self, image: OpnsenseImage, *, os_id: int, ssh_key_id: str) -> str:
-        body = {
-            "region": os.environ.get("VULTR_DEFAULT_REGION", "syd"), "plan": BUILDER_PLAN,
-            "os_id": os_id, "sshkey_id": [ssh_key_id],
-            "label": f"ctf-opnsense-builder-{image.version}-{image.id}",
-            "hostname": "opnsense-golden", "firewall_group_id": image.builder_firewall_group_id,
-            "enable_ipv6": False, "backups": "disabled",
-        }
-        return self.request("POST", "/instances", json=body)["instance"]["id"]
-
-    def instance(self, identifier: str) -> dict:
-        return self.request("GET", f"/instances/{identifier}")["instance"]
-
-    def wait_instance(self, identifier: str) -> dict:
-        return self._wait(lambda: self.instance(identifier), {"active"}, label="instance")
-
-    def start(self, identifier: str):
-        self.request("POST", f"/instances/{identifier}/start")
-
-    def halt(self, identifier: str):
-        self.request("POST", f"/instances/{identifier}/halt")
-
-    def wait_stopped(self, identifier: str) -> dict:
-        deadline = time.monotonic() + POLL_TIMEOUT
-        while time.monotonic() < deadline:
-            row = self.instance(identifier)
-            if row.get("power_status") == "stopped":
-                return row
-            time.sleep(POLL_SECONDS)
-        raise ImageWorkflowError("timed out waiting for instance to stop")
-
-    def create_snapshot(self, image: OpnsenseImage) -> str:
-        return self.request("POST", "/snapshots", json={
-            "instance_id": image.builder_instance_id,
-            "description": f"CTF OPNsense {image.version} FreeBSD bootstrap",
-        })["snapshot"]["id"]
-
-    def wait_snapshot(self, identifier: str):
-        return self._wait(
-            lambda: self.request("GET", f"/snapshots/{identifier}")["snapshot"],
-            {"complete"}, label="snapshot",
-        )
-
-    def create_clone(self, image: OpnsenseImage, number: int) -> str:
-        return self.request("POST", "/instances", json={
-            "region": os.environ.get("VULTR_DEFAULT_REGION", "syd"), "plan": BUILDER_PLAN,
-            "snapshot_id": image.snapshot_id, "label": f"ctf-opnsense-validation-{image.id}-{number}",
-            "hostname": f"opnsense-validation-{number}", "enable_ipv6": False,
-            "backups": "disabled", "firewall_group_id": image.builder_firewall_group_id,
-        })["instance"]["id"]
-
-    def create_validation_vpc(self, image: OpnsenseImage) -> str:
-        return self.request("POST", "/vpcs", json={
-            "region": os.environ.get("VULTR_DEFAULT_REGION", "syd"),
-            "description": f"ctf-opnsense-validation-{image.id}",
-            "v4_subnet": "172.31.254.0", "v4_subnet_mask": 28,
-        })["vpc"]["id"]
-
-    def attach_vpc(self, instance_id: str, vpc_id: str) -> dict:
-        path = f"/instances/{instance_id}/vpcs"
-        rows = self.request("GET", path, params={"per_page": 100}).get("vpcs", [])
-        match = next((row for row in rows if row.get("id") == vpc_id), None)
-        if not match:
-            self.request("POST", f"{path}/attach", json={"vpc_id": vpc_id})
-        deadline = time.monotonic() + POLL_TIMEOUT
-        while time.monotonic() < deadline:
-            rows = self.request("GET", path, params={"per_page": 100}).get("vpcs", [])
-            match = next((row for row in rows if row.get("id") == vpc_id), None)
-            if match and match.get("mac_address") and match.get("ip_address"):
-                return match
-            time.sleep(POLL_SECONDS)
-        raise ImageWorkflowError("validation VPC attachment did not become ready")
-
-    def delete(self, kind: str, identifier: str | None):
-        if identifier:
-            self.request("DELETE", f"/{kind}/{identifier}")
-
-    def _wait(self, getter, success: set[str], *, label: str):
-        deadline = time.monotonic() + POLL_TIMEOUT
-        while time.monotonic() < deadline:
-            row = getter()
-            status = row.get("status", "")
-            server = row.get("server_status", "")
-            if status in success and (label != "instance" or server in {"ok", "none"}):
-                return row
-            if status in {"failed", "error"}:
-                raise ImageWorkflowError(f"Vultr {label} entered {status} state")
-            time.sleep(POLL_SECONDS)
-        raise ImageWorkflowError(f"timed out waiting for Vultr {label}")
-
-
-def new_image(db: Session, version: str, *, vultr_factory=VultrImageClient) -> OpnsenseImage:
-    """Validate every prerequisite before persisting a build or creating cloud resources."""
-    release = validate_release(version)
-    validate_control_plane_cidr()
-    if db.query(OpnsenseImage).filter(OpnsenseImage.status.in_(RUNNING_STATES | {"interrupted"})).first():
-        raise ImageWorkflowError("another OPNsense image job is already running")
-    client = vultr_factory()
-    try:
-        client.preflight(SUPPORTED_RELEASES[release])
-    finally:
-        client.close()
-    row = OpnsenseImage(
-        version=release, build_method=BUILD_METHOD, base_os=SUPPORTED_RELEASES[release],
-        bootstrap_source_url=BOOTSTRAP_SOURCE_URL, status="creating_builder", phase="creating_builder",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
 def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
          retry: bool = True) -> tuple[int, str, str]:
     private_key, _ = get_or_create_platform_keypair(db)
@@ -333,24 +235,44 @@ def _ssh(db: Session, host: str, command: str, *, timeout: int = 180,
     deadline = time.monotonic() + (POLL_TIMEOUT if retry else 1)
     last_error = None
     while time.monotonic() < deadline:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            client.connect(host, username="root", pkey=key, allow_agent=False, look_for_keys=False,
-                           timeout=15, banner_timeout=15, auth_timeout=15)
-            # OPNsense assigns root a csh login shell.  Always select POSIX sh
-            # explicitly because lifecycle and validation commands use sh
-            # conditionals, substitutions, and `set -eu`.
-            _stdin, stdout, stderr = client.exec_command(_posix_command(command), timeout=timeout)
-            return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
-                    stderr.read().decode(errors="replace"))
-        except Exception as exc:
-            last_error = exc
-            if not retry:
+        for username in ("root", "freebsd", "ec2-user"):
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                client.connect(host, username=username, pkey=key, allow_agent=False,
+                               look_for_keys=False, timeout=15, banner_timeout=15,
+                               auth_timeout=15)
+                # Official FreeBSD images disable direct root login. Depending
+                # on the image release, their cloud user receives passwordless
+                # doas or sudo. Converted OPNsense images instead expose the
+                # managed root key. Select POSIX sh in both cases because the
+                # account's login shell may be csh.
+                shell = _posix_command(command)
+                if username != "root":
+                    privileged = (
+                        "if test -x /usr/local/bin/doas; then "
+                        f"exec /usr/local/bin/doas /bin/sh -c {shlex.quote(command)}; "
+                        "elif test -x /usr/local/bin/sudo; then "
+                        f"exec /usr/local/bin/sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "elif command -v sudo >/dev/null 2>&1; then "
+                        f"exec sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "else echo 'no supported privilege escalation tool' >&2; exit 127; fi"
+                    )
+                    shell = _posix_command(privileged)
+                _stdin, stdout, stderr = client.exec_command(shell, timeout=timeout)
+                return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
+                        stderr.read().decode(errors="replace"))
+            except paramiko.AuthenticationException as exc:
+                last_error = exc
+                continue
+            except Exception as exc:
+                last_error = exc
                 break
-            time.sleep(POLL_SECONDS)
-        finally:
-            client.close()
+            finally:
+                client.close()
+        if not retry:
+            break
+        time.sleep(POLL_SECONDS)
     raise ImageWorkflowError(f"SSH did not become ready: {last_error}")
 
 
@@ -358,16 +280,59 @@ def _posix_command(command: str) -> str:
     return "/bin/sh -c " + shlex.quote(command)
 
 
+def _ssh_stream(db: Session, host: str, command: str, content: bytes, *,
+                timeout: int = 180) -> tuple[int, str, str]:
+    """Execute a short command while streaming binary content to its stdin."""
+    private_key, _ = get_or_create_platform_keypair(db)
+    key = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key))
+    deadline = time.monotonic() + POLL_TIMEOUT
+    last_error = None
+    while time.monotonic() < deadline:
+        for username in ("root", "freebsd", "ec2-user"):
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                client.connect(host, username=username, pkey=key, allow_agent=False,
+                               look_for_keys=False, timeout=15, banner_timeout=15,
+                               auth_timeout=15)
+                shell = _posix_command(command)
+                if username != "root":
+                    privileged = (
+                        "if test -x /usr/local/bin/doas; then "
+                        f"exec /usr/local/bin/doas /bin/sh -c {shlex.quote(command)}; "
+                        "elif test -x /usr/local/bin/sudo; then "
+                        f"exec /usr/local/bin/sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "elif command -v sudo >/dev/null 2>&1; then "
+                        f"exec sudo -n /bin/sh -c {shlex.quote(command)}; "
+                        "else echo 'no supported privilege escalation tool' >&2; exit 127; fi"
+                    )
+                    shell = _posix_command(privileged)
+                stdin, stdout, stderr = client.exec_command(shell, timeout=timeout)
+                stdin.channel.sendall(content)
+                stdin.channel.shutdown_write()
+                return (stdout.channel.recv_exit_status(), stdout.read().decode(errors="replace"),
+                        stderr.read().decode(errors="replace"))
+            except paramiko.AuthenticationException as exc:
+                last_error = exc
+                continue
+            except Exception as exc:
+                last_error = exc
+                break
+            finally:
+                client.close()
+        time.sleep(POLL_SECONDS)
+    raise ImageWorkflowError(f"SSH upload did not become ready: {last_error}")
+
+
 def _upload_atomic(db: Session, host: str, path: str, content: bytes, mode: int = 0o600) -> None:
-    encoded = base64.b64encode(content).decode()
     temporary = path + ".part"
     directory = path.rsplit("/", 1)[0] or "/"
     command = (
         f"umask 077; install -d -m 700 {shlex.quote(directory)}; "
-        f"printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(temporary)} && "
+        f"cat > {shlex.quote(temporary)} && "
         f"chmod {mode:o} {shlex.quote(temporary)} && mv -f {shlex.quote(temporary)} {shlex.quote(path)}"
     )
-    code, _, error = _ssh(db, host, command)
+    code, _, error = _ssh_stream(db, host, command, content)
     if code:
         raise ImageWorkflowError(f"atomic upload of {path} failed: {error[:300]}")
 
@@ -384,7 +349,7 @@ def render_golden_config(db: Session, image: OpnsenseImage, cidr: str) -> str:
 <nextuid>2000</nextuid><nextgid>2000</nextgid><timezone>UTC</timezone><language>en_US</language>
 <ssh><enabled>1</enabled><port>22</port><permitrootlogin>1</permitrootlogin><interfaces>wan</interfaces><group>admins</group></ssh>
 <ctf_builder_provenance>{provenance}</ctf_builder_provenance></system>
-<interfaces><wan><if>vtnet0</if><descr>WAN</descr><enable>1</enable><ipaddr>dhcp</ipaddr><ipaddrv6>none</ipaddrv6><blockpriv>1</blockpriv><blockbogons>1</blockbogons></wan></interfaces>
+<interfaces><wan><if>ena0</if><descr>WAN</descr><enable>1</enable><ipaddr>dhcp</ipaddr><ipaddrv6>none</ipaddrv6><blockpriv>1</blockpriv><blockbogons>1</blockbogons></wan></interfaces>
 <gateways/><staticroutes/><filter/><OPNsense><Firewall><Filter><general><snat_mode>automatic</snat_mode></general><rules>
 <rule><enabled>1</enabled><statetype>keep</statetype><sequence>1</sequence><action>pass</action><quick>1</quick><interface>wan</interface><direction>in</direction><ipprotocol>inet</ipprotocol><protocol>tcp</protocol><source_net>{cidr}</source_net><destination_net>wanip</destination_net><destination_port>22</destination_port><description>CTF builder SSH</description></rule>
 </rules><snatrules/><npt/><onetoone/></Filter></Firewall></OPNsense><nat><outbound><mode>automatic</mode></outbound></nat><dhcpd/></opnsense>'''
@@ -407,66 +372,159 @@ def _verify_freebsd_base(db: Session, host: str) -> None:
         raise ImageWorkflowError(f"builder must be amd64 FreeBSD 15.1-compatible: {(error or output)[:300]}")
 
 
-def _wait_for_opnsense(db: Session, host: str, version: str) -> None:
-    deadline = time.monotonic() + POLL_TIMEOUT
-    last = "OPNsense has not answered"
-    while time.monotonic() < deadline:
+def bootstrap_launch_command(version: str) -> str:
+    release = validate_release(version)
+    bootstrap = (
+        f"/bin/sh /root/opnsense-bootstrap.sh -r {shlex.quote(release)} -y 2>&1 | "
+        "/usr/bin/tee -a /var/log/opnsense-bootstrap.log /dev/console >/dev/null"
+    )
+    return (
+        "printf 'nameserver 169.254.169.253\\n' > /etc/resolv.conf && "
+        "sysctl -n kern.boottime > /root/ctf-opnsense-bootstrap-boot && "
+        ": > /var/run/ctf-opnsense-bootstrap-launched && "
+        f"/usr/sbin/daemon -f /bin/sh -c {shlex.quote(bootstrap)}"
+    )
+
+
+def _launch_bootstrap_daemon(db: Session, host: str, version: str) -> None:
+    deadline = time.monotonic() + 300
+    while True:
         try:
             code, output, error = _ssh(
-                db, host, f"test -x /usr/local/sbin/configctl && opnsense-version -v", retry=False,
+                db, host, bootstrap_launch_command(version),
+                timeout=POLL_TIMEOUT, retry=False,
+            )
+        except ImageWorkflowError as exc:
+            detail = str(exc).lower()
+            expected_disconnects = (
+                "socket is closed", "eof", "ssh session not active",
+                "error reading ssh protocol banner",
+            )
+            if not any(marker in detail for marker in expected_disconnects):
+                raise
+            try:
+                marker_code, _, _ = _ssh(
+                    db, host, "test -f /var/run/ctf-opnsense-bootstrap-launched",
+                    retry=False,
+                )
+            except ImageWorkflowError:
+                marker_code = 1
+            if marker_code == 0:
+                logger.info("OPNsense bootstrap disconnected after launch: %s", exc)
+                return
+            if time.monotonic() >= deadline:
+                raise ImageWorkflowError(
+                    f"could not launch OPNsense bootstrap before SSH deadline: {exc}"
+                ) from exc
+            logger.info("OPNsense bootstrap SSH unavailable before launch; retrying")
+            time.sleep(POLL_SECONDS)
+            continue
+        if code not in {0, -1}:
+            detail = (error or output or f"exit {code}")[-1000:]
+            raise ImageWorkflowError(f"OPNsense bootstrap failed: {detail}")
+        return
+
+
+def _wait_for_opnsense(db: Session, host: str, version: str, *, diagnostics=None) -> None:
+    def failure(message: str) -> ImageWorkflowError:
+        if diagnostics is not None:
+            try:
+                detail = diagnostics()
+            except Exception as exc:
+                detail = f"diagnostics unavailable: {redact_error(exc)}"
+            if detail:
+                message = f"{message}\n{detail}"
+        return ImageWorkflowError(message)
+
+    deadline = time.monotonic() + POLL_TIMEOUT
+    last = "OPNsense has not answered"
+    last_progress = None
+    stalled_polls = 0
+    while time.monotonic() < deadline:
+        try:
+            command = (
+                "if pgrep -f '[o]pnsense-bootstrap' >/dev/null; then "
+                "tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; "
+                "elif test -s /root/ctf-opnsense-bootstrap-boot && "
+                "test \"$(cat /root/ctf-opnsense-bootstrap-boot)\" != \"$(sysctl -n kern.boottime)\"; then "
+                "if test -x /usr/local/sbin/configctl; then "
+                "if /usr/local/bin/flock -n -o /var/run/booting /usr/bin/true; then "
+                "opnsense-version -v; else echo 'OPNsense first boot still running' >&2; exit 1; fi; "
+                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 2; fi; "
+                "else tail -n 20 /var/log/opnsense-bootstrap.log >&2 2>/dev/null; exit 1; fi"
+            )
+            code, output, error = _ssh(
+                db, host, command, retry=False,
             )
             if code == 0 and release_matches(output.strip(), version):
                 return
-            last = (error or output or f"exit {code}")[:300]
+            last = (error or output or f"exit {code}")[-1000:]
         except Exception as exc:
             last = redact_error(exc)
+        else:
+            if code == 2:
+                raise failure(
+                    f"OPNsense bootstrap exited before conversion completed: {last}"
+                )
+            if code:
+                if last != last_progress:
+                    logger.info("OPNsense bootstrap progress: %s", last)
+                    last_progress = last
+                    stalled_polls = 0
+                else:
+                    stalled_polls += 1
+                    if stalled_polls * POLL_SECONDS >= BOOTSTRAP_STALL_TIMEOUT:
+                        raise failure(f"OPNsense bootstrap stalled: {last}")
         time.sleep(POLL_SECONDS)
-    raise ImageWorkflowError(f"bootstrap reboot did not return the expected OPNsense release: {last}")
+    raise failure(f"bootstrap reboot did not return the expected OPNsense release: {last}")
 
 
 def _provenance(image: OpnsenseImage) -> str:
     return hashlib.sha256(f"ctf-opnsense:{image.id}:{image.version}".encode()).hexdigest()
 
 
-def builder_validation_command(*, public_ip: str, version: str, cidr: str,
+def builder_validation_command(*, wan_ip: str, version: str, cidr: str,
                                provenance: str, nic_count: int = 1) -> str:
     php = ('require_once("config.inc"); $wan=$config["interfaces"]["wan"]["if"]??""; '
            '$lan=isset($config["interfaces"]["lan"])?"yes":"no"; '
            '$p=$config["system"]["ctf_builder_provenance"]??""; echo "$wan $lan $p";')
     source = str(ip_network(cidr).network_address)
+    def failed(message: str) -> str:
+        return f"{{ echo {shlex.quote(message)} >&2; exit 1; }}"
+
     return (
         f"set -eu; actual_version=$(opnsense-version -v); case \"$actual_version\" in "
-        f"{shlex.quote(version)}|{shlex.quote(version)}.*|{shlex.quote(version)}_*) ;; *) exit 1;; esac; "
-        "test -x /usr/local/sbin/configctl; test -w /conf/config.xml; "
-        f"set -- $(/usr/local/bin/php -r {shlex.quote(php)}); wan_if=$1; test \"$2\" = no; "
-        f"test \"$3\" = {shlex.quote(provenance)}; "
-        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^vtnet[0-9]+$'); "
-        f"test \"$#\" -eq {nic_count}; test \"$wan_if\" = vtnet0; "
-        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + public_ip)} >/dev/null; "
-        "route -n get default | grep -F \"interface: $wan_if\" >/dev/null; "
-        "test -s /root/.ssh/authorized_keys; "
-        "/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$'; "
-        "/usr/local/sbin/sshd -T | grep -qi '^pubkeyauthentication yes$'; "
-        "/usr/local/sbin/sshd -T | grep -qi '^passwordauthentication no$'; "
-        "/usr/local/sbin/sshd -T | grep -qi '^kbdinteractiveauthentication no$'; "
-        f"pfctl -sr | grep -F {shlex.quote('from ' + source + ' to')} | grep -E 'port = (ssh|22)' >/dev/null"
+        f"{shlex.quote(version)}|{shlex.quote(version)}.*|{shlex.quote(version)}_*) ;; "
+        f"*) {failed('unexpected OPNsense version')};; esac; "
+        f"test -x /usr/local/sbin/configctl || {failed('configctl missing')}; "
+        f"test -w /conf/config.xml || {failed('golden config not writable')}; "
+        f"set -- $(/usr/local/bin/php -r {shlex.quote(php)}); "
+        f"test \"$#\" -eq 3 || {failed('golden config not loaded')}; wan_if=$1; "
+        f"test \"$2\" = no || {failed('golden config unexpectedly contains LAN')}; "
+        f"test \"$3\" = {shlex.quote(provenance)} || {failed('golden config not loaded')}; "
+        "set -- $(ifconfig -l | tr ' ' '\\n' | grep -E '^ena[0-9]+$'); "
+        f"test \"$#\" -eq {nic_count} || {failed('unexpected ENA NIC count')}; "
+        f"test \"$wan_if\" = ena0 || {failed('WAN interface mismatch')}; "
+        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + wan_ip)} >/dev/null || {failed('WAN address missing')}; "
+        f"route -n get default | grep -F \"interface: $wan_if\" >/dev/null || {failed('default route mismatch')}; "
+        f"test -s /root/.ssh/authorized_keys || {failed('managed root key missing')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^permitrootlogin yes$' || {failed('root SSH login disabled')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^pubkeyauthentication yes$' || {failed('SSH public key authentication disabled')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^passwordauthentication no$' || {failed('SSH password authentication enabled')}; "
+        f"/usr/local/sbin/sshd -T | grep -qi '^kbdinteractiveauthentication no$' || {failed('SSH keyboard authentication enabled')}; "
+        f"pfctl -sr | grep -F {shlex.quote('from ' + source + ' to')} | grep -E 'port = (ssh|22)' >/dev/null || {failed('builder firewall rule missing')}"
     )
 
 
-def _validate_builder(db: Session, image: OpnsenseImage, host: str, cidr: str, label: str) -> None:
+def _validate_builder(db: Session, image: OpnsenseImage, host: str, wan_ip: str,
+                      cidr: str, label: str, *, nic_count: int = 1) -> None:
     command = builder_validation_command(
-        public_ip=host, version=image.version, cidr=cidr, provenance=_provenance(image),
+        wan_ip=wan_ip, version=image.version, cidr=cidr, provenance=_provenance(image),
+        nic_count=nic_count,
     )
     code, output, error = _ssh(db, host, command)
     if code:
         raise ImageWorkflowError(f"{label} failed: {(error or output)[:300]}")
-
-
-def _boot_id(db: Session, host: str) -> str:
-    code, output, error = _ssh(db, host, "sysctl -n kern.boottime")
-    if code or not output.strip():
-        raise ImageWorkflowError(f"could not read boot identity: {error[:300]}")
-    return output.strip()
 
 
 def _fingerprint(db: Session, host: str) -> str:
@@ -505,21 +563,23 @@ def _guest_ssh_online(host: str) -> bool:
         return False
 
 
-def _power_off_builder(db: Session, client: VultrImageClient,
+def _power_off_builder(db: Session, client,
                        image: OpnsenseImage, host: str) -> None:
     _halt(db, host)
     _wait_for_guest_shutdown(host)
-    # Vultr can leave a cleanly halted custom guest marked running.  Once the
-    # guest is offline, synchronize the hypervisor state before the hard gate.
+    # Once the guest is offline, synchronize the EC2 state before imaging.
     client.halt(image.builder_instance_id)
     client.wait_stopped(image.builder_instance_id)
 
 
-def _sanitize_and_halt(db: Session, client: VultrImageClient, image: OpnsenseImage, host: str) -> None:
+def _sanitize_and_halt(db: Session, client, image: OpnsenseImage, host: str) -> None:
     sanitize = (
         "rm -f /conf/sshd/ssh_host_* /etc/ssh/ssh_host_* /usr/local/etc/ssh/ssh_host_* "
         "/var/db/dhclient.leases.* /var/db/dhclient.leases /root/.*history /root/.sh_history "
-        "/root/opnsense-bootstrap.sh /var/log/opnsense-bootstrap.log; "
+        "/root/opnsense-bootstrap.sh /root/ctf-golden-config.xml "
+        "/root/ctf-opnsense-bootstrap-boot "
+        "/var/log/opnsense-bootstrap.log; "
+        "rm -f /var/run/ctf-opnsense-bootstrap-launched; "
         "rm -f /conf/ctf-site-ready /conf/ctf-site-applying /conf/ctf-site-failed "
         "/conf/ctf-site-apply.lock /var/log/ctf-site-apply.log "
         "/usr/local/etc/inc/plugins.inc.d/gamenet.inc; "
@@ -538,20 +598,26 @@ def _record_validation(image: OpnsenseImage, name: str, **data) -> None:
     image.validation_results = json.dumps(results, sort_keys=True)
 
 
-def _validate_clone_one(db: Session, image: OpnsenseImage, host: str, cidr: str) -> str:
-    _validate_builder(db, image, host, cidr, "WAN-only clone validation")
+def _validate_clone_one(db: Session, image: OpnsenseImage, host: str,
+                        wan_ip: str, cidr: str) -> str:
+    # The validation ENI is pre-attached at device index 1 so this clone can
+    # become the private-network peer after its pristine golden config passes.
+    _validate_builder(
+        db, image, host, wan_ip, cidr, "WAN-only clone validation", nic_count=2,
+    )
     fingerprint = _fingerprint(db, host)
     _record_validation(image, "clone_wan", public_ip=host, ssh_host_key=fingerprint)
     db.commit()
     return fingerprint
 
 
-def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment: dict,
+def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, wan_ip: str, attachment: dict,
                         cidr: str, peer_host: str, peer_ip: str) -> str:
     """Use the production snapshot-site configurator, then validate LAN/NAT policy."""
     from api.services.gamenet_provider import configure_snapshot_validation_site
+    private_ip = attachment["ip_address"]
     configure_snapshot_validation_site(
-        db, host=host, private_ip="172.31.254.1", lan_mac=attachment["mac_address"],
+        db, host=host, private_ip=private_ip, lan_mac=attachment["mac_address"],
         expected_version=image.version, control_plane_cidr=cidr,
     )
     command = (
@@ -560,9 +626,9 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment
         f"if ifconfig \"$i\" | grep -qiF {shlex.quote('ether ' + attachment['mac_address'].lower())}; then echo \"$i\"; fi; done); "
         "test -n \"$wan_if\" || { echo 'default WAN interface missing' >&2; exit 1; }; "
         "test -n \"$lan_if\" || { echo 'VPC MAC did not map to a LAN interface' >&2; exit 1; }; "
-        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + host)} >/dev/null || "
+        f"ifconfig \"$wan_if\" | grep -F {shlex.quote('inet ' + wan_ip)} >/dev/null || "
         "{ echo 'public WAN address missing' >&2; exit 1; }; "
-        "ifconfig \"$lan_if\" | grep -F 'inet 172.31.254.1' >/dev/null || "
+        f"ifconfig \"$lan_if\" | grep -F {shlex.quote('inet ' + private_ip)} >/dev/null || "
         "{ echo 'private LAN address missing' >&2; exit 1; }; "
         "pfctl -sr | grep -F \"pass in quick on $lan_if inet from ($lan_if:network) to any\" >/dev/null || "
         "{ echo 'effective LAN pass rule missing' >&2; exit 1; }; "
@@ -576,13 +642,13 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment
     # where the production site policy permits private traffic.
     peer_command = (
         f"ifconfig -a | grep -F {shlex.quote('inet ' + peer_ip)} >/dev/null; "
-        "ping -c 1 -t 3 172.31.254.1"
+        f"ping -c 1 -t 3 {shlex.quote(private_ip)}"
     )
     code, output, error = _ssh(db, peer_host, peer_command)
     if code:
         raise ImageWorkflowError(f"VPC private connectivity failed: {(error or output)[:300]}")
     fingerprint = _fingerprint(db, host)
-    _record_validation(image, "clone_vpc", public_ip=host, private_ip="172.31.254.1",
+    _record_validation(image, "clone_vpc", public_ip=host, private_ip=private_ip,
                        ssh_host_key=fingerprint)
     db.commit()
     return fingerprint
@@ -590,7 +656,7 @@ def _validate_clone_two(db: Session, image: OpnsenseImage, host: str, attachment
 
 def _configure_validation_peer(db: Session, host: str, attachment: dict) -> str:
     """Give clone one a temporary VPC address after its WAN-only gate passes."""
-    peer_ip = "172.31.254.2"
+    peer_ip = attachment["ip_address"]
     mac = attachment["mac_address"].lower()
     command = (
         "set -eu; iface=''; for candidate in $(ifconfig -l); do "
@@ -604,184 +670,63 @@ def _configure_validation_peer(db: Session, host: str, attachment: dict) -> str:
     return peer_ip
 
 
-def run_image_build(db: Session, image_id: int, *, vultr_factory=VultrImageClient,
+def _default_aws_workflow_factory():
+    from api.services.aws.opnsense_workflow import AwsOpnsenseWorkflow
+    return AwsOpnsenseWorkflow.from_env()
+
+
+def new_image(db: Session, version: str, *, provider_factory=None) -> OpnsenseImage:
+    """Create a resumable AWS AMI job."""
+    release = validate_release(version)
+    validate_control_plane_cidr()
+    if db.query(OpnsenseImage).filter(
+            OpnsenseImage.status.in_(RUNNING_STATES | {"interrupted"})).first():
+        raise ImageWorkflowError("another OPNsense image job is already running")
+    provider = (provider_factory or _default_aws_workflow_factory)()
+    placement = provider.preflight(SUPPORTED_RELEASES[release])
+    row = OpnsenseImage(
+        version=release, build_method=BUILD_METHOD, base_os=SUPPORTED_RELEASES[release],
+        bootstrap_source_url=BOOTSTRAP_SOURCE_URL, status="creating_builder",
+        phase="creating_builder", region=placement["region"],
+        availability_zone=placement["availability_zone"],
+    )
+    db.add(row); db.commit(); db.refresh(row)
+    return row
+
+
+def run_image_build(db: Session, image_id: int, *, provider_factory=None,
                     bootstrap_downloader=download_bootstrap) -> None:
     image = db.get(OpnsenseImage, image_id)
     if not image or image.status in TERMINAL_STATES:
         return
-    client = None
     try:
-        cidr = validate_control_plane_cidr()
-        validate_release(image.version)
-        validate_bootstrap_url(image.bootstrap_source_url or "")
-        client = vultr_factory()
-        os_id = client.preflight(image.base_os)
-        _, public_key = get_or_create_platform_keypair(db)
-        ssh_key_id = client.ensure_ssh_key(public_key)
-        validations = json.loads(image.validation_results or "{}")
-        snapshot_resume = (
-            not image.snapshot_id and image.phase == "snapshotting"
-            and validations.get("builder_boot_2", {}).get("passed")
-        )
-        builder_key = validations.get("builder_boot_2", {}).get("ssh_host_key")
-
-        if snapshot_resume:
-            builder = client.instance(image.builder_instance_id)
-            if builder.get("power_status") != "stopped":
-                host = builder.get("main_ip")
-                if not host:
-                    raise ImageWorkflowError("snapshot resume cannot resolve the builder address")
-                if _guest_ssh_online(host):
-                    _sanitize_and_halt(db, client, image, host)
-                else:
-                    # A prior run can be interrupted after the clean guest halt
-                    # but before Vultr records the corresponding power state.
-                    client.halt(image.builder_instance_id)
-                    client.wait_stopped(image.builder_instance_id)
-
-        if not image.snapshot_id and not snapshot_resume:
-            if not image.builder_firewall_group_id:
-                _set_phase(db, image, "creating_builder")
-                image.builder_firewall_group_id = client.create_firewall(image.version, cidr)
-                db.commit()
-            if not image.builder_instance_id:
-                image.builder_instance_id = client.create_builder(image, os_id=os_id, ssh_key_id=ssh_key_id)
-                db.commit()
-            builder = client.wait_instance(image.builder_instance_id)
-            host = builder.get("main_ip")
-            if not host:
-                raise ImageWorkflowError("builder did not receive a public IPv4 address")
-
-            state = _guest_state(db, host)
-            if state == "freebsd":
-                _set_phase(db, image, "bootstrapping")
-                _verify_freebsd_base(db, host)
-                script, digest = bootstrap_downloader(image.bootstrap_source_url)
-                image.bootstrap_sha256 = digest
-                db.commit()
-                config = render_golden_config(db, image, cidr).encode()
-                _upload_atomic(db, host, "/conf/config.xml", config)
-                _upload_atomic(db, host, "/root/opnsense-bootstrap.sh", script, 0o700)
-                command = (f"nohup sh /root/opnsense-bootstrap.sh -r {shlex.quote(image.version)} -y "
-                           ">/var/log/opnsense-bootstrap.log 2>&1 </dev/null &")
-                code, _, error = _ssh(db, host, command, timeout=30)
-                if code:
-                    raise ImageWorkflowError(f"could not launch OPNsense bootstrap: {error[:300]}")
-            elif state not in {"converting", "opnsense"}:
-                raise ImageWorkflowError(f"unrecognized builder state: {state}")
-
-            _wait_for_opnsense(db, host, image.version)
-            _set_phase(db, image, "validating")
-            _validate_builder(db, image, host, cidr, "first disk-boot validation")
-            builder_key = _fingerprint(db, host)
-            first_boot = _boot_id(db, host)
-            _record_validation(image, "builder_boot_1", public_ip=host, boot_id=first_boot,
-                               ssh_host_key=builder_key)
-            db.commit()
-
-            _power_off_builder(db, client, image, host)
-            client.start(image.builder_instance_id)
-            client.wait_instance(image.builder_instance_id)
-            _validate_builder(db, image, host, cidr, "second disk-boot validation")
-            second_boot = _boot_id(db, host)
-            if second_boot == first_boot:
-                raise ImageWorkflowError("second validation did not prove a changed boot identity")
-            _record_validation(image, "builder_boot_2", public_ip=host, boot_id=second_boot,
-                               ssh_host_key=builder_key)
-            db.commit()
-            _set_phase(db, image, "snapshotting")
-            _sanitize_and_halt(db, client, image, host)
-
-        if not image.snapshot_id:
-            image.snapshot_id = client.create_snapshot(image)
-            db.commit()
-        _set_phase(db, image, "snapshotting")
-        client.wait_snapshot(image.snapshot_id)
-        if not builder_key:
-            validations = json.loads(image.validation_results or "{}")
-            builder_key = validations.get("builder_boot_2", {}).get("ssh_host_key")
-        if not builder_key:
-            raise ImageWorkflowError("snapshot resume is missing the builder SSH host-key result")
-
-        if not image.test_instance_id:
-            image.test_instance_id = client.create_clone(image, 1)
-            db.commit()
-        clone_one = client.wait_instance(image.test_instance_id)
-        validations = json.loads(image.validation_results or "{}")
-        clone_one_key = validations.get("clone_wan", {}).get("ssh_host_key")
-        if not clone_one_key:
-            clone_one_key = _validate_clone_one(db, image, clone_one["main_ip"], cidr)
-        if clone_one_key == builder_key:
-            raise ImageWorkflowError("clone one reused the builder SSH host key")
-
-        if not image.validation_vpc_id:
-            image.validation_vpc_id = client.create_validation_vpc(image)
-            db.commit()
-        peer_attachment = client.attach_vpc(image.test_instance_id, image.validation_vpc_id)
-        peer_ip = _configure_validation_peer(db, clone_one["main_ip"], peer_attachment)
-        if not image.second_test_instance_id:
-            image.second_test_instance_id = client.create_clone(image, 2)
-            db.commit()
-        clone_two = client.wait_instance(image.second_test_instance_id)
-        attachment = client.attach_vpc(image.second_test_instance_id, image.validation_vpc_id)
-        clone_two_key = _validate_clone_two(
-            db, image, clone_two["main_ip"], attachment, cidr, clone_one["main_ip"], peer_ip,
-        )
-        if len({builder_key, clone_one_key, clone_two_key}) != 3:
-            raise ImageWorkflowError("builder and clone SSH host keys are not unique")
-
+        provider = (provider_factory or _default_aws_workflow_factory)()
+        result = provider.build(db, image, bootstrap_downloader)
+        evidence = result["validation_results"]
+        if not evidence.get("public_clone", {}).get("passed") or not evidence.get("private_clone", {}).get("passed"):
+            raise ImageWorkflowError("public and private AMI validation must both pass")
+        provider.cleanup_temporary(image, result)
+        for field in (
+            "builder_instance_id", "builder_vpc_id", "builder_subnet_id",
+            "validation_subnet_id", "ami_id",
+        ):
+            setattr(image, field, result.get(field))
+        image.backing_snapshot_ids_json = json.dumps(result["snapshot_ids"], sort_keys=True)
+        image.validation_results = json.dumps(evidence, sort_keys=True)
         image.validated_at = image.completed_at = utcnow()
         image.build_duration_seconds = elapsed_seconds(image)
         image.status = image.phase = "ready"
         image.error_detail = None
-        _audit(db, "opnsense_image_validation", image, snapshot_id=image.snapshot_id)
+        _audit(db, "opnsense_ami_validation", image, ami_id=image.ami_id)
         db.commit()
-        cleanup_validated_image(db, image, client)
     except Exception as exc:
         db.rollback()
         image = db.get(OpnsenseImage, image_id)
         if image:
             image.status = "failed"
             image.error_detail = redact_error(exc)
-            _audit(db, "opnsense_image_failure", image, phase=image.phase, error=image.error_detail)
+            _audit(db, "opnsense_ami_failure", image, phase=image.phase, error=image.error_detail)
             db.commit()
-    finally:
-        if client:
-            client.close()
-
-
-def cleanup_remote(image: OpnsenseImage, client: VultrImageClient, *, preserve_snapshot: bool) -> None:
-    errors = []
-    resources = [
-        ("instances", "test_instance_id"), ("instances", "second_test_instance_id"),
-        ("instances", "builder_instance_id"), ("vpcs", "validation_vpc_id"),
-        ("firewalls", "builder_firewall_group_id"),
-    ]
-    # Legacy IDs are cleanup-only and are never created by this workflow.
-    resources.extend([("iso", "vultr_iso_id"), ("vpcs", "builder_vpc_id")])
-    if not preserve_snapshot:
-        resources.append(("snapshots", "snapshot_id"))
-    for kind, attribute in resources:
-        identifier = getattr(image, attribute)
-        if not identifier:
-            continue
-        try:
-            client.delete(kind, identifier)
-            setattr(image, attribute, None)
-        except Exception as exc:
-            errors.append(f"{kind}/{identifier}: {redact_error(exc)}")
-    if errors:
-        raise ImageWorkflowError("; ".join(errors))
-
-
-def cleanup_validated_image(db: Session, image: OpnsenseImage, client: VultrImageClient) -> None:
-    try:
-        cleanup_remote(image, client, preserve_snapshot=True)
-        image.error_detail = None
-    except Exception as exc:
-        image.error_detail = "Snapshot validated; cleanup incomplete: " + redact_error(exc)
-        _audit(db, "opnsense_image_cleanup_failure", image, error=image.error_detail)
-    db.commit()
 
 
 def cleanup_local(_image: OpnsenseImage, **_kwargs) -> None:

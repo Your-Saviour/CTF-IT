@@ -269,6 +269,13 @@ class Site(Base):
     allocated_cidr: Mapped[str] = mapped_column(String(43), nullable=False)
     infrastructure_subnet: Mapped[str] = mapped_column(String(43), nullable=False)
     vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    availability_zone: Mapped[str] = mapped_column(String(32), nullable=True)
+    public_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    infrastructure_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    internet_gateway_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    route_table_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    wan_security_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    lan_security_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
     firewall_vm_id: Mapped[int] = mapped_column(
         ForeignKey("vms.id", name="fk_sites_firewall_vm_id", use_alter=True), nullable=True
     )
@@ -288,7 +295,7 @@ class Site(Base):
 
 
 class PrivateBootCertification(Base):
-    """Event-local proof that a stock Vultr image boots with only a VPC NIC."""
+    """Event-local record of the active AMI private-network validation gate."""
 
     __tablename__ = "private_boot_certifications"
     __table_args__ = (
@@ -332,6 +339,8 @@ class Zone(Base):
     team_role: Mapped[str] = mapped_column(String(8), nullable=False)
     subnet: Mapped[str] = mapped_column(String(43), nullable=False, unique=True)
     gateway_address: Mapped[str] = mapped_column(String(45), nullable=False)
+    subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    security_group_id: Mapped[str] = mapped_column(String(64), nullable=True)
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     site: Mapped["Site"] = relationship(back_populates="zones")
@@ -380,10 +389,21 @@ class VM(Base):
     semaphore_project_id: Mapped[int] = mapped_column(Integer, nullable=True)
     semaphore_task_id: Mapped[int] = mapped_column(Integer, nullable=True)
     agent_status: Mapped[str] = mapped_column(String(16), nullable=True)
-    # Vultr cloud provisioning
+    # Legacy Vultr fields remain readable for historical records.
     vultr_id: Mapped[str] = mapped_column(String(64), nullable=True)
     vultr_plan: Mapped[str] = mapped_column(String(64), nullable=True)
     vultr_region: Mapped[str] = mapped_column(String(16), nullable=True)
+    # Provider-neutral AWS provisioning fields.
+    cloud_instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    instance_type: Mapped[str] = mapped_column(String(64), nullable=True)
+    cloud_region: Mapped[str] = mapped_column(String(32), nullable=True)
+    availability_zone: Mapped[str] = mapped_column(String(32), nullable=True)
+    primary_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    wan_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    lan_eni_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    security_group_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    eip_allocation_id: Mapped[str] = mapped_column(String(64), nullable=True)
     cloudflare_record_id: Mapped[str] = mapped_column(String(64), nullable=True)
     vm_type: Mapped[str] = mapped_column(String(64), nullable=True)
     # Caldera attack tree cache
@@ -449,6 +469,12 @@ class OpnsenseImage(Base):
     second_test_instance_id: Mapped[str] = mapped_column(String(64), nullable=True)
     validation_vpc_id: Mapped[str] = mapped_column(String(64), nullable=True)
     snapshot_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    ami_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    backing_snapshot_ids_json: Mapped[str] = mapped_column(Text, nullable=True)
+    region: Mapped[str] = mapped_column(String(32), nullable=True)
+    availability_zone: Mapped[str] = mapped_column(String(32), nullable=True)
+    builder_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    validation_subnet_id: Mapped[str] = mapped_column(String(64), nullable=True)
     route_token: Mapped[str] = mapped_column(String(128), nullable=True)
     builder_config_token: Mapped[str] = mapped_column(String(128), nullable=True)
     build_method: Mapped[str] = mapped_column(String(32), nullable=True)

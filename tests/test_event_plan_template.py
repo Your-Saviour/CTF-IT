@@ -356,3 +356,15 @@ def test_zone_drag_translates_children_and_persists_once_on_release():
     assert "updateMachineTransforms" in canvas
     assert "event.stopPropagation()" in canvas
     assert ".on('end',function(event,d)" in compact
+
+
+def test_cloud_ui_uses_aws_contracts_and_no_vultr_actions():
+    admin = (ROOT / "frontend" / "templates" / "admin.html").read_text()
+    detail = (ROOT / "frontend" / "templates" / "vm_detail.html").read_text()
+    topology = (ROOT / "frontend" / "templates" / "topology.html").read_text()
+    assert "/admin/api/aws/instance-types" in admin
+    assert "/admin/api/aws/amis" in admin
+    assert "Create on AWS" in admin
+    assert "Vultr" not in admin + detail + topology
+    assert "/destroy-cloud" in detail + topology
+    assert "Destroy EC2 instance" in detail

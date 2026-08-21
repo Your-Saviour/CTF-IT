@@ -1,0 +1,252 @@
+from dataclasses import dataclass
+from typing import Mapping
+import random
+import time
+
+from botocore.exceptions import ClientError
+
+from .errors import AwsQuotaError, AwsRetryableError, AwsTerminalError
+from .tags import assert_owned, aws_tag_dict, aws_tag_list
+from .types import ElasticIpResult, InstanceResult
+
+
+_RETRYABLE_CODES = {
+    "InternalError", "InternalFailure", "RequestLimitExceeded", "ServiceUnavailable",
+    "Throttling", "ThrottlingException", "Unavailable",
+}
+_QUOTA_CODES = {
+    "AddressLimitExceeded", "InstanceLimitExceeded", "NetworkInterfaceLimitExceeded",
+    "VcpuLimitExceeded", "VpcLimitExceeded",
+}
+
+
+@dataclass(frozen=True)
+class NetworkInterfaceSpec:
+    device_index: int
+    subnet_id: str | None = None
+    security_group_ids: tuple[str, ...] = ()
+    eni_id: str | None = None
+    associate_public_ip: bool = False
+    delete_on_termination: bool = True
+    private_ip: str | None = None
+
+    def request(self) -> dict:
+        value = {
+            "DeviceIndex": self.device_index,
+            "DeleteOnTermination": self.delete_on_termination,
+        }
+        if self.eni_id:
+            value["NetworkInterfaceId"] = self.eni_id
+        else:
+            value["SubnetId"] = self.subnet_id
+            value["Groups"] = list(self.security_group_ids)
+            value["AssociatePublicIpAddress"] = self.associate_public_ip
+            if self.private_ip:
+                value["PrivateIpAddress"] = self.private_ip
+        return value
+
+
+@dataclass(frozen=True)
+class InstanceSpec:
+    ami_id: str
+    instance_type: str
+    client_token: str
+    network_interfaces: tuple[NetworkInterfaceSpec, ...]
+    tags: Mapping[str, str]
+    key_name: str | None = None
+    user_data: str = ""
+
+
+class AwsComputeProvider:
+    def __init__(self, ec2_client, *, max_attempts: int = 4,
+                 sleep=time.sleep, jitter=random.random):
+        self.ec2 = ec2_client
+        self.max_attempts = max(1, max_attempts)
+        self.sleep = sleep
+        self.jitter = jitter
+
+    def _call(self, operation: str, **kwargs):
+        for attempt in range(self.max_attempts):
+            try:
+                return getattr(self.ec2, operation)(**kwargs)
+            except ClientError as exc:
+                error = exc.response.get("Error", {})
+                code = error.get("Code", "Unknown")
+                message = error.get("Message", str(exc))
+                if code in _QUOTA_CODES:
+                    raise AwsQuotaError(f"{operation}: {message}") from exc
+                if code not in _RETRYABLE_CODES and not code.endswith("NotFound"):
+                    raise AwsTerminalError(f"{operation}: {code}: {message}") from exc
+                if attempt + 1 == self.max_attempts:
+                    raise AwsRetryableError(f"{operation}: {message}") from exc
+                delay = min(4.0, 0.25 * (2 ** attempt)) + (self.jitter() * 0.1)
+                self.sleep(delay)
+
+    @staticmethod
+    def _result(instance: dict) -> InstanceResult:
+        interfaces = instance.get("NetworkInterfaces", [])
+        primary = next(
+            (eni for eni in interfaces if eni.get("Attachment", {}).get("DeviceIndex") == 0),
+            interfaces[0] if interfaces else None,
+        )
+        return InstanceResult(
+            instance_id=instance["InstanceId"],
+            state=instance.get("State", {}).get("Name", "unknown"),
+            primary_eni_id=primary.get("NetworkInterfaceId") if primary else None,
+            public_ip=instance.get("PublicIpAddress"),
+            private_ip=instance.get("PrivateIpAddress"),
+            availability_zone=instance.get("Placement", {}).get("AvailabilityZone"),
+            primary_mac=primary.get("MacAddress") if primary else None,
+        )
+
+    def _owned_result(self, instance: dict, tags: Mapping[str, str]) -> InstanceResult:
+        assert_owned(aws_tag_dict(instance.get("Tags")), tags)
+        return self._result(instance)
+
+    def _find_by_client_token(self, token: str) -> dict | None:
+        response = self._call(
+            "describe_instances",
+            Filters=[
+                {"Name": "client-token", "Values": [token]},
+                {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
+            ],
+        )
+        return next(
+            (instance for reservation in response.get("Reservations", [])
+             for instance in reservation.get("Instances", [])),
+            None,
+        )
+
+    def launch_instance(self, spec: InstanceSpec) -> InstanceResult:
+        existing = self._find_by_client_token(spec.client_token)
+        if existing:
+            return self._owned_result(existing, spec.tags)
+        tagged_resources = ["instance", "volume"]
+        if any(not interface.eni_id for interface in spec.network_interfaces):
+            tagged_resources.append("network-interface")
+        request = {
+            "ImageId": spec.ami_id,
+            "InstanceType": spec.instance_type,
+            "ClientToken": spec.client_token,
+            "MinCount": 1,
+            "MaxCount": 1,
+            "MetadataOptions": {"HttpTokens": "required", "HttpEndpoint": "enabled"},
+            "NetworkInterfaces": [interface.request() for interface in spec.network_interfaces],
+            "TagSpecifications": [
+                {"ResourceType": resource, "Tags": aws_tag_list(spec.tags)}
+                for resource in tagged_resources
+            ],
+        }
+        if spec.key_name:
+            request["KeyName"] = spec.key_name
+        if spec.user_data:
+            request["UserData"] = spec.user_data
+        instance = self._call("run_instances", **request)["Instances"][0]
+        return self._result(instance)
+
+    def instance(self, instance_id: str) -> InstanceResult:
+        response = self._call("describe_instances", InstanceIds=[instance_id])
+        try:
+            instance = response["Reservations"][0]["Instances"][0]
+        except (KeyError, IndexError) as exc:
+            raise AwsRetryableError(f"instance {instance_id} is not visible yet") from exc
+        return self._result(instance)
+
+    def terminate_owned(self, instance_id: str, expected_tags: Mapping[str, str]) -> None:
+        response = self._call("describe_instances", InstanceIds=[instance_id])
+        instance = response["Reservations"][0]["Instances"][0]
+        assert_owned(aws_tag_dict(instance.get("Tags")), expected_tags)
+        self._call("terminate_instances", InstanceIds=[instance_id])
+
+    def set_source_dest_check(self, instance_id: str, *, enabled: bool) -> None:
+        response = self._call("describe_instances", InstanceIds=[instance_id])
+        interfaces = response["Reservations"][0]["Instances"][0].get("NetworkInterfaces", [])
+        if not interfaces:
+            raise AwsRetryableError(f"instance {instance_id} interfaces are not visible yet")
+        for interface in interfaces:
+            self._call(
+                "modify_network_interface_attribute",
+                NetworkInterfaceId=interface["NetworkInterfaceId"],
+                SourceDestCheck={"Value": enabled},
+            )
+
+    def allocate_eip(self, tags: Mapping[str, str]) -> ElasticIpResult:
+        response = self._call(
+            "allocate_address",
+            Domain="vpc",
+            TagSpecifications=[{"ResourceType": "elastic-ip", "Tags": aws_tag_list(tags)}],
+        )
+        return ElasticIpResult(response["AllocationId"], response["PublicIp"])
+
+    def ensure_eip(self, tags: Mapping[str, str]) -> ElasticIpResult:
+        response = self._call("describe_addresses", Filters=[
+            {"Name": f"tag:{key}", "Values": [value]} for key, value in tags.items()
+        ])
+        addresses = response.get("Addresses", [])
+        if len(addresses) > 1:
+            raise AwsTerminalError("multiple Elastic IPs match one ownership identity")
+        if addresses:
+            address = addresses[0]
+            assert_owned(aws_tag_dict(address.get("Tags")), tags)
+            return ElasticIpResult(
+                address["AllocationId"], address["PublicIp"], address.get("AssociationId"),
+            )
+        return self.allocate_eip(tags)
+
+    def associate_eip(self, allocation_id: str, eni_id: str) -> str:
+        addresses = self._call("describe_addresses", AllocationIds=[allocation_id]).get(
+            "Addresses", []
+        )
+        if addresses and addresses[0].get("NetworkInterfaceId") == eni_id:
+            return addresses[0].get("AssociationId", "")
+        response = self._call(
+            "associate_address",
+            AllocationId=allocation_id,
+            NetworkInterfaceId=eni_id,
+            AllowReassociation=False,
+        )
+        return response["AssociationId"]
+
+    def release_owned_eip(self, allocation_id: str, expected_tags: Mapping[str, str]) -> None:
+        response = self._call("describe_addresses", AllocationIds=[allocation_id])
+        address = response["Addresses"][0]
+        assert_owned(aws_tag_dict(address.get("Tags")), expected_tags)
+        if address.get("AssociationId"):
+            self._call("disassociate_address", AssociationId=address["AssociationId"])
+        self._call("release_address", AllocationId=allocation_id)
+
+    def ensure_key_pair(self, name: str, public_key: str, tags: Mapping[str, str]) -> str:
+        try:
+            response = self._call("describe_key_pairs", KeyNames=[name])
+            key = response["KeyPairs"][0]
+            assert_owned(aws_tag_dict(key.get("Tags")), tags)
+            return key["KeyPairId"]
+        except AwsRetryableError:
+            response = self._call(
+                "import_key_pair",
+                KeyName=name,
+                PublicKeyMaterial=public_key.encode(),
+                TagSpecifications=[{"ResourceType": "key-pair", "Tags": aws_tag_list(tags)}],
+            )
+            return response["KeyPairId"]
+
+    def wait_running(self, instance_id: str, *, delay: int = 5, max_attempts: int = 120) -> None:
+        self.ec2.get_waiter("instance_running").wait(
+            InstanceIds=[instance_id], WaiterConfig={"Delay": delay, "MaxAttempts": max_attempts}
+        )
+
+    def wait_stopped(self, instance_id: str, *, delay: int = 5, max_attempts: int = 120) -> None:
+        self.ec2.get_waiter("instance_stopped").wait(
+            InstanceIds=[instance_id], WaiterConfig={"Delay": delay, "MaxAttempts": max_attempts}
+        )
+
+    def stop(self, instance_id: str) -> None:
+        self._call("stop_instances", InstanceIds=[instance_id])
+
+    def start(self, instance_id: str) -> None:
+        self._call("start_instances", InstanceIds=[instance_id])
+
+    def wait_terminated(self, instance_id: str, *, delay: int = 5, max_attempts: int = 120) -> None:
+        self.ec2.get_waiter("instance_terminated").wait(
+            InstanceIds=[instance_id], WaiterConfig={"Delay": delay, "MaxAttempts": max_attempts}
+        )

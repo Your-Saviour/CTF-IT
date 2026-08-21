@@ -1,12 +1,13 @@
 ---
-# Configure the Vultr VPC network interface on an Ubuntu target VM.
-# The VPC interface (ens7) is assigned a static IP with MTU 1450 (required for Vultr VXLAN).
+# Configure an AWS secondary ENI on an Ubuntu endpoint.
+# The interface is selected by its recorded EC2 MAC address, not a device name.
 #
 # Required extra vars:
 #   vpc_ip          - Static IP to assign (e.g. "10.1.1.10")
 #   vpc_subnet_mask - Subnet mask bits (e.g. 24)
 #   vpc_gateway     - Default gateway on VPC (OPNsense LAN IP, e.g. "10.1.1.1")
-#   vpc_interface   - Interface name for the VPC NIC (default: "ens7" on Vultr Ubuntu)
+#   vpc_mac         - MAC address reported for the EC2 ENI
+#   vpc_mtu         - Optional interface MTU (default: 1500)
 
 - name: Configure VPC Interface
   hosts: all
@@ -14,6 +15,12 @@
   gather_facts: false
 
   tasks:
+
+    - name: Validate recorded ENI MAC address
+      ansible.builtin.assert:
+        that:
+          - vpc_mac is match('^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
+        fail_msg: "vpc_mac must be the MAC address recorded for the AWS ENI"
 
     - name: Ensure netplan config directory exists
       ansible.builtin.file:
@@ -28,8 +35,6 @@
         owner: root
         group: root
         mode: "0600"
-      vars:
-        vpc_interface: "{{ vpc_interface | default('ens7') }}"
 
     - name: Apply netplan configuration
       ansible.builtin.shell:

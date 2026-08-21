@@ -534,9 +534,9 @@
         <div style="background: var(--bg-deep); padding: 1rem; border-radius: 4px; border: 1px solid var(--border);">
             <!-- Tab switcher -->
             <div style="display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 1px solid var(--border);">
-                <button id="vm-tab-vultr" onclick="switchVMTab('vultr')"
+                <button id="vm-tab-cloud" onclick="switchVMTab('cloud')"
                     style="background: none; border: none; border-bottom: 2px solid var(--cyan); color: var(--cyan); padding: 0.4rem 0.9rem; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 600;">
-                    Create on Vultr
+                    Create on AWS
                 </button>
                 <button id="vm-tab-manual" onclick="switchVMTab('manual')"
                     style="background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); padding: 0.4rem 0.9rem; cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
@@ -544,8 +544,8 @@
                 </button>
             </div>
 
-            <!-- Vultr creation form -->
-            <div id="vm-panel-vultr">
+            <!-- AWS creation form -->
+            <div id="vm-panel-cloud">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
                     <div class="form-group" style="margin-bottom: 0;">
                         <label for="vf-vhostname" style="font-size: 0.8rem;">Hostname</label>
@@ -556,15 +556,15 @@
                         <select id="vf-vteam" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></select>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
-                        <label for="vf-vos" style="font-size: 0.8rem;">Operating System</label>
+                        <label for="vf-vos" style="font-size: 0.8rem;">Approved AMI</label>
                         <select id="vf-vos" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">
-                            <option value="">Loading OS list...</option>
+                            <option value="">Loading AMIs...</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
-                        <label for="vf-vplan" style="font-size: 0.8rem;">Plan</label>
+                        <label for="vf-vplan" style="font-size: 0.8rem;">Instance type</label>
                         <select id="vf-vplan" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;">
-                            <option value="">Loading plans...</option>
+                            <option value="">Loading instance types...</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
@@ -577,7 +577,7 @@
                     <textarea id="vf-vnotes" rows="2" style="background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-primary); padding: 0.5rem; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; width: 100%;"></textarea>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <button class="btn btn-primary btn-sm" onclick="createVMOnVultr()">Create VM</button>
+                    <button class="btn btn-primary btn-sm" onclick="createVMOnAWS()">Create VM</button>
                     <button class="btn-outline" onclick="hideVMForm()" style="padding: 0.35rem 0.75rem;">Cancel</button>
                     <span id="vf-vconfigured" style="font-size: 0.75rem; color: var(--text-muted);"></span>
                 </div>
@@ -823,7 +823,7 @@ function showEventForm(eventData) {
     document.getElementById('ef-vm-json-editor').classList.remove('active');
     document.getElementById('ef-vm-mode-toggle').textContent = 'Show Raw JSON';
     var vmQuotaData = (eventData && eventData.vm_quota) ? eventData.vm_quota : {};
-    fetchVultrOptions().then(function() {
+    fetchAwsOptions().then(function() {
         populateVmQuotaForm(vmQuotaData);
     });
 
@@ -1006,23 +1006,19 @@ document.getElementById('ef-add-tag').addEventListener('click', function() {
 // ── VM Quota Editor ──
 
 var efVmJsonMode = false;
-var cachedVultrOS = null;
-var cachedVultrPlans = null;
+var cachedAwsInstanceTypes = null;
 var cachedBaseTypes = null;
 
-function fetchVultrOptions() {
-    if (cachedVultrOS && cachedVultrPlans && cachedBaseTypes) return Promise.resolve();
+function fetchAwsOptions() {
+    if (cachedAwsInstanceTypes && cachedBaseTypes) return Promise.resolve();
     return Promise.all([
-        fetch('/admin/api/vultr/os').then(function(r) { return r.ok ? r.json() : {os: []}; }),
-        fetch('/admin/api/vultr/plans').then(function(r) { return r.ok ? r.json() : {plans: []}; }),
+        fetch('/admin/api/aws/instance-types').then(function(r) { return r.ok ? r.json() : {instance_types: []}; }),
         fetch('/admin/api/base-types').then(function(r) { return r.ok ? r.json() : []; })
     ]).then(function(results) {
-        cachedVultrOS = results[0].os || [];
-        cachedVultrPlans = results[1].plans || [];
-        cachedBaseTypes = Array.isArray(results[2]) ? results[2] : [];
+        cachedAwsInstanceTypes = results[0].instance_types || [];
+        cachedBaseTypes = Array.isArray(results[1]) ? results[1] : [];
     }).catch(function() {
-        cachedVultrOS = cachedVultrOS || [];
-        cachedVultrPlans = cachedVultrPlans || [];
+        cachedAwsInstanceTypes = cachedAwsInstanceTypes || [];
         cachedBaseTypes = cachedBaseTypes || [];
     });
 }
@@ -1143,7 +1139,7 @@ function populateVmQuotaForm(vmQuota) {
 }
 
 document.getElementById('ef-add-vm-type').addEventListener('click', function() {
-    fetchVultrOptions().then(function() { addVmTypeRow('', {}); });
+    fetchAwsOptions().then(function() { addVmTypeRow('', {}); });
 });
 
 document.getElementById('ef-vm-mode-toggle').addEventListener('click', function() {
@@ -1162,7 +1158,7 @@ document.getElementById('ef-vm-mode-toggle').addEventListener('click', function(
     } else {
         try {
             var vmQuota = JSON.parse(document.getElementById('ef-vm-quota-json').value);
-            fetchVultrOptions().then(function() {
+            fetchAwsOptions().then(function() {
                 populateVmQuotaForm(vmQuota);
                 jsonEl.classList.remove('active');
                 structEl.classList.add('active');
@@ -1390,16 +1386,8 @@ function startEvent(id) {
                     });
                     totalVms *= eventTeams.length;
 
-                    // Try to estimate cost from cached plans
+                    // AWS readiness supplies pricing when the Pricing API is available.
                     var costStr = '';
-                    if (cachedVultrPlans && cachedVultrPlans.length > 0) {
-                        Object.keys(event.vm_quota).forEach(function(key) {
-                            var spec = event.vm_quota[key];
-                            var plan = cachedVultrPlans.find(function(p) { return p.id === spec.default_plan; });
-                            if (plan) monthlyCost += (plan.monthly_cost || 0) * (spec.count || 1) * eventTeams.length;
-                        });
-                        costStr = ' Estimated cost: $' + monthlyCost.toFixed(2) + '/mo.';
-                    }
 
                     if (!confirm('This will create ' + totalVms + ' VMs across ' + eventTeams.length + ' teams.' + costStr + ' Proceed?')) return;
 
@@ -1514,52 +1502,45 @@ function showTeamForm() {
 function hideTeamForm() { document.getElementById('team-form-panel').style.display = 'none'; }
 
 function switchVMTab(tab) {
-    var isVultr = tab === 'vultr';
-    document.getElementById('vm-panel-vultr').style.display = isVultr ? 'block' : 'none';
-    document.getElementById('vm-panel-manual').style.display = isVultr ? 'none' : 'block';
-    var tabVultr = document.getElementById('vm-tab-vultr');
+    var isCloud = tab === 'cloud';
+    document.getElementById('vm-panel-cloud').style.display = isCloud ? 'block' : 'none';
+    document.getElementById('vm-panel-manual').style.display = isCloud ? 'none' : 'block';
+    var tabCloud = document.getElementById('vm-tab-cloud');
     var tabManual = document.getElementById('vm-tab-manual');
-    tabVultr.style.borderBottomColor = isVultr ? 'var(--cyan)' : 'transparent';
-    tabVultr.style.color = isVultr ? 'var(--cyan)' : 'var(--text-secondary)';
-    tabManual.style.borderBottomColor = isVultr ? 'transparent' : 'var(--cyan)';
-    tabManual.style.color = isVultr ? 'var(--text-secondary)' : 'var(--cyan)';
+    tabCloud.style.borderBottomColor = isCloud ? 'var(--cyan)' : 'transparent';
+    tabCloud.style.color = isCloud ? 'var(--cyan)' : 'var(--text-secondary)';
+    tabManual.style.borderBottomColor = isCloud ? 'transparent' : 'var(--cyan)';
+    tabManual.style.color = isCloud ? 'var(--text-secondary)' : 'var(--cyan)';
 }
 
-var _vultrDataLoaded = false;
-function loadVultrData() {
-    if (_vultrDataLoaded) return;
-    _vultrDataLoaded = true;
-    // Load OS options
-    fetch('/admin/api/vultr/os').then(function(r) { return r.json(); }).then(function(data) {
+var _awsDataLoaded = false;
+function loadAWSData() {
+    if (_awsDataLoaded) return;
+    _awsDataLoaded = true;
+    fetch('/admin/api/aws/amis').then(function(r) { return r.json(); }).then(function(data) {
         var sel = document.getElementById('vf-vos');
         if (data.error) {
             sel.innerHTML = '<option value="">' + esc(data.error) + '</option>';
-            document.getElementById('vf-vconfigured').textContent = 'Vultr not configured';
+            document.getElementById('vf-vconfigured').textContent = 'AWS not configured';
             return;
         }
-        sel.innerHTML = data.os.map(function(o) {
-            return '<option value="' + esc(o.name) + '">' + esc(o.name) + '</option>';
+        sel.innerHTML = data.amis.map(function(ami) {
+            return '<option value="' + esc(ami.region) + '">' + esc(ami.region + ' · ' + ami.ami_id) + '</option>';
         }).join('');
     }).catch(function() {
-        document.getElementById('vf-vos').innerHTML = '<option value="">Failed to load OS list</option>';
+        document.getElementById('vf-vos').innerHTML = '<option value="">Failed to load AMIs</option>';
     });
-    // Load plan options
-    fetch('/admin/api/vultr/plans').then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/admin/api/aws/instance-types').then(function(r) { return r.json(); }).then(function(data) {
         var sel = document.getElementById('vf-vplan');
         if (data.error) {
             sel.innerHTML = '<option value="">' + esc(data.error) + '</option>';
             return;
         }
-        sel.innerHTML = data.plans.map(function(p) {
+        sel.innerHTML = data.instance_types.map(function(p) {
             return '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>';
         }).join('');
-        // Smallest plans are not compatible with every OS image. Prefer the
-        // lowest generally usable option rather than silently submitting 512MB.
-        if (Array.from(sel.options).some(function(option) { return option.value === 'vc2-1c-1gb'; })) {
-            sel.value = 'vc2-1c-1gb';
-        }
     }).catch(function() {
-        document.getElementById('vf-vplan').innerHTML = '<option value="">Failed to load plans</option>';
+        document.getElementById('vf-vplan').innerHTML = '<option value="">Failed to load instance types</option>';
     });
 }
 
@@ -1574,28 +1555,28 @@ function showVMForm() {
     document.getElementById('vf-vteam').innerHTML = html;
 
     document.getElementById('vm-form-panel').style.display = 'block';
-    loadVultrData();
+    loadAWSData();
 }
 function hideVMForm() { document.getElementById('vm-form-panel').style.display = 'none'; }
 
-function createVMOnVultr() {
+function createVMOnAWS() {
     var hostname = document.getElementById('vf-vhostname').value.trim();
     var team_id = parseInt(document.getElementById('vf-vteam').value);
-    var vultr_os = document.getElementById('vf-vos').value;
-    var vultr_plan = document.getElementById('vf-vplan').value;
+    var region = document.getElementById('vf-vos').value;
+    var instance_type = document.getElementById('vf-vplan').value;
     if (!hostname) { showToast('Hostname is required'); return; }
     if (!team_id) { showToast('Select a team'); return; }
-    if (!vultr_os) { showToast('Select an OS'); return; }
-    if (!vultr_plan) { showToast('Select a plan'); return; }
+    if (!region) { showToast('Select an approved AMI'); return; }
+    if (!instance_type) { showToast('Select an instance type'); return; }
     var body = {
         hostname: hostname,
         team_id: team_id,
-        vultr_os: vultr_os,
-        vultr_plan: vultr_plan,
+        region: region,
+        instance_type: instance_type,
         ssh_user: document.getElementById('vf-vsshuser').value.trim() || 'root',
         notes: document.getElementById('vf-vnotes').value.trim() || null,
     };
-    fetch('/admin/api/vms/create-vultr', {
+    fetch('/admin/api/vms/create-cloud', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)

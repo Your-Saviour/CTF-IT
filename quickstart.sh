@@ -28,7 +28,15 @@ DOMAIN="${DOMAIN:-}"
 ACME_EMAIL="${ACME_EMAIL:-}"
 SERVER_IP="${SERVER_IP:-}"
 TRAEFIK_USER="${TRAEFIK_USER:-}"
-VULTR_API_KEY="${VULTR_API_KEY:-}"
+AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-}"
+AWS_ENVIRONMENT="${AWS_ENVIRONMENT:-production}"
+AWS_STANDARD_VPC_ID="${AWS_STANDARD_VPC_ID:-}"
+AWS_STANDARD_SUBNET_ID="${AWS_STANDARD_SUBNET_ID:-}"
+AWS_STANDARD_SECURITY_GROUP_IDS="${AWS_STANDARD_SECURITY_GROUP_IDS:-}"
+AWS_UBUNTU_AMIS="${AWS_UBUNTU_AMIS:-}"
+AWS_FREEBSD_AMIS="${AWS_FREEBSD_AMIS:-}"
+AWS_AVAILABILITY_ZONES="${AWS_AVAILABILITY_ZONES:-}"
+AWS_INSTANCE_TYPES="${AWS_INSTANCE_TYPES:-t3.small,t3.medium,t3.large}"
 CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 CLOUDFLARE_DOMAIN="${CLOUDFLARE_DOMAIN:-}"
 AI_API_BASE="${AI_API_BASE:-}"
@@ -132,7 +140,10 @@ Options:
   -h, --help          Show this help and exit.
 
 Non-interactive env vars: DOMAIN, ACME_EMAIL, SERVER_IP, TRAEFIK_USER,
-  VULTR_API_KEY, CLOUDFLARE_API_TOKEN, CLOUDFLARE_DOMAIN, AI_API_BASE,
+  AWS_DEFAULT_REGION, AWS_ENVIRONMENT, AWS_STANDARD_VPC_ID,
+  AWS_STANDARD_SUBNET_ID, AWS_STANDARD_SECURITY_GROUP_IDS, AWS_UBUNTU_AMIS,
+  AWS_FREEBSD_AMIS, AWS_AVAILABILITY_ZONES, AWS_INSTANCE_TYPES,
+  CLOUDFLARE_API_TOKEN, CLOUDFLARE_DOMAIN, AI_API_BASE,
   AI_API_KEY, AI_MODEL.
 EOF
 }
@@ -217,7 +228,17 @@ collect_inputs() {
     prompt_var TRAEFIK_USER "Traefik dashboard admin username" "admin" false
   fi
   # Optional — relevant to both root and deploy env files.
-  prompt_var VULTR_API_KEY "Vultr API key (optional, blank to skip)" "" false
+  prompt_var AWS_DEFAULT_REGION "AWS region (optional, blank to skip cloud provisioning)" "" false
+  if [[ -n "$AWS_DEFAULT_REGION" ]]; then
+    prompt_var AWS_ENVIRONMENT "AWS environment tag" "production" true
+    prompt_var AWS_STANDARD_VPC_ID "AWS standard VPC ID" "" true
+    prompt_var AWS_STANDARD_SUBNET_ID "AWS standard subnet ID" "" true
+    prompt_var AWS_STANDARD_SECURITY_GROUP_IDS "AWS standard security group IDs (comma separated)" "" true
+    prompt_var AWS_UBUNTU_AMIS "Approved Ubuntu AMI JSON mapping" "" true
+    prompt_var AWS_FREEBSD_AMIS "Approved FreeBSD AMI JSON mapping" "" true
+    prompt_var AWS_AVAILABILITY_ZONES "Approved Availability Zone JSON mapping" "" true
+    prompt_var AWS_INSTANCE_TYPES "Approved EC2 instance types" "t3.small,t3.medium,t3.large" true
+  fi
   prompt_var CLOUDFLARE_API_TOKEN "Cloudflare API token (optional, blank to skip)" "" false
   prompt_var CLOUDFLARE_DOMAIN "Cloudflare domain (optional, blank to skip)" "" false
   prompt_var AI_API_BASE "OpenAI-compatible API URL (optional, blank to configure later)" "" false
@@ -247,8 +268,10 @@ gen_root_env() {
       echo "CTF_API_KEY=$(openssl rand -hex 32)" >> "$ROOT_ENV"
       log "Added missing CTF_API_KEY to $ROOT_ENV"
     fi
-    if [[ -n "$VULTR_API_KEY" ]] && ! grep -q '^VULTR_API_KEY=' "$ROOT_ENV"; then
-      echo "VULTR_API_KEY=$VULTR_API_KEY" >> "$ROOT_ENV"
+    if [[ -n "$AWS_DEFAULT_REGION" ]] && ! grep -q '^AWS_DEFAULT_REGION=' "$ROOT_ENV"; then
+      for key in AWS_DEFAULT_REGION AWS_ENVIRONMENT AWS_STANDARD_VPC_ID AWS_STANDARD_SUBNET_ID AWS_STANDARD_SECURITY_GROUP_IDS AWS_UBUNTU_AMIS AWS_FREEBSD_AMIS AWS_AVAILABILITY_ZONES AWS_INSTANCE_TYPES; do
+        echo "$key=${!key}" >> "$ROOT_ENV"
+      done
     fi
     if [[ -n "$CLOUDFLARE_API_TOKEN" ]] && ! grep -q '^CLOUDFLARE_API_TOKEN=' "$ROOT_ENV"; then
       echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN" >> "$ROOT_ENV"
@@ -284,7 +307,11 @@ gen_root_env() {
     echo "AGENT_API_KEY=$agent_api_key"
     echo "CTF_API_KEY=$ctf_api_key"
     echo "EVENT_QUOTA=$quota"
-    [[ -n "$VULTR_API_KEY" ]]        && echo "VULTR_API_KEY=$VULTR_API_KEY"
+    if [[ -n "$AWS_DEFAULT_REGION" ]]; then
+      for key in AWS_DEFAULT_REGION AWS_ENVIRONMENT AWS_STANDARD_VPC_ID AWS_STANDARD_SUBNET_ID AWS_STANDARD_SECURITY_GROUP_IDS AWS_UBUNTU_AMIS AWS_FREEBSD_AMIS AWS_AVAILABILITY_ZONES AWS_INSTANCE_TYPES; do
+        echo "$key=${!key}"
+      done
+    fi
     [[ -n "$CLOUDFLARE_API_TOKEN" ]] && echo "CLOUDFLARE_API_TOKEN=$CLOUDFLARE_API_TOKEN"
     [[ -n "$CLOUDFLARE_DOMAIN" ]]    && echo "CLOUDFLARE_DOMAIN=$CLOUDFLARE_DOMAIN"
     [[ -n "$AI_API_BASE" ]]          && echo "AI_API_BASE=$AI_API_BASE"
@@ -317,8 +344,13 @@ validate_configuration() {
     || err "Generated Docker Compose configuration is invalid."
   [[ -n "$(read_env_value "$ROOT_ENV" AI_API_BASE)" ]] \
     || warn "AI_API_BASE is not configured; the AI-agent UI will run, but LLM actions will be unavailable."
-  [[ -n "$(read_env_value "$ROOT_ENV" VULTR_API_KEY)" ]] \
-    || warn "VULTR_API_KEY is not configured; automatic cloud VM provisioning will be unavailable."
+  if [[ -n "$(read_env_value "$ROOT_ENV" AWS_DEFAULT_REGION)" ]]; then
+    for key in AWS_ENVIRONMENT AWS_STANDARD_VPC_ID AWS_STANDARD_SUBNET_ID AWS_STANDARD_SECURITY_GROUP_IDS AWS_UBUNTU_AMIS AWS_FREEBSD_AMIS AWS_AVAILABILITY_ZONES AWS_INSTANCE_TYPES; do
+      require_env_value "$ROOT_ENV" "$key"
+    done
+  else
+    warn "AWS is not configured; automatic cloud VM provisioning will be unavailable."
+  fi
 }
 
 configure_cloudflare_dns() {
@@ -400,7 +432,6 @@ gen_deploy_env() {
     echo "SEMAPHORE_ACCESS_KEY_ENCRYPTION=$enc"
     echo "SEMAPHORE_POSTGRES_PASSWORD=$pgpw"
     echo "CTF_POSTGRES_PASSWORD=$ctfpgpw"
-    [[ -n "$VULTR_API_KEY" ]] && echo "VULTR_API_KEY=$VULTR_API_KEY"
   } > "$DEPLOY_ENV"
   chmod 600 "$DEPLOY_ENV"
   log "Wrote $DEPLOY_ENV"

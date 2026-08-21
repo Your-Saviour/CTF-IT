@@ -193,13 +193,21 @@
                 <span class="detail-label">SSH Port</span>
                 <span class="detail-value" id="ci-port">—</span>
             </div>
-            <div class="detail-row" id="ci-vultr-row" style="display:none;">
-                <span class="detail-label">Vultr Plan</span>
-                <span class="detail-value" id="ci-vultr-plan">—</span>
+            <div class="detail-row" id="ci-instance-type-row" style="display:none;">
+                <span class="detail-label">Instance type</span>
+                <span class="detail-value" id="ci-instance-type">—</span>
             </div>
             <div class="detail-row" id="ci-region-row" style="display:none;">
                 <span class="detail-label">Region</span>
-                <span class="detail-value" id="ci-vultr-region">—</span>
+                <span class="detail-value" id="ci-cloud-region">—</span>
+            </div>
+            <div class="detail-row" id="ci-az-row" style="display:none;">
+                <span class="detail-label">Availability Zone</span>
+                <span class="detail-value" id="ci-availability-zone">—</span>
+            </div>
+            <div class="detail-row" id="ci-instance-id-row" style="display:none;">
+                <span class="detail-label">EC2 instance</span>
+                <span class="detail-value" id="ci-instance-id">—</span>
             </div>
             <div class="detail-row" id="ci-vmtype-row" style="display:none;">
                 <span class="detail-label">VM Type</span>
@@ -336,7 +344,7 @@
     </table>
 </div>
 
-<!-- VM Creation Status (shown while Vultr creates the instance) -->
+<!-- VM Creation Status -->
 <div class="card" id="create-card" style="display:none; margin-bottom: 1.25rem;">
     <h3>VM Creation Status</h3>
     <div class="provision-steps" id="create-steps"></div>
@@ -383,7 +391,7 @@
         <button class="btn btn-primary" id="btn-provision" onclick="startProvision()">Provision VM</button>
         <button class="btn" id="btn-deploy-agent" onclick="deployAgent()">Deploy Agent</button>
         <button class="btn btn-primary" onclick="exportAnsible()">Export Ansible Playbook</button>
-        <button class="btn btn-danger" id="btn-destroy-vultr" style="display:none;" onclick="destroyVultrVM()">Destroy on Vultr</button>
+        <button class="btn btn-danger" id="btn-destroy-cloud" style="display:none;" onclick="destroyCloudVM()">Destroy EC2 instance</button>
         <button class="btn btn-danger" onclick="deleteVM()">Delete VM</button>
     </div>
     <div id="platform-key-section" style="display:none;">
@@ -430,7 +438,7 @@ function loadVM() {
             if (data.status === 'creating' && !createPollTimer) {
                 showCreateCard();
                 startCreatePoll();
-            } else if (data.status === 'failed' && data.vultr_plan) {
+            } else if (data.status === 'failed' && data.instance_type) {
                 // Keep the cloud-creation result visible after polling stops.
                 // Previously loadVM() replaced the failed state with neutral steps.
                 showCreateCard();
@@ -467,14 +475,22 @@ function renderVM(data) {
     document.getElementById('ci-created').textContent = fmtDate(data.created_at);
     document.getElementById('ci-updated').textContent = fmtDate(data.updated_at);
 
-    // Vultr info
-    if (data.vultr_plan) {
-        document.getElementById('ci-vultr-plan').textContent = data.vultr_plan;
-        document.getElementById('ci-vultr-row').style.display = 'flex';
+    // AWS resource identity
+    if (data.instance_type) {
+        document.getElementById('ci-instance-type').textContent = data.instance_type;
+        document.getElementById('ci-instance-type-row').style.display = 'flex';
     }
-    if (data.vultr_region) {
-        document.getElementById('ci-vultr-region').textContent = data.vultr_region;
+    if (data.cloud_region) {
+        document.getElementById('ci-cloud-region').textContent = data.cloud_region;
         document.getElementById('ci-region-row').style.display = 'flex';
+    }
+    if (data.availability_zone) {
+        document.getElementById('ci-availability-zone').textContent = data.availability_zone;
+        document.getElementById('ci-az-row').style.display = 'flex';
+    }
+    if (data.cloud_instance_id) {
+        document.getElementById('ci-instance-id').textContent = data.cloud_instance_id;
+        document.getElementById('ci-instance-id-row').style.display = 'flex';
     }
     if (data.vm_type) {
         document.getElementById('ci-vmtype').textContent = data.vm_type;
@@ -521,9 +537,8 @@ function renderVM(data) {
 
     // Button states
     document.getElementById('btn-provision').disabled = (data.status === 'provisioning' || data.status === 'creating');
-    // Show "Destroy on Vultr" only when a Vultr instance exists and we're not mid-operation
-    var destroyBtn = document.getElementById('btn-destroy-vultr');
-    if (data.vultr_id && data.status !== 'creating' && data.status !== 'destroying') {
+    var destroyBtn = document.getElementById('btn-destroy-cloud');
+    if (data.cloud_instance_id && data.status !== 'creating' && data.status !== 'destroying') {
         destroyBtn.style.display = 'inline-flex';
     } else {
         destroyBtn.style.display = 'none';
@@ -722,12 +737,12 @@ function deleteVM() {
         });
 }
 
-// ── Vultr VM Creation ─────────────────────────────────────────────────────────
+// ── AWS VM Creation ───────────────────────────────────────────────────────────
 
 var CREATE_STEPS = [
     {key: 'staging_playbook',      label: 'Staging playbook'},
     {key: 'configuring_semaphore', label: 'Configuring Semaphore'},
-    {key: 'creating_instance',     label: 'Creating Vultr instance'},
+    {key: 'creating_instance',     label: 'Creating EC2 instance'},
     {key: 'extracting_results',    label: 'Extracting IP / DNS'},
     {key: 'completed',             label: 'VM ready'},
 ];
@@ -798,14 +813,14 @@ function renderCreateSteps(currentStep, vmStatus) {
     }).join('');
 }
 
-function destroyVultrVM() {
-    if (!confirm('Destroy this VM on Vultr? This will permanently delete the VPS and remove the VM record. This cannot be undone.')) return;
-    fetch('/admin/api/vms/' + VM_ID + '/destroy-vultr', {method: 'POST'})
+function destroyCloudVM() {
+    if (!confirm('Destroy this EC2 instance and remove its managed DNS record? This cannot be undone.')) return;
+    fetch('/admin/api/vms/' + VM_ID + '/destroy-cloud', {method: 'POST'})
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok) {
                 showToast('Destroying VM...');
-                document.getElementById('btn-destroy-vultr').disabled = true;
+                document.getElementById('btn-destroy-cloud').disabled = true;
                 // Poll loadVM until VM is gone (will get 404 and redirect)
                 var pollDestroy = setInterval(function() {
                     fetch('/admin/api/vms/' + VM_ID)

@@ -193,6 +193,16 @@ services:
       - VERIFICATION_INTERVAL_SECONDS=${VERIFICATION_INTERVAL_SECONDS:-300}
       - VERIFICATION_VM_CONCURRENCY=${VERIFICATION_VM_CONCURRENCY:-5}
       - VERIFICATION_TIMEOUT_SECONDS=${VERIFICATION_TIMEOUT_SECONDS:-10}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+      - AWS_ENVIRONMENT=${AWS_ENVIRONMENT:-}
+      - AWS_STANDARD_VPC_ID=${AWS_STANDARD_VPC_ID:-}
+      - AWS_STANDARD_SUBNET_ID=${AWS_STANDARD_SUBNET_ID:-}
+      - AWS_STANDARD_SECURITY_GROUP_IDS=${AWS_STANDARD_SECURITY_GROUP_IDS:-}
+      - AWS_UBUNTU_AMIS=${AWS_UBUNTU_AMIS:-}
+      - AWS_FREEBSD_AMIS=${AWS_FREEBSD_AMIS:-}
+      - AWS_AVAILABILITY_ZONES=${AWS_AVAILABILITY_ZONES:-}
+      - AWS_INSTANCE_TYPES=${AWS_INSTANCE_TYPES:-}
+      - AWS_KEY_PAIR_NAME=${AWS_KEY_PAIR_NAME:-ctf-it}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
       start_period: 15s
@@ -309,8 +319,6 @@ services:
       SEMAPHORE_ADMIN_NAME: ${SEMAPHORE_ADMIN_NAME:-Admin}
       SEMAPHORE_ADMIN_EMAIL: ${SEMAPHORE_ADMIN_EMAIL:-admin@example.com}
       SEMAPHORE_ACCESS_KEY_ENCRYPTION: ${SEMAPHORE_ACCESS_KEY_ENCRYPTION:?Please set SEMAPHORE_ACCESS_KEY_ENCRYPTION in your .env file}
-      # Vultr API key — needed by create-vm.yml / destroy-vm.yml playbooks
-      VULTR_API_KEY: ${VULTR_API_KEY:-}
     volumes:
       - ctf-semaphore_data:/var/lib/semaphore
       # Shared playbooks: Semaphore reads playbook files staged here by the CTF API
