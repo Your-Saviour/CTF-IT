@@ -717,6 +717,9 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
             if ready == 0:
                 _, diagnostic_output, diagnostic_error = ssh_command(
                     vm,
+                    "printf '%s\\n' 'persisted-nat:'; "
+                    "grep -A35 -B2 '<snatrules>' /conf/config.xml || true; "
+                    "grep -A3 -B1 '<outbound>' /conf/config.xml || true; "
                     f"printf '%s\\n' 'filter:'; pfctl -sr; printf '%s\\n' 'nat:'; pfctl -sn; "
                     f"printf '%s\\n' 'interfaces:'; ifconfig {shlex.quote(wan_interface)}; "
                     f"ifconfig {shlex.quote(lan_interface)}",
@@ -725,7 +728,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
                 error = (
                     "configuration applied but semantic validation failed:\n"
                     + (diagnostic_error or diagnostic_output or "no diagnostic output")
-                )[-2000:]
+                )[-8000:]
                 break
             failure_check = f"printf '%s\\n' {shlex.quote(token)} | cmp -s - /conf/ctf-site-failed"
             failed, _, _ = ssh_command(vm, "/bin/sh -c " + shlex.quote(failure_check), timeout=30)
@@ -739,7 +742,7 @@ def configure_snapshot_opnsense(site: Site, vm: VM, expected_version: str, *, la
             error = str(exc)
         time.sleep(POLL_SECONDS)
     if code != 0 or expected_version not in output:
-        detail = f"snapshot OPNsense validation failed for generation {token}: {(error or output)[:2000]}"
+        detail = f"snapshot OPNsense validation failed for generation {token}: {(error or output)[:8000]}"
         vm.opnsense_config_status = "failed"
         vm.provision_error = detail
         db.commit()
