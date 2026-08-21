@@ -576,7 +576,7 @@ def test_connectivity_gate_requires_nat_egress(monkeypatch):
         },
     )
 
-    with pytest.raises(RuntimeError, match="connectivity checks"):
+    with pytest.raises(RuntimeError, match="missing=nat_egress"):
         gamenet_provisioning.run_connectivity_checks(None, object(), {})
 
 

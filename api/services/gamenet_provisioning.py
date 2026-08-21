@@ -458,7 +458,13 @@ def run_connectivity_checks(db, event, infrastructure):
     result = _run_connectivity_and_exposure_checks(event, infrastructure, exposure=False)
     required = {"vpn_routes", "same_site", "site_isolation", "team_isolation", "private_management", "nat_egress"}
     if set(result) != required or not all(result.values()):
-        raise RuntimeError("GameNet connectivity checks did not all pass")
+        missing = ",".join(sorted(required - set(result))) or "none"
+        failed = ",".join(sorted(name for name in required & set(result) if not result[name])) or "none"
+        unexpected = ",".join(sorted(set(result) - required)) or "none"
+        raise RuntimeError(
+            "GameNet connectivity checks did not all pass: "
+            f"missing={missing}; failed={failed}; unexpected={unexpected}"
+        )
 
 
 def run_exposure_checks(db, event, infrastructure):
