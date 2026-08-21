@@ -3,6 +3,7 @@ name: Webshell in Guestbook Uploads
 description: A PHP webshell has been planted at /opt/guestbook/uploads/backup.php and is served by Apache on port 8080. Anyone who reaches the file gains remote command execution as the www-data user, letting an attacker run arbitrary commands against the web server. The file is disguised as a routine backup script.
 type: payload
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: web
 tags: [webshell, web, persistence, backdoor, incident-response]

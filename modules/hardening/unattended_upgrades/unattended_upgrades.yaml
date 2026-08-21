@@ -4,6 +4,7 @@ description: Automatic security updates are disabled and the unattended-upgrades
 type: hardening
 stage: preapplied
 difficulty: easy
+supported_bases: [ubuntu_24_server]
 points: 100
 category: services
 tags: [patch-management, apt, updates, hardening]

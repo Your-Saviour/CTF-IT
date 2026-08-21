@@ -4,6 +4,7 @@ description: Kernel hardening parameters have been relaxed in /etc/sysctl.d/99-c
 type: hardening
 stage: preapplied
 difficulty: medium
+supported_bases: [ubuntu_24_server]
 points: 200
 category: configuration
 tags: [kernel, sysctl, hardening, configuration]

@@ -3,6 +3,7 @@ name: LD_PRELOAD Library Hijack Backdoor
 description: A hidden shared library has been planted under /opt/.cache/ and referenced from /etc/ld.so.preload. Every process on the system loads it, letting the library intercept standard function calls and drop a persistence beacon marker — a classic rootkit-style dynamic linker hijack. Investigate the loader configuration, remove the library, and prove a clean process still works.
 type: payload
 difficulty: hard
+supported_bases: [ubuntu_24_server]
 points: 300
 category: persistence
 tags: [ld-preload, backdoor, persistence, rootkit, incident-response]
