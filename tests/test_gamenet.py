@@ -598,6 +598,32 @@ def test_connectivity_gate_requires_nat_egress(monkeypatch):
         gamenet_provisioning.run_connectivity_checks(None, object(), {})
 
 
+def test_security_group_exposure_gate_waits_for_canonical_rule_convergence(monkeypatch):
+    from api.services import gamenet_provisioning
+
+    expected = ({
+        "IpProtocol": "udp", "FromPort": 51820, "ToPort": 51820,
+        "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+    },)
+
+    class Provider:
+        def __init__(self):
+            self.responses = iter([
+                ({"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                  "IpRanges": [{"CidrIp": "192.0.2.8/32"}]},),
+                ({"IpRanges": [{"CidrIp": "0.0.0.0/0"}], "ToPort": 51820,
+                  "FromPort": 51820, "IpProtocol": "udp", "Ipv6Ranges": []},),
+            ])
+
+        def security_group_rules(self, _group_id):
+            return next(self.responses)
+
+    monkeypatch.setattr(gamenet_provisioning.time, "sleep", lambda _seconds: None)
+    assert gamenet_provisioning._wait_security_group_rules(
+        Provider(), "sg-test", expected, timeout=1,
+    )
+
+
 def test_vpc_only_validation_rejects_public_or_ambiguous_responses():
     with pytest.raises(GameNetProviderError, match="vpc_only=true"):
         validate_vpc_only_instance({"vpc_only": 1, "main_ip": "0.0.0.0"})

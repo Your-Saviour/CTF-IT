@@ -16,6 +16,7 @@ import os
 import shlex
 import socket
 import subprocess
+import time
 from ipaddress import ip_network
 from sqlalchemy.orm import object_session
 
@@ -717,10 +718,16 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
             for team in teams:
                 gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
                 group_ids = json.loads(gateway_vm.security_group_ids_json or "[]")
-                rules = provider.security_group_rules(group_ids[0]) if len(group_ids) == 1 else ()
-                public_exposure &= tuple(rules) == _gateway_ingress(team, temporary=False)
+                expected = _gateway_ingress(team, temporary=False)
+                converged = len(group_ids) == 1 and _wait_security_group_rules(
+                    provider, group_ids[0], expected,
+                )
+                public_exposure &= converged
             for site in sites:
-                public_exposure &= provider.security_group_rules(site.wan_security_group_id) == ()
+                converged = _wait_security_group_rules(
+                    provider, site.wan_security_group_id, (),
+                )
+                public_exposure &= converged
         finally:
             provider.close()
     for site in sites:
@@ -732,7 +739,10 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
             if not site_management:
                 _log_private_path_diagnostics(event, site, firewall, gateway_vm)
         if exposure:
-            public_exposure &= _wait_ports_closed(firewall.public_ip, (22, 80, 443))
+            closed = _wait_ports_closed(firewall.public_ip, (22, 80, 443))
+            if not closed:
+                log.warning("firewall public management ports remained reachable: %s", firewall.public_ip)
+            public_exposure &= closed
         endpoints = db.query(VM).filter(VM.site_id == site.id, VM.role.like("%_endpoint")).all()
         if connectivity and len(endpoints) > 1:
             code, _, _ = ssh_command(
@@ -756,7 +766,10 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
     for team in teams:
         gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
         if exposure:
-            public_exposure &= _wait_ports_closed(gateway_vm.public_ip, (22, 80, 443, 8080))
+            closed = _wait_ports_closed(gateway_vm.public_ip, (22, 80, 443, 8080))
+            if not closed:
+                log.warning("gateway public management ports remained reachable: %s", gateway_vm.public_ip)
+            public_exposure &= closed
         if connectivity:
             for site in team.sites:
                 firewall = db.get(VM, site.firewall_vm_id)
@@ -789,6 +802,42 @@ def _tcp_probe(host, port, timeout=3):
     except OSError as exc:
         log.warning("TCP probe failed for %s:%s: %s", host, port, exc)
         return False
+
+
+def _canonical_permissions(permissions):
+    keys = (
+        "IpProtocol", "FromPort", "ToPort", "IpRanges", "Ipv6Ranges",
+        "PrefixListIds", "UserIdGroupPairs",
+    )
+
+    def normalize(value):
+        if isinstance(value, dict):
+            return tuple(sorted((key, normalize(item)) for key, item in value.items()))
+        if isinstance(value, list):
+            return tuple(sorted((normalize(item) for item in value), key=repr))
+        return value
+
+    rows = [
+        {key: permission[key] for key in keys if permission.get(key) not in (None, [])}
+        for permission in permissions
+    ]
+    return tuple(sorted((normalize(row) for row in rows), key=repr))
+
+
+def _wait_security_group_rules(provider, group_id, expected, timeout=60):
+    deadline = time.monotonic() + timeout
+    expected_canonical = _canonical_permissions(expected)
+    actual = ()
+    while time.monotonic() < deadline:
+        actual = provider.security_group_rules(group_id)
+        if _canonical_permissions(actual) == expected_canonical:
+            return True
+        time.sleep(2)
+    log.warning(
+        "security group %s did not converge: expected=%r actual=%r",
+        group_id, expected, actual,
+    )
+    return False
 
 
 def _log_private_path_diagnostics(event, site, firewall, gateway_vm):
