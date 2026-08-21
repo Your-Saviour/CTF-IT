@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from api.database import engine, get_db, init_db
 from api.models import Event, EventOperation, User, VM, utcnow
-from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, module_repos, scenarios, service_credentials, vm, vm_goals
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, integrations, learner, module_repos, scenarios, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
 
 _log = logging.getLogger(__name__)
@@ -437,6 +437,7 @@ app.include_router(caldera_setup.router)
 app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
 app.include_router(event_dashboard.router)
+app.include_router(integrations.router)
 app.include_router(learner.router)
 app.include_router(module_repos.router)
 app.include_router(scenarios.router)
