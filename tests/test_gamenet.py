@@ -55,7 +55,7 @@ def test_snapshot_site_validation_checks_effective_pf_policy():
         management_cidr="192.0.2.8/32", site_cidr="10.128.0.0/20",
     )
     assert "pass in quick on vtnet1 inet from 10.128.0.0/20 to any" in command
-    assert "nat on" in command and "from 192.0.2.8 to" in command
+    assert "nat on" in command and "from 10.128.0.0/20 to" in command
     assert "Allow management SSH" not in command
     assert "printf '%s\\n' generation-token" in command
     assert "/conf/ctf-site-ready" in command
@@ -277,6 +277,9 @@ def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
     assert "<gateway>10.128.0.1</gateway>" in rendered
     assert "<network>10.128.0.0/20</network>" in rendered
     assert "<source_net>10.128.0.0/20</source_net>" in rendered
+    assert "<snat_mode>hybrid</snat_mode>" in rendered
+    assert "<description>GameNet site outbound NAT</description>" in rendered
+    assert "<interface>wan</interface>" in rendered
     assert "<passwordauth>" not in rendered
     assert "<ssl-certref>self-signed</ssl-certref>" not in rendered
 

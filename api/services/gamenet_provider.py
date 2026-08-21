@@ -565,7 +565,7 @@ def snapshot_site_validation_command(*, token: str, expected_version: str, publi
         f"ifconfig {shlex.quote(lan_interface)} | grep -F 'inet {private_ip}' >/dev/null && "
         f"route -n get default | grep -F 'interface: {wan_interface}' >/dev/null && "
         f"pfctl -sr | grep -F {shlex.quote(f'pass in quick on {lan_interface} inet from {site_cidr} to any')} >/dev/null && "
-        "pfctl -sn | grep -E 'nat on' >/dev/null && "
+        f"pfctl -sn | grep -F {shlex.quote(f'nat on {wan_interface} inet from {site_cidr} to any')} >/dev/null && "
         f"pfctl -sr | grep -F {shlex.quote('from ' + management_source + ' to')} | "
         "grep -E 'port = (ssh|22)' >/dev/null && opnsense-version -v"
     )

@@ -98,7 +98,7 @@
   <OPNsense>
     <Firewall>
       <Filter>
-        <general><snat_mode>automatic</snat_mode></general>
+        <general><snat_mode>hybrid</snat_mode></general>
         <rules>
 {% if temporary_management | default(true) %}
           <rule><enabled>1</enabled><statetype>keep</statetype><sequence>1</sequence><action>pass</action>
@@ -128,13 +128,21 @@
             <source_port/><destination_net>any</destination_net><destination_not>0</destination_not><destination_port/>
             <disablereplyto>0</disablereplyto><log>0</log><allowopts>0</allowopts><nosync>0</nosync>
             <nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any><description>Allow LAN traffic</description></rule>
-        </rules><snatrules/><npt/><onetoone/>
+        </rules>
+        <snatrules>
+          <rule><enabled>1</enabled><nonat>0</nonat><nosync>0</nosync><sequence>1</sequence>
+            <interface>wan</interface><ipprotocol>inet</ipprotocol><protocol>any</protocol>
+            <source_net>{{ opnsense_site_network }}</source_net><source_not>0</source_not><source_port/>
+            <destination_net>any</destination_net><destination_not>0</destination_not><destination_port/>
+            <target/><target_port/><staticnatport>0</staticnatport><log>0</log>
+            <description>GameNet site outbound NAT</description></rule>
+        </snatrules><npt/><onetoone/>
       </Filter>
     </Firewall>
   </OPNsense>
   <nat>
     <outbound>
-      <mode>automatic</mode>
+      <mode>hybrid</mode>
     </outbound>
   </nat>
   <dhcpd/>
