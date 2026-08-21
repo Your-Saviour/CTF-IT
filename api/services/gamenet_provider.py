@@ -233,7 +233,7 @@ import bcrypt
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import object_session
 
-from api.models import Site, TeamVPNGateway, VM, VPNCredential, utcnow
+from api.models import Site, TeamVPNGateway, VM, VPNCredential, Zone, utcnow
 from api.services.secrets import decrypt_secret
 from api.services.ssh_keys import get_or_create_platform_keypair
 from builder.base_loader import load_base_type
@@ -830,6 +830,7 @@ def render_opnsense_config(site: Site, vm: VM, public_key: str, password: str,
         opnsense_hostname=vm.hostname, opnsense_lan_ip=vm.private_ip,
         opnsense_lan_subnet=lan_network.prefixlen,
         opnsense_vpc_gateway=vpc_gateway, opnsense_routed_site_network=routed_site_network,
+        opnsense_site_network=str(site_network),
         opnsense_wan_interface=wan_interface, opnsense_lan_interface=lan_interface,
         opnsense_admin_password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=10)).decode(),
         opnsense_ssh_pubkey=public_key, temporary_management=temporary_management,
@@ -1065,6 +1066,36 @@ def add_deterministic_endpoint_address(vm: VM, site: Site, gateway_vm: VM) -> No
     if code:
         raise GameNetProviderError(f"deterministic-address transition failed to reach new address: {error[:300]}")
     vm.network_boot_id = output.strip()
+
+
+def verify_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:
+    """Verify the endpoint retains its AWS subnet address and router."""
+    if not vm.vpc_ip or not vm.vpc_mac or not vm.zone_id:
+        raise GameNetProviderError("missing VPC attachment metadata for endpoint network verification")
+    zone = object_session(vm).get(Zone, vm.zone_id)
+    if not zone or not zone.subnet:
+        raise GameNetProviderError("missing zone subnet for endpoint network verification")
+    network = ip_network(zone.subnet)
+    router = str(network.network_address + 1)
+    mac = vm.vpc_mac.lower()
+    command = (
+        "set -eu; cloud-init status --wait; iface=''; "
+        "for path in /sys/class/net/*/address; do "
+        f"if [ \"$(tr A-F a-f < \"$path\")\" = {shlex.quote(mac)} ]; then iface=$(basename \"$(dirname \"$path\")\"); break; fi; done; "
+        "test -n \"$iface\"; "
+        f"ip -4 address show dev \"$iface\" | grep -F {shlex.quote(vm.private_ip + '/' + str(network.prefixlen))}; "
+        f"ip route show default | grep -F {shlex.quote('via ' + router)}; "
+        "getent hosts example.com >/dev/null; "
+        "curl -4fsS --max-time 20 https://example.com/ >/dev/null"
+    )
+    code, output, error = ssh_command(
+        vm, command, host=vm.vpc_ip, jump=gateway_vm,
+        timeout=120, connect_timeout=CREATE_TIMEOUT,
+    )
+    if code:
+        raise GameNetProviderError(
+            f"AWS-native endpoint network verification failed: {(error or output)[:300]}"
+        )
 
 
 def finalize_endpoint_network(vm: VM, site: Site, gateway_vm: VM) -> None:

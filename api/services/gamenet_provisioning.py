@@ -24,11 +24,11 @@ from api.models import (
     VPNCredential, Zone, utcnow,
 )
 from api.services.gamenet_provider import (
-    AwsGameNetProvider, GameNetProviderError, add_deterministic_endpoint_address,
-    configure_snapshot_opnsense,
+    AwsGameNetProvider, GameNetProviderError, configure_snapshot_opnsense,
     configure_gateway, configure_site_wireguard, install_local_wireguard,
-    finalize_endpoint_network, ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
+    ssh_command, ssh_host_command, tcp_closed, ubuntu_cloud_init,
     upload_text, validate_site_tunnel,
+    verify_endpoint_network,
 )
 from api.services.secrets import decrypt_secret
 from api.services.ssh_keys import get_or_create_platform_keypair
@@ -353,12 +353,8 @@ def create_private_endpoints(db, event, infrastructure):
                         finally:
                             provider.close()
                         db.commit()
-                    if not vm.network_phase:
-                        add_deterministic_endpoint_address(vm, site, gateway_vm)
-                        vm.network_phase = "address_staged"
-                        db.commit()
-                    if vm.network_phase == "address_staged":
-                        finalize_endpoint_network(vm, site, gateway_vm)
+                    if vm.network_phase != "network_converted":
+                        verify_endpoint_network(vm, site, gateway_vm)
                         vm.network_phase = "network_converted"
                         db.commit()
                     if vm.public_ip or not vm.private_ip:

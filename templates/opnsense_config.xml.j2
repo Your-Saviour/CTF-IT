@@ -124,7 +124,7 @@
             <nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any><description>Allow WAN outbound</description></rule>
           <rule><enabled>1</enabled><statetype>keep</statetype><sequence>20</sequence><action>pass</action>
             <quick>1</quick><interfacenot>0</interfacenot><interface>lan</interface><direction>in</direction>
-            <ipprotocol>inet46</ipprotocol><protocol>any</protocol><source_net>lan</source_net><source_not>0</source_not>
+            <ipprotocol>inet46</ipprotocol><protocol>any</protocol><source_net>{{ opnsense_site_network }}</source_net><source_not>0</source_not>
             <source_port/><destination_net>any</destination_net><destination_not>0</destination_not><destination_port/>
             <disablereplyto>0</disablereplyto><log>0</log><allowopts>0</allowopts><nosync>0</nosync>
             <nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any><description>Allow LAN traffic</description></rule>

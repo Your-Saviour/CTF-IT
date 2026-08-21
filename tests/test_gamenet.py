@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from api.database import Base
 from api.models import (
     Event, OpnsenseImage, PlatformSettings, PrivateBootCertification,
-    Site, Team, User, VM, VPNCredential, utcnow,
+    Site, Team, User, VM, VPNCredential, Zone, utcnow,
 )
 from api.routes.admin import PlanPreviewRequest, overview, plan_preview
 from api.routes.vm import _gamenet_gateway_proxy
@@ -276,6 +276,7 @@ def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
     assert "<subnet>24</subnet>" in rendered
     assert "<gateway>10.128.0.1</gateway>" in rendered
     assert "<network>10.128.0.0/20</network>" in rendered
+    assert "<source_net>10.128.0.0/20</source_net>" in rendered
     assert "<passwordauth>" not in rendered
     assert "<ssl-certref>self-signed</ssl-certref>" not in rendered
 
@@ -634,12 +635,8 @@ def test_endpoint_creation_uses_approved_ami_and_persists_eni_metadata(monkeypat
     )()))
     network_calls = []
     monkeypatch.setattr(
-        gamenet_provisioning, "add_deterministic_endpoint_address",
-        lambda vm, site, gateway: network_calls.append(("stage", vm.id, site.id, gateway.id)),
-    )
-    monkeypatch.setattr(
-        gamenet_provisioning, "finalize_endpoint_network",
-        lambda vm, site, gateway: network_calls.append(("finalize", vm.id, site.id, gateway.id)),
+        gamenet_provisioning, "verify_endpoint_network",
+        lambda vm, site, gateway: network_calls.append((vm.id, site.id, gateway.id)),
     )
     monkeypatch.setattr(gamenet_provisioning, "_assign_blue_modules", lambda *_args: None)
     create_private_endpoints(db_session, event, INFRASTRUCTURE)
@@ -650,22 +647,20 @@ def test_endpoint_creation_uses_approved_ami_and_persists_eni_metadata(monkeypat
     }
     assert all(vm.cloud_instance_id and vm.primary_eni_id and vm.vpc_mac for vm in endpoints)
     assert all(vm.network_phase == "network_converted" for vm in endpoints)
-    assert network_calls == [
-        call
-        for vm in endpoints
-        for call in (("stage", vm.id, site.id, gateway.id),
-                     ("finalize", vm.id, site.id, gateway.id))
-    ]
+    assert network_calls == [(vm.id, site.id, gateway.id) for vm in endpoints]
 
 
-def test_endpoint_stage_one_selects_nic_by_attachment_mac_and_jumps_gateway(monkeypatch, db_session):
+def test_endpoint_network_verification_preserves_aws_subnet_router(monkeypatch, db_session):
     event = Event(name="GameNet", quota="{}"); db_session.add(event); db_session.flush()
     team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
     site = Site(event_id=event.id, team_id=team.id, key="site", name="Site", region="ewr",
                 allocated_cidr="10.128.0.0/20", infrastructure_subnet="10.128.0.0/24")
     db_session.add(site); db_session.flush()
+    zone = Zone(site_id=site.id, key="blue", name="Blue", subnet="10.128.1.0/24",
+                gateway_address="10.128.1.1", team_role="blue")
+    db_session.add(zone); db_session.flush()
     endpoint = VM(hostname="endpoint", team_id=team.id, event_id=event.id, site_id=site.id,
-                  role="blue_endpoint", vpc_ip="10.128.0.8", private_ip="10.128.1.10",
+                  zone_id=zone.id, role="blue_endpoint", vpc_ip="10.128.1.10", private_ip="10.128.1.10",
                   vpc_mac="5A:00:00:00:00:08")
     firewall = VM(hostname="firewall", team_id=team.id, event_id=event.id, site_id=site.id,
                   role="site_firewall", private_ip="10.128.0.4")
@@ -673,15 +668,17 @@ def test_endpoint_stage_one_selects_nic_by_attachment_mac_and_jumps_gateway(monk
     db_session.add_all([endpoint, firewall, gateway]); db_session.flush()
     site.firewall_vm_id = firewall.id
     calls = []
-    responses = iter([(0, "", ""), (0, "boot-one\n", "")])
     monkeypatch.setattr("api.services.gamenet_provider.ssh_command",
-                        lambda vm, command, **kwargs: calls.append((command, kwargs)) or next(responses))
-    add_deterministic_endpoint_address(endpoint, site, gateway)
+                        lambda vm, command, **kwargs: calls.append((command, kwargs)) or (0, "", ""))
+    from api.services.gamenet_provider import verify_endpoint_network
+    verify_endpoint_network(endpoint, site, gateway)
     assert "/sys/class/net/*/address" in calls[0][0]
     assert "5a:00:00:00:00:08" in calls[0][0]
     assert calls[0][1]["host"] == endpoint.vpc_ip and calls[0][1]["jump"] is gateway
-    assert calls[1][1]["host"] == endpoint.private_ip
-    assert endpoint.network_boot_id == "boot-one"
+    assert "via 10.128.1.1" in calls[0][0]
+    assert "ip address replace" not in calls[0][0]
+    assert "netplan" not in calls[0][0]
+    assert "reboot" not in calls[0][0]
 
 
 def test_private_boot_gate_rejects_missing_validated_aws_ami(db_session):
