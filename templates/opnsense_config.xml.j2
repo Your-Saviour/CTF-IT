@@ -97,18 +97,18 @@
   <filter/>
   <OPNsense>
     <Firewall>
-      <Filter>
+      <Filter version="1.0.5">
         <general><snat_mode>hybrid</snat_mode></general>
         <rules>
 {% if temporary_management | default(true) %}
-          <rule><enabled>1</enabled><statetype>keep</statetype><sequence>1</sequence><action>pass</action>
+          <rule uuid="89450192-e721-48d2-864c-2a4950eab4a1"><enabled>1</enabled><statetype>keep</statetype><sequence>1</sequence><action>pass</action>
             <quick>1</quick><interfacenot>0</interfacenot><interface>wan</interface><direction>in</direction>
             <ipprotocol>inet</ipprotocol><protocol>tcp</protocol><source_net>{{ opnsense_management_cidr }}</source_net>
             <source_not>0</source_not><source_port/><destination_net>wanip</destination_net>
             <destination_not>0</destination_not><destination_port>443</destination_port><disablereplyto>0</disablereplyto>
             <log>1</log><allowopts>0</allowopts><nosync>0</nosync><nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any>
             <description>Allow management HTTPS</description></rule>
-          <rule><enabled>1</enabled><statetype>keep</statetype><sequence>2</sequence><action>pass</action>
+          <rule uuid="9325e811-f3a1-4a64-a74f-bcbd2071db51"><enabled>1</enabled><statetype>keep</statetype><sequence>2</sequence><action>pass</action>
             <quick>1</quick><interfacenot>0</interfacenot><interface>wan</interface><direction>in</direction>
             <ipprotocol>inet</ipprotocol><protocol>tcp</protocol><source_net>{{ opnsense_management_cidr }}</source_net>
             <source_not>0</source_not><source_port/><destination_net>wanip</destination_net>
@@ -116,13 +116,13 @@
             <log>1</log><allowopts>0</allowopts><nosync>0</nosync><nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any>
             <description>Allow management SSH</description></rule>
 {% endif %}
-          <rule><enabled>1</enabled><statetype>keep</statetype><sequence>10</sequence><action>pass</action>
+          <rule uuid="13413531-37f8-448f-b739-c51351564a42"><enabled>1</enabled><statetype>keep</statetype><sequence>10</sequence><action>pass</action>
             <quick>1</quick><interfacenot>0</interfacenot><interface>wan</interface><direction>out</direction>
             <ipprotocol>inet46</ipprotocol><protocol>any</protocol><source_net>any</source_net><source_not>0</source_not>
             <source_port/><destination_net>any</destination_net><destination_not>0</destination_not><destination_port/>
             <disablereplyto>1</disablereplyto><log>0</log><allowopts>0</allowopts><nosync>0</nosync>
             <nopfsync>0</nopfsync><tcpflags_any>0</tcpflags_any><description>Allow WAN outbound</description></rule>
-          <rule><enabled>1</enabled><statetype>keep</statetype><sequence>20</sequence><action>pass</action>
+          <rule uuid="5528151b-5eca-4dd9-9d8c-c750545cc26d"><enabled>1</enabled><statetype>keep</statetype><sequence>20</sequence><action>pass</action>
             <quick>1</quick><interfacenot>0</interfacenot><interface>lan</interface><direction>in</direction>
             <ipprotocol>inet46</ipprotocol><protocol>any</protocol><source_net>{{ opnsense_site_network }}</source_net><source_not>0</source_not>
             <source_port/><destination_net>any</destination_net><destination_not>0</destination_not><destination_port/>

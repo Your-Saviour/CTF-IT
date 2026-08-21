@@ -267,6 +267,7 @@ def test_opnsense_config_encodes_authorized_key(monkeypatch, db_session):
     assert "<authorizedkeys>c3NoLWVkMjU1MTkgVEVTVA==</authorizedkeys>" in rendered
     assert "<active_interface>lan</active_interface>" in rendered
     assert "<OPNsense>" in rendered
+    assert '<Filter version="1.0.5">' in rendered
     assert "<source_net>127.0.0.1/32</source_net>" in rendered
     assert "<description>Allow management SSH</description>" in rendered
     assert "<filter/>" in rendered
