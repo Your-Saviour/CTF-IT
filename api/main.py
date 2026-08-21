@@ -326,6 +326,10 @@ async def lifespan(app: FastAPI):
                 deadline_db.close()
 
     deadline_task = asyncio.create_task(enforce_event_deadlines())
+    from api.services.integration_outbox import recover_stale_claims, worker_loop
+    recover_stale_claims()
+    integration_stop = asyncio.Event()
+    integration_task = asyncio.create_task(worker_loop(integration_stop))
     verification_task = None
     if os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from api.services.verification_scheduler import scheduler_loop
@@ -334,10 +338,14 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         deadline_task.cancel()
+        integration_stop.set()
+        integration_task.cancel()
         if verification_task:
             verification_task.cancel()
         with suppress(asyncio.CancelledError):
             await deadline_task
+        with suppress(asyncio.CancelledError):
+            await integration_task
         if verification_task:
             with suppress(asyncio.CancelledError):
                 await verification_task
