@@ -11,16 +11,16 @@ import re
 _DEFAULT_INFRASTRUCTURE = {
     "vpn_gateway": {
         "base_type": "ubuntu_24_server",
-        "default_plan": "vc2-1c-1gb",
-        "region": "ewr",
+        "default_plan": "t3.small",
+        "region": "ap-southeast-2",
         "listen_port": 51820,
     },
     "sites": [{
         "key": "head_office",
         "name": "Head Office",
-        "region": "ewr",
+        "region": "ap-southeast-2",
         "firewall_team": "blue",
-        "firewall": {"base_type": "opnsense", "default_plan": "vc2-2c-4gb"},
+        "firewall": {"base_type": "opnsense", "default_plan": "t3.medium"},
         "zones": [
             {
                 "key": "corporate",
@@ -31,13 +31,13 @@ _DEFAULT_INFRASTRUCTURE = {
                         "key": "workstation_1",
                         "name": "Workstation 1",
                         "base_type": "ubuntu_24_server",
-                        "default_plan": "vc2-1c-1gb",
+                        "default_plan": "t3.small",
                     },
                     {
                         "key": "workstation_2",
                         "name": "Workstation 2",
                         "base_type": "ubuntu_24_server",
-                        "default_plan": "vc2-1c-1gb",
+                        "default_plan": "t3.small",
                     },
                 ],
             },

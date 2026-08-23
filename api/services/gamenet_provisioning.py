@@ -614,8 +614,7 @@ def _assign_blue_modules(db, vm, event):
     if vm.modules:
         return
     from builder.module_loader import load_all_modules
-    from builder.selector import select_modules
-    selected = select_modules(json.loads(event.quota), load_all_modules(), base_type_id=vm.base_type)
+    selected = _selected_blue_modules(vm, event, load_all_modules())
     for module in selected:
         db.add(VMModule(vm_id=vm.id, module_id=module.id, module_type=module.type,
                         difficulty=module.difficulty, points=module.points, stage=module.stage))
@@ -623,6 +622,21 @@ def _assign_blue_modules(db, vm, event):
             db.add(VMGoal(vm_id=vm.id, module_id=module.id, red_points=module.red_points,
                           defend_points=module.defend_points, status="pending"))
     db.flush()
+
+
+def _selected_blue_modules(vm, event, library):
+    from builder.module_plan import resolved_module_ids
+    from builder.selector import select_modules
+
+    plan = json.loads(event.module_plan) if event.module_plan else None
+    if plan is not None:
+        site = vm.zone.site
+        stable_vm_id = f"vm:{site.key}/{vm.zone.key}/{vm.vm_type}"
+        assignment = plan.get("assignments", {}).get(stable_vm_id)
+        if assignment is not None:
+            by_id = {module.id: module for module in library}
+            return [by_id[module_id] for module_id in resolved_module_ids(plan, stable_vm_id)]
+    return select_modules(json.loads(event.quota), library, base_type_id=vm.base_type)
 
 
 def _apply_modules_through_jump_access(vm):

@@ -6,6 +6,7 @@ from builder.module_plan import (
     normalize_module_plan,
     reconcile_module_plan,
     resolve_assignment,
+    validate_module_plan_for_start,
 )
 from builder.module_loader import Module
 
@@ -71,3 +72,19 @@ def test_conflicting_pins_are_preserved_and_reported():
         {}, library, refill=True)
     assert result["pinned_module_ids"] == ["left", "right"]
     assert result["issues"][0]["code"] == "pinned_conflict"
+
+
+def test_start_validation_rejects_stale_vms_and_resolved_modules():
+    plan = {"version": 1, "assignments": {
+        "vm:hq/blue/analyst": {
+            "mode": "manual_only", "pinned_module_ids": ["missing"],
+            "resolved_module_ids": ["missing"],
+        },
+        "vm:gone/blue/host": {
+            "mode": "manual_only", "pinned_module_ids": [], "resolved_module_ids": [],
+        },
+    }}
+
+    issues = validate_module_plan_for_start(plan, infrastructure(), [mod("available")])
+
+    assert {issue["code"] for issue in issues} == {"unknown_vm", "unknown_module"}

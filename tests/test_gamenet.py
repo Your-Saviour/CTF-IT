@@ -1500,6 +1500,41 @@ def test_gamenet_placeholders_store_ec2_type_and_region_not_vultr_fields():
     assert "vultr_region=" not in placeholder_section
 
 
+def test_aws_readiness_plan_counts_normalized_endpoint_records():
+    from api.routes.admin import _aws_resource_plan
+    from builder.infrastructure_planner import default_infrastructure
+
+    plan = _aws_resource_plan(default_infrastructure(), team_count=3)
+
+    assert plan.instances_by_type == {"t3.small": 9, "t3.medium": 3}
+    assert plan.network_interfaces == 15
+    assert plan.on_demand_vcpus == 24
+
+
+def test_blue_endpoint_uses_saved_resolved_module_assignment():
+    from types import SimpleNamespace
+    from api.services.gamenet_provisioning import _selected_blue_modules
+    from builder.module_loader import Module
+
+    pinned = Module("pinned", "Pinned", "Pinned module", "vulnerability", "easy", 100, "test")
+    random = Module("random", "Random", "Random module", "vulnerability", "easy", 100, "test")
+    event = SimpleNamespace(
+        module_plan=json.dumps({"version": 1, "assignments": {
+            "vm:hq/blue/analyst": {
+                "mode": "manual_only", "pinned_module_ids": ["pinned"],
+                "resolved_module_ids": ["pinned"],
+            },
+        }}),
+        quota=json.dumps({"vulnerability": {"easy": 1}}),
+    )
+    vm = SimpleNamespace(
+        base_type="ubuntu_24_server", vm_type="analyst",
+        zone=SimpleNamespace(key="blue", site=SimpleNamespace(key="hq")),
+    )
+
+    assert _selected_blue_modules(vm, event, [random, pinned]) == [pinned]
+
+
 def test_aws_gamenet_site_network_uses_secondary_wan_cidr():
     from types import SimpleNamespace
     from api.services.aws import SiteNetworkResult

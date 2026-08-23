@@ -13,8 +13,8 @@ export function normalizeClientInfrastructure(value) {
   const result = clone(value || {
     vpn_gateway: {
       base_type: 'ubuntu_24_server',
-      default_plan: 'vc2-1c-1gb',
-      region: 'ewr',
+      default_plan: 't3.small',
+      region: 'ap-southeast-2',
       listen_port: 51820,
     },
     sites: [],

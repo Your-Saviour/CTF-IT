@@ -133,3 +133,22 @@ def resolve_assignment(endpoint, assignment, quota, library, *, refill):
 
 def resolved_module_ids(plan, stable_vm_id):
     return list(normalize_module_plan(plan)["assignments"].get(stable_vm_id, {}).get("resolved_module_ids", []))
+
+
+def validate_module_plan_for_start(plan, infrastructure, library):
+    normalized, issues = reconcile_module_plan(plan, infrastructure)
+    endpoints = {row["id"]: row for row in assignable_endpoints(infrastructure)}
+    modules = {module.id: module for module in library}
+    for vm_id, assignment in normalized["assignments"].items():
+        endpoint = endpoints.get(vm_id)
+        if endpoint is None:
+            continue
+        for module_id in assignment["resolved_module_ids"]:
+            module = modules.get(module_id)
+            if module is None:
+                issues.append({"code": "unknown_module", "vm_id": vm_id, "module_id": module_id,
+                               "message": f"Module '{module_id}' is unavailable"})
+            elif not _compatible(module, endpoint.get("base_type")):
+                issues.append({"code": "incompatible_base", "vm_id": vm_id, "module_id": module_id,
+                               "message": f"Module '{module_id}' is incompatible with this base"})
+    return issues

@@ -37,6 +37,7 @@ def validate_infrastructure(
     infrastructure: dict,
     valid_base_ids: set[str],
     valid_regions: set[str] | None = None,
+    valid_plans: set[str] | None = None,
     *,
     team_count: int = 1,
     live_vpcs_by_region: dict[str, int] | None = None,
@@ -53,6 +54,10 @@ def validate_infrastructure(
         errors.append("vpn_gateway is required and must be an object")
     else:
         _validate_machine(gateway, "vpn_gateway", valid_base_ids, errors, require_region=True)
+        if valid_regions is not None and gateway.get("region") not in valid_regions:
+            errors.append(f"vpn_gateway.region references unavailable region '{gateway.get('region')}'")
+        if valid_plans is not None and gateway.get("default_plan") not in valid_plans:
+            errors.append(f"vpn_gateway.default_plan references unavailable AWS instance type '{gateway.get('default_plan')}'")
         port = gateway.get("listen_port")
         if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
             errors.append("vpn_gateway.listen_port must be an integer from 1 to 65535")
@@ -89,6 +94,8 @@ def validate_infrastructure(
             errors.append(f"{path}.firewall is required and must be an object")
         else:
             _validate_machine(firewall, f"{path}.firewall", valid_base_ids, errors)
+            if valid_plans is not None and firewall.get("default_plan") not in valid_plans:
+                errors.append(f"{path}.firewall.default_plan references unavailable AWS instance type '{firewall.get('default_plan')}'")
             firewall_address = firewall.get("address")
             if firewall_address is not None and not isinstance(firewall_address, str):
                 errors.append(f"{path}.firewall.address must be a string")
@@ -125,6 +132,8 @@ def validate_infrastructure(
                     continue
                 _key(endpoint.get("key"), f"{epath}.key", endpoint_keys, errors)
                 _validate_machine(endpoint, epath, valid_base_ids, errors)
+                if valid_plans is not None and endpoint.get("default_plan") not in valid_plans:
+                    errors.append(f"{epath}.default_plan references unavailable AWS instance type '{endpoint.get('default_plan')}'")
                 address = endpoint.get("address")
                 if address is not None and not isinstance(address, str):
                     errors.append(f"{epath}.address must be a string")

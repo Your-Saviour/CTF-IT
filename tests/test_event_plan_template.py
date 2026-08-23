@@ -14,6 +14,25 @@ CSS = ROOT / "frontend" / "static" / "event-planner.css"
 BASES = {"ubuntu_24_server", "opnsense"}
 
 
+def test_new_planner_topologies_use_aws_defaults_and_catalogue_contract():
+    infrastructure = default_infrastructure()
+
+    assert infrastructure["vpn_gateway"]["region"] == "ap-southeast-2"
+    assert infrastructure["vpn_gateway"]["default_plan"] == "t3.small"
+    assert infrastructure["sites"][0]["region"] == "ap-southeast-2"
+    assert infrastructure["sites"][0]["firewall"]["default_plan"] == "t3.medium"
+    assert {endpoint["default_plan"] for endpoint in infrastructure["sites"][0]["zones"][0]["endpoints"]} == {"t3.small"}
+
+    controller = CONTROLLER.read_text()
+    state = STATE.read_text()
+    assert "/admin/api/aws/plans" in controller
+    assert "/admin/api/vultr/plans" not in controller
+    from api.routes.admin import router
+    assert "/admin/api/aws/plans" in {route.path for route in router.routes}
+    assert "vc2-" not in controller + state
+    assert "'ewr'" not in controller + state
+
+
 def test_planner_command_header_separates_context_from_actions():
     html = TEMPLATE.read_text()
 

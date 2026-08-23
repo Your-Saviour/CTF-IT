@@ -36,6 +36,7 @@ def _utc_instant(value) -> datetime:
 
 def _aws_resource_plan(infrastructure: dict, team_count: int):
     from api.services.aws import ResourcePlan
+    from builder.infrastructure_planner import zone_endpoint_instances
     instances = Counter()
     gateway = infrastructure["vpn_gateway"]
     instances[gateway["default_plan"]] += team_count
@@ -44,10 +45,9 @@ def _aws_resource_plan(infrastructure: dict, team_count: int):
     for site in sites:
         instances[site["firewall"]["default_plan"]] += team_count
         for zone in site["zones"]:
-            for endpoint in zone["endpoints"]:
-                count = int(endpoint.get("count", 0))
-                endpoints_per_team += count
-                instances[endpoint["default_plan"]] += count * team_count
+            for endpoint in zone_endpoint_instances(zone["endpoints"]):
+                endpoints_per_team += 1
+                instances[endpoint["default_plan"]] += team_count
     firewalls = len(sites) * team_count
     endpoints = endpoints_per_team * team_count
     vcpu_defaults = {"t3.small": 2, "t3.medium": 2, "t3.large": 2, "t3.xlarge": 4}
@@ -1441,10 +1441,28 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
 
         from builder.base_loader import load_all_bases
         from builder.infrastructure_validation import infrastructure_summary, validate_infrastructure
+        from api.services.aws import AwsConfig
         valid_base_ids = {base.id for base in load_all_bases() if not base.disabled}
-        errors = validate_infrastructure(infrastructure, valid_base_ids, team_count=len(teams))
+        try:
+            aws_config = AwsConfig.from_env()
+        except Exception as exc:
+            return JSONResponse({"error": "Invalid AWS configuration", "detail": str(exc)}, status_code=502)
+        errors = validate_infrastructure(
+            infrastructure, valid_base_ids,
+            valid_regions=set(aws_config.availability_zones),
+            valid_plans=set(aws_config.instance_types),
+            team_count=len(teams),
+        )
         if errors:
             return JSONResponse({"error": "Invalid infrastructure", "details": errors}, status_code=422)
+        if event.module_plan:
+            from builder.module_loader import load_all_modules
+            from builder.module_plan import validate_module_plan_for_start
+            module_issues = validate_module_plan_for_start(
+                json.loads(event.module_plan), infrastructure, load_all_modules(),
+            )
+            if module_issues:
+                return JSONResponse({"error": "Invalid module plan", "issues": module_issues}, status_code=422)
         summary = infrastructure_summary(infrastructure, len(teams))
         try:
             readiness = await asyncio.to_thread(
@@ -1918,6 +1936,16 @@ async def get_base_types(request: Request, db: Session = Depends(get_db)):
         }
         for b in bases
     ]
+
+
+@router.get("/aws/plans")
+async def get_aws_plans(request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        return {"plans": await asyncio.to_thread(_aws_instance_catalogue)}
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
 
 
 @router.delete("/events/{event_id}")
