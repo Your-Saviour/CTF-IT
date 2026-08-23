@@ -35,7 +35,7 @@ export function topologyLinkClass(link) {
 }
 
 export function topologyNodePresentation(node) {
-  return ['gateway', 'firewall', 'vm'].includes(node.type) ? 'machine' : 'structural';
+  return ['gateway', 'firewall', 'vm', 'green_vm'].includes(node.type) ? 'machine' : 'structural';
 }
 
 export function topologyThemeStyle(node) {
@@ -83,7 +83,7 @@ export const ZONE_CONTAINER_GEOMETRY = Object.freeze({
 
 export function machineBounds(node) {
   const width = ZONE_CONTAINER_GEOMETRY.machineWidth;
-  const annotated = ['vm', 'firewall'].includes(node?.type) && typeof node.annotation === 'string' && node.annotation !== '';
+  const annotated = ['vm', 'firewall', 'green_vm'].includes(node?.type) && typeof node.annotation === 'string' && node.annotation !== '';
   return {
     x: (node?.x ?? 0) - width / 2,
     y: (node?.y ?? 0) + ZONE_CONTAINER_GEOMETRY.machineTop,

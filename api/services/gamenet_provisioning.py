@@ -42,8 +42,10 @@ log = logging.getLogger(__name__)
 PROVISIONING_STEPS = (
     "allocate_keys_and_addresses", "create_gateways", "create_site_firewalls",
     "establish_site_tunnels", "connecting_control_plane", "certifying_private_boot",
-    "create_private_endpoints", "apply_blue_modules", "run_connectivity_checks",
-    "lock_down_public_ingress", "run_exposure_checks",
+    "create_private_endpoints", "create_green_services", "apply_blue_modules",
+    "deploy_green_modules", "run_connectivity_checks", "lock_down_public_ingress",
+    "run_exposure_checks",
+    "finalize_green_services",
 )
 
 
@@ -74,9 +76,8 @@ def provision_event_gamenets(event_id: int) -> None:
         event.ends_at = (event.started_at + __import__("datetime").timedelta(minutes=event.time_limit_minutes)
                          if event.time_limit_minutes else None)
         db.commit()
-        from api.services.expo_ust import configured, synchronize
-        if configured():
-            asyncio.run(synchronize(event.id))
+        from api.services.integration_outbox import enqueue_event_sync
+        enqueue_event_sync(event.id, "provisioning_completed")
     except Exception as exc:
         db.rollback()
         event = db.query(Event).filter_by(id=event_id).first()
@@ -158,6 +159,18 @@ def ensure_vm_placeholders(db, event, infrastructure) -> list[VM]:
     definitions = {site["key"]: site for site in infrastructure["sites"]}
     gateway_spec = infrastructure["vpn_gateway"]
     teams = db.query(Team).filter_by(event_id=event.id).order_by(Team.id).all()
+    from builder.infrastructure_validation import gamenet_green_hostname
+    for spec in infrastructure.get("green_infrastructure", {}).get("vms", []):
+        vm = db.query(VM).filter_by(event_id=event.id, green_key=spec["key"]).first()
+        if not vm:
+            vm = VM(
+                hostname=gamenet_green_hostname(event.id, spec["key"]), event_id=event.id,
+                team_id=None, green_key=spec["key"], role="green_service", status="creating",
+                vm_type=spec["key"], base_type=spec["base_type"],
+                instance_type=spec["default_plan"], cloud_region=spec["region"],
+            )
+            db.add(vm); db.flush()
+        created.append(vm)
     for team in teams:
         gateway = team.vpn_gateway
         if gateway and gateway.vm_id:
@@ -264,6 +277,47 @@ def create_gateways(db, event, infrastructure):
         sites = db.query(Site).filter_by(team_id=team.id).order_by(Site.order).all()
         participants = db.query(VPNCredential).filter_by(team_id=team.id, status="active").all()
         configure_gateway(team.vpn_gateway, vm, sites, participants)
+
+
+def create_green_services(db, event, infrastructure):
+    _require_provider()
+    for vm in db.query(VM).filter_by(event_id=event.id, role="green_service"):
+        if not vm.cloud_instance_id or not vm.public_ip:
+            _, public_key = get_or_create_platform_keypair(db)
+            provider = _provider()
+            try:
+                result = provider.create_green_service(
+                    event, vm, key_name=provider.config.key_pair_name,
+                    public_key=public_key, ingress=_green_ingress(event, temporary=True),
+                    user_data=ubuntu_cloud_init(),
+                )
+                _persist_instance_result(vm, result)
+            finally:
+                provider.close()
+        vm.ip_address = vm.public_ip
+        _apply_green_firewall(event, vm, temporary=True)
+        vm.status = "active"
+
+
+def deploy_green_modules(db, event, infrastructure):
+    plan = json.loads(event.module_plan or '{"version":1,"assignments":{}}')
+    from api.services.green_deployment import execute_green_modules
+    from api.services.green_integrations import ensure_expo_it_integration
+    for vm in db.query(VM).filter_by(event_id=event.id, role="green_service"):
+        assignment = plan.get("assignments", {}).get(f"green:{vm.green_key}", {})
+        outputs = execute_green_modules(db, event, vm, assignment.get("resolved_module_ids", []))
+        if "expo_it.api_key" in outputs:
+            ensure_expo_it_integration(db, event, vm, outputs)
+
+
+def finalize_green_services(db, event, infrastructure):
+    from api.models import GreenDeploymentFact
+    keys = [vm.green_key for vm in db.query(VM).filter_by(event_id=event.id, role="green_service")]
+    if keys:
+        db.query(GreenDeploymentFact).filter(
+            GreenDeploymentFact.event_id == event.id,
+            GreenDeploymentFact.vm_key.in_(keys),
+        ).delete(synchronize_session=False)
 
 
 def create_site_firewalls(db, event, infrastructure):
@@ -454,6 +508,9 @@ def _certify_site_image(db, event, site, base_type_id):
     return
 def lock_down_public_ingress(db, event, infrastructure):
     _apply_final_firewall_groups(event, infrastructure)
+    for vm in db.query(VM).filter_by(event_id=event.id, role="green_service"):
+        _apply_green_host_egress(db, event, vm)
+        _apply_green_firewall(event, vm, temporary=False)
     # The provider firewall must be in place before temporary management rules
     # are removed. Any failure here keeps the event closed.
     _remove_temporary_management_access(event)
@@ -461,7 +518,13 @@ def lock_down_public_ingress(db, event, infrastructure):
 
 def run_connectivity_checks(db, event, infrastructure):
     result = _run_connectivity_and_exposure_checks(event, infrastructure, exposure=False)
-    required = {"vpn_routes", "same_site", "site_isolation", "team_isolation", "private_management", "nat_egress"}
+    required = {"vpn_routes", "same_site", "site_isolation", "team_isolation",
+                "private_management", "nat_egress"}
+    if infrastructure.get("green_infrastructure", {}).get("vms"):
+        required.update({"green_vpn_access", "green_egress_isolation"})
+    else:
+        result.pop("green_vpn_access", None)
+        result.pop("green_egress_isolation", None)
     if set(result) != required or not all(result.values()):
         missing = ",".join(sorted(required - set(result))) or "none"
         failed = ",".join(sorted(name for name in required & set(result) if not result[name])) or "none"
@@ -475,6 +538,10 @@ def run_connectivity_checks(db, event, infrastructure):
 def run_exposure_checks(db, event, infrastructure):
     result = _run_connectivity_and_exposure_checks(event, infrastructure, connectivity=False)
     required = {"public_exposure"}
+    if infrastructure.get("green_infrastructure", {}).get("vms"):
+        required.add("green_public_denial")
+    else:
+        result.pop("green_public_denial", None)
     if set(result) != required or not all(result.values()):
         raise RuntimeError("GameNet public exposure checks did not all pass")
 
@@ -610,6 +677,49 @@ def _gateway_ingress(team, *, temporary: bool) -> tuple[dict, ...]:
     return tuple(rules)
 
 
+def _apply_green_firewall(event, vm, *, temporary: bool):
+    provider = _provider()
+    try:
+        group = provider.ensure_green_security_group(event, vm, _green_ingress(event, temporary=temporary))
+        vm.security_group_ids_json = json.dumps([group])
+        object_session(vm).commit()
+    finally:
+        provider.close()
+
+
+def _green_ingress(event, *, temporary: bool) -> tuple[dict, ...]:
+    db = object_session(event)
+    control = ip_network(os.environ.get("CTF_CONTROL_PLANE_CIDR", "127.0.0.1/32"))
+    cidrs = [str(control)]
+    cidrs.extend(
+        f"{gateway_vm.public_ip}/32" for team in db.query(Team).filter_by(event_id=event.id)
+        if team.vpn_gateway and team.vpn_gateway.vm_id
+        and (gateway_vm := db.get(VM, team.vpn_gateway.vm_id)) and gateway_vm.public_ip
+    )
+    rules = [{"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443,
+              "IpRanges": [{"CidrIp": cidr} for cidr in cidrs]}]
+    if temporary:
+        rules.append({"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                      "IpRanges": [{"CidrIp": str(control)}]})
+    return tuple(rules)
+
+
+def _apply_green_host_egress(db, event, vm):
+    cidrs = [site.allocated_cidr for site in db.query(Site).filter_by(event_id=event.id)]
+    commands = [
+        "iptables -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || "
+        "iptables -I OUTPUT 1 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
+    ]
+    commands.extend(
+        f"iptables -C OUTPUT -d {shlex.quote(cidr)} -j REJECT 2>/dev/null || "
+        f"iptables -A OUTPUT -d {shlex.quote(cidr)} -j REJECT"
+        for cidr in cidrs
+    )
+    code, _, error = ssh_command(vm, " && ".join(commands))
+    if code:
+        raise GameNetProviderError(f"failed to enforce green-service egress isolation: {error[:300]}")
+
+
 def _assign_blue_modules(db, vm, event):
     if vm.modules:
         return
@@ -723,6 +833,9 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
     vpn_routes = True
     nat_egress = True
     public_exposure = True
+    green_vpn_access = True
+    green_public_denial = True
+    green_egress_isolation = True
     if exposure:
         provider = _provider()
         try:
@@ -739,6 +852,11 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
                     provider, site.wan_security_group_id, (),
                 )
                 public_exposure &= converged
+            for green_vm in db.query(VM).filter_by(event_id=event.id, role="green_service"):
+                group_ids = json.loads(green_vm.security_group_ids_json or "[]")
+                green_public_denial &= len(group_ids) == 1 and _wait_security_group_rules(
+                    provider, group_ids[0], _green_ingress(event, temporary=False),
+                )
         finally:
             provider.close()
     for site in sites:
@@ -796,11 +914,22 @@ def _run_connectivity_and_exposure_checks(event, infrastructure, *, connectivity
                 team_isolation &= code != 0
     result = {}
     if connectivity:
+        for team in teams:
+            gateway_vm = db.query(VM).filter_by(id=team.vpn_gateway.vm_id).one()
+            for green_vm in db.query(VM).filter_by(event_id=event.id, role="green_service"):
+                code, _, _ = ssh_command(gateway_vm, f"curl -kfsS --max-time 10 https://{green_vm.public_ip}/")
+                green_vpn_access &= code == 0
+        for green_vm in db.query(VM).filter_by(event_id=event.id, role="green_service"):
+            for site in sites:
+                destination = str(ip_network(site.allocated_cidr).network_address + 1)
+                code, _, _ = ssh_command(green_vm, f"ping -c 1 -W 3 {destination}")
+                green_egress_isolation &= code != 0
         result.update({"vpn_routes": vpn_routes, "same_site": same_site, "site_isolation": site_isolation,
                        "team_isolation": team_isolation, "private_management": private_management,
-                       "nat_egress": nat_egress})
+                       "nat_egress": nat_egress, "green_vpn_access": green_vpn_access,
+                       "green_egress_isolation": green_egress_isolation})
     if exposure:
-        result["public_exposure"] = public_exposure
+        result.update({"public_exposure": public_exposure, "green_public_denial": green_public_denial})
     return result
 
 

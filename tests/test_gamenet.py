@@ -101,13 +101,23 @@ def test_vm_persists_opnsense_configuration_generation(db_session):
     assert saved.opnsense_config_status == "applying"
 
 
-def test_schema_repair_migration_covers_existing_database_feature_columns():
-    migration = Path("migrations/versions/0009_existing_feature_columns.py").read_text()
-    assert '"ust_prompt"' in migration
-    assert '"expo_sync_status"' in migration
-    assert '"expo_sync_last_error"' in migration
-    assert '"expo_sync_attempts"' in migration
-    assert '"expo_sync_completed_at"' in migration
+def test_general_integration_migration_replaces_obsolete_event_sync_columns():
+    migration = Path("migrations/versions/0017_general_integrations.py").read_text()
+    for table in (
+        "integration_destinations", "event_integrations",
+        "integration_sync_jobs", "integration_sync_attempts",
+    ):
+        assert table in migration
+    for column in (
+        "expo_sync_status", "expo_sync_last_error",
+        "expo_sync_attempts", "expo_sync_completed_at",
+    ):
+        assert f'"{column}"' in migration
+    assert "batch_op.drop_column(column)" in migration
+
+    startup = Path("api/main.py").read_text()
+    assert "expo_sync_status" not in startup
+    assert "expo_sync_last_error" not in startup
 
 
 def test_snapshot_configuration_resume_does_not_relaunch_live_generation(monkeypatch, db_session):
@@ -593,6 +603,49 @@ def test_user_profile_routes_and_uses_team_resolver(monkeypatch, db_session):
     config = render_user_config(db_session, user)
     assert f"DNS = {gateway.vpn_address}" in config
     assert f"AllowedIPs = {gateway.vpn_address}/32, {team.sites[0].allocated_cidr}" in config
+
+
+def test_user_profile_routes_shared_green_service_through_gamenet(monkeypatch, db_session):
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(INFRASTRUCTURE))
+    db_session.add(event); db_session.flush()
+    team = Team(name="One", event_id=event.id); db_session.add(team); db_session.flush()
+    allocate_event_networks(db_session, event, [team], INFRASTRUCTURE)
+    ensure_vm_placeholders(db_session, event, INFRASTRUCTURE)
+    gateway = team.vpn_gateway
+    gateway.status = "active"
+    db_session.get(VM, gateway.vm_id).public_ip = "192.0.2.10"
+    db_session.add(VM(
+        hostname="green-expo", event_id=event.id, team_id=None, role="green_service",
+        green_key="expo_it", status="active", public_ip="198.51.100.44",
+    ))
+    user = User(username="learner-green", password_hash="x", event_id=event.id, team_id=team.id)
+    db_session.add(user); db_session.flush()
+    monkeypatch.setattr("api.services.gamenet._sync_team_gateway_if_active", lambda *_: None)
+
+    config = render_user_config(db_session, user)
+
+    assert "198.51.100.44/32" in config
+
+
+def test_green_placeholder_is_shared_and_retry_safe(db_session):
+    infrastructure = deepcopy(INFRASTRUCTURE)
+    infrastructure["green_infrastructure"] = {"vms": [{
+        "key": "expo_it", "name": "Expo-IT", "region": "ewr",
+        "base_type": "ubuntu_24_server", "default_plan": "vc2-1c-2gb",
+    }]}
+    event = Event(name="GameNet", quota="{}", infrastructure=json.dumps(infrastructure))
+    db_session.add(event); db_session.flush()
+    db_session.add_all([Team(name="One", event_id=event.id), Team(name="Two", event_id=event.id)])
+    db_session.flush()
+    allocate_event_networks(db_session, event, db_session.query(Team).all(), infrastructure)
+
+    ensure_vm_placeholders(db_session, event, infrastructure)
+    ensure_vm_placeholders(db_session, event, infrastructure)
+
+    green = db_session.query(VM).filter_by(event_id=event.id, role="green_service").all()
+    assert len(green) == 1
+    assert green[0].team_id is None
+    assert green[0].green_key == "expo_it"
 
 
 def test_opnsense_bootstrap_waits_through_pre_reboot_window(monkeypatch, db_session):

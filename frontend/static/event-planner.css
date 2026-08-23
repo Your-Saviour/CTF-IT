@@ -201,3 +201,6 @@ dialog header, dialog footer { display: flex; align-items: center; justify-conte
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.outline-child.green-node .outline-node { border-left: 3px solid #34d399; }
+[data-green-controls] { margin-top: 1rem; display: grid; gap: .75rem; }

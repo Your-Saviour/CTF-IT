@@ -143,6 +143,42 @@ class AwsGameNetProvider:
             eip_allocation_id=allocation.allocation_id,
         )
 
+    def ensure_green_security_group(self, event, vm, ingress: tuple[dict, ...]):
+        tags = ownership_tags(
+            self.config.environment, event_id=event.id, vm_id=vm.id,
+        )
+        return self.network.ensure_security_group(SecurityGroupSpec(
+            self.config.standard_vpc_id, f"ctf-it-event-{event.id}-green-{vm.green_key}",
+            "GameNet green service", ingress,
+            ({"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},), tags,
+        ))
+
+    def create_green_service(self, event, vm, *, key_name: str, public_key: str,
+                             ingress: tuple[dict, ...], user_data: str):
+        vm.ssh_user = "ubuntu"
+        tags = ownership_tags(
+            self.config.environment, event_id=event.id, vm_id=vm.id,
+        )
+        group_id = self.ensure_green_security_group(event, vm, ingress)
+        self.compute.ensure_key_pair(key_name, public_key, ownership_tags(self.config.environment))
+        result = self.compute.launch_instance(InstanceSpec(
+            ami_id=self.config.ubuntu_ami(vm.cloud_region),
+            instance_type=vm.instance_type or "t3.small",
+            client_token=self._token("vm", vm.id),
+            network_interfaces=(NetworkInterfaceSpec(
+                0, subnet_id=self.config.standard_subnet_id,
+                security_group_ids=(group_id,), associate_public_ip=False,
+            ),),
+            tags=tags, key_name=key_name, user_data=user_data,
+        ))
+        self.compute.wait_running(result.instance_id)
+        allocation = self.compute.ensure_eip(tags)
+        self.compute.associate_eip(allocation.allocation_id, result.primary_eni_id)
+        return replace(
+            result, public_ip=allocation.public_ip,
+            eip_allocation_id=allocation.allocation_id,
+        )
+
     def create_firewall(self, site, vm, *, ami_id: str):
         tags = self._tags(site, vm)
         wan = self.network.ensure_eni(

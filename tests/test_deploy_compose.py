@@ -221,3 +221,9 @@ def test_aws_containers_expose_no_static_keys_or_host_credential_mounts() -> Non
         assert all(volume.startswith(("aws_credentials:", "opnsense_source_cache:",
                                       "aws_acceptance_state:"))
                    for volume in volumes)
+def test_expo_it_destination_is_database_managed_not_environment_configured() -> None:
+    paths = [ROOT / ".env.example", ROOT / "docker-compose.yml", ROOT / "deploy" / ".env.example",
+             ROOT / "deploy" / "docker-compose.yml"]
+    contents = "\n".join(path.read_text() for path in paths if path.exists())
+    assert "EXPO_IT_URL" not in contents
+    assert "EXPO_IT_API_KEY" not in contents

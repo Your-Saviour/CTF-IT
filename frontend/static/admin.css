@@ -426,6 +426,9 @@ body.admin-app input:-webkit-autofill {
     .vm-quota-row [name="vm_plan"],
     .vm-quota-row [name="vm_region"] { grid-column: auto; }
 }
+.integration-list { display: grid; gap: .75rem; }
+.integration-record { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; border: 1px solid var(--border); background: var(--bg-deep); }
+.integration-record h3, .integration-record p { margin: 0 0 .35rem; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }

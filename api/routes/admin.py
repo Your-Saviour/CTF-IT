@@ -151,6 +151,53 @@ def require_admin(request: Request, db: Session = Depends(get_db)):
     return user
 
 
+@router.get("/events/{event_id}/green/{vm_key}/facts")
+async def green_fact_list(event_id: int, vm_key: str, request: Request, db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    from api.services.deployment_facts import fact_presence
+    return JSONResponse(fact_presence(db, event, vm_key), headers={"Cache-Control": "no-store"})
+
+
+@router.put("/events/{event_id}/green/{vm_key}/facts/{trait}")
+async def green_fact_put(event_id: int, vm_key: str, trait: str, request: Request,
+                         db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "deployment facts are read only"}, status_code=409)
+    from api.services.deployment_facts import fact_presence, put_fact
+    try:
+        put_fact(db, event, vm_key, trait, (await request.json()).get("value"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    item = next(item for item in fact_presence(db, event, vm_key) if item["trait"] == trait)
+    return JSONResponse(item, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/events/{event_id}/green/{vm_key}/facts/{trait}", status_code=204)
+async def green_fact_delete(event_id: int, vm_key: str, trait: str, request: Request,
+                            db: Session = Depends(get_db)):
+    if not require_admin(request, db):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    event = db.get(Event, event_id)
+    if not event:
+        return JSONResponse({"error": "Event not found"}, status_code=404)
+    if event.status != "draft":
+        return JSONResponse({"error": "deployment facts are read only"}, status_code=409)
+    from api.services.deployment_facts import clear_fact, declared_inputs
+    if trait not in declared_inputs(event, vm_key):
+        return JSONResponse({"error": "fact is not declared by an assigned deployment module"}, status_code=422)
+    clear_fact(db, event.id, vm_key, trait)
+    return Response(status_code=204)
+
+
 def _audit(db: Session, actor: User, action: str, target: User | None = None, **metadata):
     db.add(AdminAudit(
         actor_id=actor.id,
@@ -735,10 +782,6 @@ async def list_events(request: Request, db: Session = Depends(get_db)):
             "updated_at": e.updated_at.isoformat(),
             "user_count": user_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
-            "expo_sync_status": e.expo_sync_status,
-            "expo_sync_last_error": e.expo_sync_last_error,
-            "expo_sync_attempts": e.expo_sync_attempts,
-            "expo_sync_completed_at": e.expo_sync_completed_at.isoformat() if e.expo_sync_completed_at else None,
         })
     return result
 
@@ -768,10 +811,6 @@ async def get_event(event_id: int, request: Request, db: Session = Depends(get_d
         "updated_at": event.updated_at.isoformat(),
         "user_count": user_count,
         "created_at": event.created_at.isoformat() if event.created_at else None,
-        "expo_sync_status": event.expo_sync_status,
-        "expo_sync_last_error": event.expo_sync_last_error,
-        "expo_sync_attempts": event.expo_sync_attempts,
-        "expo_sync_completed_at": event.expo_sync_completed_at.isoformat() if event.expo_sync_completed_at else None,
     }
 
 
@@ -797,7 +836,16 @@ async def get_module_plan(event_id: int, request: Request, db: Session = Depends
                           "disabled": m.disabled, "learning_objectives": m.learning_objectives,
                           "estimated_minutes": m.estimated_minutes, "prerequisites": m.prerequisites,
                           "phases": m.phases, "narrative": m.narrative,
-                          "verification_type": (m.verification or {}).get("type")} for m in modules]}
+                          "verification_type": (m.verification or {}).get("type"),
+                          "deployment": ({
+                              "inputs": [{"trait": item.trait, "label": item.label,
+                                          "value_type": item.value_type, "secret": item.secret}
+                                         for item in m.deployment.inputs],
+                              "outputs": [{"trait": item.trait, "label": item.label,
+                                           "value_type": item.value_type, "secret": item.secret,
+                                           "consume_as": item.consume_as}
+                                          for item in m.deployment.outputs],
+                          } if m.deployment else None)} for m in modules]}
 
 
 @router.put("/events/{event_id}/module-plan")
@@ -817,7 +865,10 @@ async def save_module_plan(event_id: int, request: Request, db: Session = Depend
         plan = normalize_module_plan(body.get("module_plan"))
     except (TypeError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
-    event.module_plan = json.dumps(plan); event.updated_at = utcnow(); db.commit(); db.refresh(event)
+    event.module_plan = json.dumps(plan); event.updated_at = utcnow()
+    from api.services.deployment_facts import clear_orphaned_inputs
+    clear_orphaned_inputs(db, event, plan)
+    db.commit(); db.refresh(event)
     return {"status": "saved", "updated_at": event.updated_at.isoformat()}
 
 
@@ -837,8 +888,8 @@ async def resolve_module_plan(event_id: int, request: Request, db: Session = Dep
     if not endpoint:
         return JSONResponse({"error": "planned VM not found"}, status_code=404)
     refill = bool(body.get("refill", False))
-    if endpoint["role"] == "red" and refill:
-        return JSONResponse({"error": "red-team VMs are manual-only"}, status_code=422)
+    if endpoint["role"] in {"red", "green"} and refill:
+        return JSONResponse({"error": f"{endpoint['role']}-team VMs are manual-only"}, status_code=422)
     return resolve_assignment(endpoint, body.get("assignment", {}), json.loads(event.quota), load_all_modules(), refill=refill)
 
 
@@ -1267,6 +1318,8 @@ async def create_event(request: Request, db: Session = Depends(get_db)):
     db.add(event)
     db.commit()
     db.refresh(event)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event.id, "event_created")
     return {"status": "created", "id": event.id}
 
 
@@ -1395,8 +1448,12 @@ async def update_event(
                 "current_updated_at": current.updated_at.isoformat(),
             }, status_code=409)
         db.commit()
+        from api.services.integration_outbox import enqueue_event_sync
+        enqueue_event_sync(event_id, "event_updated")
         return {"status": "updated", "updated_at": new_updated_at.isoformat()}
     db.commit()
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event_id, "event_updated")
     return {"status": "updated", "updated_at": event.updated_at.isoformat()}
 
 
@@ -1438,6 +1495,42 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
                 {"error": "Cannot auto-provision VMs: no teams defined for this event"},
                 status_code=422,
             )
+
+        from api.services.deployment_facts import missing_required_inputs
+        missing_facts = missing_required_inputs(db, event)
+        if missing_facts:
+            return JSONResponse({"error": "Missing green deployment facts", "details": missing_facts}, status_code=422)
+
+        from builder.module_plan import empty_module_plan, validate_green_assignments
+        green_issues = validate_green_assignments(
+            json.loads(event.module_plan) if event.module_plan else empty_module_plan(),
+            infrastructure, load_all_modules(),
+        )
+        if green_issues:
+            return JSONResponse({"error": "Invalid green module assignments", "details": green_issues}, status_code=422)
+
+        from api.models import EventIntegration, IntegrationDestination
+        admin_expo_binding = db.query(EventIntegration).join(IntegrationDestination).filter(
+            EventIntegration.event_id == event.id,
+            EventIntegration.enabled.is_(True),
+            IntegrationDestination.adapter_key == "expo_it",
+            IntegrationDestination.owner_green_vm_id.is_(None),
+        ).first()
+        expo_planned = any(
+            "expo_it" in assignment.get("resolved_module_ids", [])
+            for vm_id, assignment in (json.loads(event.module_plan).get("assignments", {})
+                                      if event.module_plan else {}).items()
+            if vm_id.startswith("green:")
+        )
+        if expo_planned and admin_expo_binding:
+            return JSONResponse({
+                "error": "Expo-IT integration conflict",
+                "details": [{
+                    "code": "existing_expo_it_binding",
+                    "message": "Disable the administrator-managed Expo-IT binding before deploying managed Expo-IT",
+                    "vm_id": "green:expo_it", "vm_key": "expo_it", "module_id": "expo_it",
+                }],
+            }, status_code=422)
 
         from builder.base_loader import load_all_bases
         from builder.infrastructure_validation import infrastructure_summary, validate_infrastructure
@@ -1504,27 +1597,9 @@ async def start_event(event_id: int, request: Request, db: Session = Depends(get
     event.status = "open"
     event.open = True
     db.commit()
-    from api.services.expo_ust import schedule
-    scheduled = schedule(event.id)
-    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None,
-            "warning": None if scheduled else "Expo-IT integration is not configured"}
-
-
-@router.post("/events/{event_id}/expo-sync/retry")
-async def retry_expo_sync(event_id: int, request: Request, db: Session = Depends(get_db)):
-    admin = require_admin(request, db)
-    if not admin:
-        return JSONResponse({"error": "forbidden"}, status_code=403)
-    event = db.query(Event).filter_by(id=event_id).first()
-    if not event:
-        return JSONResponse({"error": "Event not found"}, status_code=404)
-    if event.status != "open":
-        return JSONResponse({"error": "Only an open event can be synchronized"}, status_code=409)
-    from api.services.expo_ust import configured, schedule
-    if not configured():
-        return JSONResponse({"error": "Expo-IT integration is not configured"}, status_code=503)
-    schedule(event_id)
-    return JSONResponse({"status": "syncing"}, status_code=202)
+    from api.services.integration_outbox import enqueue_event_sync
+    enqueue_event_sync(event.id, "event_opened")
+    return {"status": "started", "ends_at": event.ends_at.isoformat() if event.ends_at else None}
 
 
 @router.get("/events/{event_id}/provision-status")
@@ -1536,7 +1611,7 @@ async def event_provision_status(
     if not admin:
         return JSONResponse({"error": "forbidden"}, status_code=403)
 
-    from api.models import PrivateBootCertification, Site, Team, VM
+    from api.models import EventIntegration, GreenDeploymentState, IntegrationDestination, PrivateBootCertification, Site, Team, VM
 
     vms = db.query(VM).filter(VM.event_id == event_id).all()
 
@@ -1550,6 +1625,12 @@ async def event_provision_status(
     for vm in vms:
         status_key = vm.status if vm.status in counts else "creating"
         counts[status_key] = counts.get(status_key, 0) + 1
+        green_state = (db.query(GreenDeploymentState).filter_by(vm_id=vm.id)
+                       .order_by(GreenDeploymentState.id.desc()).first()) if vm.green_key else None
+        green_binding = (db.query(EventIntegration).join(IntegrationDestination).filter(
+            EventIntegration.event_id == event_id,
+            IntegrationDestination.owner_green_vm_id == vm.id,
+        ).first()) if vm.green_key else None
         vm_list.append({
             "id": vm.id,
             "hostname": vm.hostname,
@@ -1559,6 +1640,15 @@ async def event_provision_status(
             "provision_step": vm.provision_step,
             "provision_error": vm.provision_error,
             "ip_address": vm.ip_address,
+            "ownership": "event" if vm.green_key else "team",
+            "green_key": vm.green_key,
+            "module_id": green_state.module_id if green_state else None,
+            "resolved_commit": green_state.resolved_commit if green_state else None,
+            "service_url": green_state.service_url if green_state else None,
+            "health_status": green_state.health_status if green_state else None,
+            "integration_status": green_binding.last_status if green_binding and green_binding.last_status else (
+                "configured" if green_binding and green_binding.enabled else None
+            ),
         })
 
     certifications = (
@@ -1971,6 +2061,9 @@ async def delete_event(event_id: int, request: Request, db: Session = Depends(ge
     if cleanup.remaining:
         return JSONResponse({"error": "AWS cleanup incomplete",
                              "remaining": list(cleanup.remaining)}, status_code=409)
+
+    from api.services.green_integrations import delete_owned_integrations
+    delete_owned_integrations(db, event_id)
 
     db.delete(event)
     db.commit()

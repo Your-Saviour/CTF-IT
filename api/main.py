@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from api.database import engine, get_db, init_db
 from api.models import Event, EventOperation, User, VM, utcnow
-from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, learner, module_repos, scenarios, service_credentials, vm, vm_goals
+from api.routes import admin, ai_agent, ansible_export, auth, caldera_export, caldera_ops, caldera_setup, caldera_tree, event_dashboard, integrations, learner, module_repos, scenarios, service_credentials, vm, vm_goals
 from api.routes.auth import get_current_user
 
 _log = logging.getLogger(__name__)
@@ -104,10 +104,6 @@ async def lifespan(app: FastAPI):
                 "infrastructure": "TEXT",
                 "started_at": "DATETIME",
                 "ends_at": "DATETIME",
-                "expo_sync_status": "VARCHAR(24)",
-                "expo_sync_last_error": "TEXT",
-                "expo_sync_attempts": "INTEGER NOT NULL DEFAULT 0",
-                "expo_sync_completed_at": "DATETIME",
             }.items():
                 if col not in existing:
                     db.execute(text(f"ALTER TABLE events ADD COLUMN {col} {typ}"))
@@ -372,6 +368,10 @@ async def lifespan(app: FastAPI):
                 deadline_db.close()
 
     deadline_task = asyncio.create_task(enforce_event_deadlines())
+    from api.services.integration_outbox import recover_stale_claims, worker_loop
+    recover_stale_claims()
+    integration_stop = asyncio.Event()
+    integration_task = asyncio.create_task(worker_loop(integration_stop))
     verification_task = None
     if os.environ.get("LEARNER_TRAINING_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from api.services.verification_scheduler import scheduler_loop
@@ -380,10 +380,14 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         deadline_task.cancel()
+        integration_stop.set()
+        integration_task.cancel()
         if verification_task:
             verification_task.cancel()
         with suppress(asyncio.CancelledError):
             await deadline_task
+        with suppress(asyncio.CancelledError):
+            await integration_task
         if verification_task:
             with suppress(asyncio.CancelledError):
                 await verification_task
@@ -475,6 +479,7 @@ app.include_router(caldera_setup.router)
 app.include_router(caldera_ops.router)
 app.include_router(caldera_tree.router)
 app.include_router(event_dashboard.router)
+app.include_router(integrations.router)
 app.include_router(learner.router)
 app.include_router(module_repos.router)
 app.include_router(scenarios.router)

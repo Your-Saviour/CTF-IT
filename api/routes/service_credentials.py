@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import ServiceCredential, User, utcnow
+from api.models import IntegrationDestination, ServiceCredential, User, utcnow
 from api.routes.auth import get_current_user
 
 router = APIRouter(prefix="/admin/api/credentials", tags=["service_credentials"])
@@ -153,6 +153,11 @@ async def delete_credential(
     credential = db.query(ServiceCredential).filter(ServiceCredential.id == credential_id).first()
     if not credential:
         return JSONResponse({"error": "not found"}, status_code=404)
+
+    if db.query(IntegrationDestination).filter_by(credential_id=credential_id).first():
+        return JSONResponse(
+            {"error": "credential is used by an integration destination"}, status_code=409
+        )
 
     db.delete(credential)
     db.commit()

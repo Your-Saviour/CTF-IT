@@ -73,9 +73,9 @@
 
 <div class="summary-grid" id="summary-grid"></div>
 
-<section class="card" style="margin-bottom:1.25rem;border-left:3px solid var(--cyan);" aria-labelledby="expo-sync-title">
-    <div class="section-title"><h2 id="expo-sync-title">Expo-IT UST synchronization</h2><button class="btn btn-sm" id="expo-sync-retry" type="button">Retry</button></div>
-    <div id="expo-sync-state" class="summary-detail">Loading synchronization state…</div>
+<section class="card" style="margin-bottom:1.25rem;border-left:3px solid var(--cyan);" aria-labelledby="integration-sync-title">
+    <div class="section-title"><h2 id="integration-sync-title">Integration synchronization</h2><button class="btn btn-sm" id="integration-sync-now" type="button">Sync now</button></div>
+    <div id="integration-sync-state" class="summary-detail">Loading integration state…</div>
 </section>
 
 <div class="section-grid">
@@ -175,10 +175,11 @@
         document.getElementById('vm-health-summary').textContent = counts.healthy + ' healthy · ' + counts.degraded + ' degraded · ' + counts.failed + ' failed · ' + counts.pending + ' pending';
         document.getElementById('vm-grid').innerHTML = vms.length ? vms.map(function(vm) {
             var agent = vm.caldera_agent;
-            var agentText = !agent.available ? 'agent: unknown' : agent.alive ? 'agent: alive' : agent.present ? 'agent: not alive' : 'agent: missing';
+            var agentText = vm.ownership === 'event' ? 'shared green service' : !agent.available ? 'agent: unknown' : agent.alive ? 'agent: alive' : agent.present ? 'agent: not alive' : 'agent: missing';
+            var greenMeta = vm.ownership === 'event' ? '<div class="vm-meta">' + esc(vm.resolved_commit || 'commit pending') + ' · ' + esc(vm.service_health || 'health pending') + ' · integration: ' + esc(vm.integration_status || 'pending') + '</div>' : '';
             return '<a class="vm-card ' + esc(vm.health) + '" href="/admin/infrastructure/vms/' + encodeURIComponent(vm.id) + '"><div class="vm-head"><span class="vm-name">' + esc(vm.hostname || 'VM ' + vm.id) + '</span><span class="health-' + esc(vm.health) + '">' + esc(vm.health.toUpperCase()) + '</span></div>' +
                 '<div class="vm-meta">' + esc(vm.team_name) + ' · ' + esc(vm.ip_address || 'no IP') + '</div><div class="vm-meta">' + esc(vm.status || 'registered') + (vm.provision_step ? ' / ' + esc(vm.provision_step) : '') + ' · ' + esc(agentText) + '</div>' +
-                '<div class="vm-meta">Modules ' + vm.module_progress.completed + '/' + vm.module_progress.assigned + ' (' + percent(vm.module_progress.percentage) + ')</div>' + progress(vm.module_progress.percentage) + '</a>';
+                greenMeta + '<div class="vm-meta">Modules ' + vm.module_progress.completed + '/' + vm.module_progress.assigned + ' (' + percent(vm.module_progress.percentage) + ')</div>' + progress(vm.module_progress.percentage) + '</a>';
         }).join('') : '<div class="empty">No VMs in this event</div>';
     }
 
@@ -276,28 +277,37 @@
         } finally { polling = false; }
     }
 
-    async function loadExpoSync() {
-        var state = document.getElementById('expo-sync-state');
+    async function loadIntegrationSync() {
+        var state = document.getElementById('integration-sync-state');
         try {
-            var response = await fetch('/admin/api/events/' + EVENT_ID, {headers:{'Accept':'application/json'}});
-            var data = await response.json();
-            var value = data.expo_sync_status || 'not configured';
-            state.textContent = value + ' · ' + (data.expo_sync_attempts || 0) + ' attempts' + (data.expo_sync_last_error ? ' · Last error: ' + data.expo_sync_last_error : '') + (data.expo_sync_completed_at ? ' · Completed ' + data.expo_sync_completed_at : '');
+            var response = await fetch('/admin/api/events/' + EVENT_ID + '/integrations', {headers:{'Accept':'application/json'}});
+            var data = await response.json(), binding = data.find(function(item){ return item.enabled; }) || data[0];
+            if (!binding) { state.textContent = 'No integration configured for this event.'; return; }
+            state.dataset.bindingId = binding.id;
+            var job = binding.job;
+            state.textContent = binding.destination.name + ' · ' + (job ? job.status : binding.last_status) +
+              (job ? ' · attempt ' + job.attempt_count + ' · ' + job.trigger_reason : '') +
+              (job && job.status === 'retrying' && job.next_attempt_at ? ' · next retry ' + job.next_attempt_at : '') +
+              (binding.last_success_at ? ' · Last success ' + binding.last_success_at : '') +
+              (binding.last_error_message ? ' · ' + binding.last_error_message : '');
         } catch (error) { state.textContent = 'Unable to load synchronization state'; }
     }
-    document.getElementById('expo-sync-retry').addEventListener('click', async function () {
-        var response = await fetch('/admin/api/events/' + EVENT_ID + '/expo-sync/retry', {method:'POST'});
-        document.getElementById('expo-sync-state').textContent = response.ok ? 'syncing · retry requested' : 'Retry could not be started';
-        if (response.ok) window.setTimeout(loadExpoSync, 1000);
+    document.getElementById('integration-sync-now').addEventListener('click', async function () {
+        var state = document.getElementById('integration-sync-state'), bindingId = state.dataset.bindingId;
+        if (!bindingId) return;
+        var response = await fetch('/admin/api/events/' + EVENT_ID + '/integrations/' + bindingId + '/sync', {method:'POST'});
+        state.textContent = response.ok ? 'pending · manual synchronization queued' : 'Synchronization could not be queued';
+        if (response.ok) window.setTimeout(loadIntegrationSync, 1000);
     });
 
     poll();
     pollAnalytics();
-    loadExpoSync();
+    loadIntegrationSync();
     pollTimer = window.setInterval(poll, 10000);
     analyticsTimer = window.setInterval(pollAnalytics, 30000);
+    var integrationTimer = window.setInterval(loadIntegrationSync, 5000);
     window.setInterval(updateClock, 1000);
-    window.addEventListener('beforeunload', function(){ window.clearInterval(pollTimer); window.clearInterval(analyticsTimer); });
+    window.addEventListener('beforeunload', function(){ window.clearInterval(pollTimer); window.clearInterval(analyticsTimer); window.clearInterval(integrationTimer); });
 })();
 </script>
 {% endblock %}

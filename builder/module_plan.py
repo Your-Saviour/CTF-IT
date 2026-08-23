@@ -31,7 +31,9 @@ def normalize_module_plan(value):
         raise ValueError("module_plan.assignments must be an object")
     result = empty_module_plan()
     for vm_id, row in assignments.items():
-        if not isinstance(vm_id, str) or not vm_id.startswith("vm:") or vm_id.count("/") != 2:
+        endpoint_id = isinstance(vm_id, str) and vm_id.startswith("vm:") and vm_id.count("/") == 2
+        green_id = isinstance(vm_id, str) and vm_id.startswith("green:") and vm_id.count(":") == 1 and bool(vm_id[6:])
+        if not endpoint_id and not green_id:
             raise ValueError("assignment keys must be stable VM IDs")
         if not isinstance(row, dict) or row.get("mode") not in {"random_fill", "manual_only"}:
             raise ValueError(f"{vm_id}.mode must be random_fill or manual_only")
@@ -47,7 +49,10 @@ def normalize_module_plan(value):
 
 
 def assignable_endpoints(infrastructure):
-    rows = []
+    rows = [{"id": f"green:{vm['key']}", "name": vm.get("name", vm["key"]),
+             "base_type": vm.get("base_type"), "role": "green", "shared": True,
+             "site": "Shared", "zone": "Green team"}
+            for vm in (infrastructure or {}).get("green_infrastructure", {}).get("vms", [])]
     for site in (infrastructure or {}).get("sites", []):
         for zone in site.get("zones", []):
             for endpoint in zone.get("endpoints", []):
@@ -67,8 +72,9 @@ def reconcile_module_plan(plan, infrastructure):
     return result, issues
 
 
-def _compatible(module, base_type):
-    return not module.disabled and (not module.supported_bases or base_type in module.supported_bases)
+def _compatible(module, base_type, role=None):
+    placement_ok = (module.type == "green_infrastructure") == (role == "green")
+    return placement_ok and not module.disabled and (not module.supported_bases or base_type in module.supported_bases)
 
 
 def _conflicts(module, selected):
@@ -98,7 +104,7 @@ def resolve_assignment(endpoint, assignment, quota, library, *, refill):
             issues.append({"code": "unknown_module", "module_id": module_id,
                            "message": f"Module '{module_id}' is unavailable"})
             return
-        if not _compatible(module, endpoint.get("base_type")):
+        if not _compatible(module, endpoint.get("base_type"), endpoint.get("role")):
             issues.append({"code": "incompatible_base", "module_id": module_id,
                            "message": f"Module '{module_id}' is incompatible with this base"})
         for required in module.requires:
@@ -119,7 +125,7 @@ def resolve_assignment(endpoint, assignment, quota, library, *, refill):
             for difficulty, count in tiers.items():
                 have = sum(m.type == module_type and m.difficulty == difficulty for m in selected)
                 pool = [m for m in library if m.type == module_type and m.difficulty == difficulty
-                        and _compatible(m, endpoint.get("base_type")) and m not in selected and not _conflicts(m, selected)]
+                        and _compatible(m, endpoint.get("base_type"), endpoint.get("role")) and m not in selected and not _conflicts(m, selected)]
                 for _ in range(max(0, int(count) - have)):
                     if not pool:
                         issues.append({"code": "quota_unfilled", "message": f"Cannot fill {difficulty} {module_type} quota"})
@@ -151,4 +157,27 @@ def validate_module_plan_for_start(plan, infrastructure, library):
             elif not _compatible(module, endpoint.get("base_type")):
                 issues.append({"code": "incompatible_base", "vm_id": vm_id, "module_id": module_id,
                                "message": f"Module '{module_id}' is incompatible with this base"})
+    return issues
+
+
+def validate_green_assignments(plan, infrastructure, library):
+    normalized = normalize_module_plan(plan)
+    green_ids = {row["id"] for row in assignable_endpoints(infrastructure) if row["role"] == "green"}
+    by_id = {module.id: module for module in library}
+    issues = []
+    expo_count = 0
+    for vm_id in green_ids:
+        assignment = normalized["assignments"].get(vm_id, {})
+        if assignment.get("mode") != "manual_only":
+            issues.append({"code": "green_manual_only", "vm_id": vm_id,
+                           "message": "Green infrastructure assignments must be manual-only"})
+        for module_id in assignment.get("resolved_module_ids", []):
+            module = by_id.get(module_id)
+            if not module or module.type != "green_infrastructure":
+                issues.append({"code": "invalid_green_module", "vm_id": vm_id, "module_id": module_id,
+                               "message": "Green nodes accept only deployment modules"})
+            if module_id == "expo_it":
+                expo_count += 1
+    if expo_count > 1:
+        issues.append({"code": "duplicate_expo_it", "message": "Only one Expo-IT deployment is allowed per event"})
     return issues

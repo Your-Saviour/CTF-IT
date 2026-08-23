@@ -9,7 +9,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from api.database import get_db
-from api.models import Event, HintReveal, Team, User, VerificationAttempt, VM, VMGoal, VMModule
+from api.models import (
+    Event, EventIntegration, GreenDeploymentState, HintReveal, IntegrationDestination,
+    Team, User, VerificationAttempt, VM, VMGoal, VMModule,
+)
 from api.routes.admin import require_admin
 from api.services.caldera import CalderaClient, get_caldera_api_key
 from api.services.verifier_account import scoring_enabled_vm_ids
@@ -205,6 +208,13 @@ async def event_dashboard_data(
 
     team_map = {team.id: team for team in teams}
     vm_map = {vm.id: vm for vm in vms}
+    green_states = {row.vm_id: row for row in db.query(GreenDeploymentState).filter(
+        GreenDeploymentState.vm_id.in_(vm_ids),
+    ).order_by(GreenDeploymentState.id).all()} if vm_ids else {}
+    green_bindings = {row.destination.owner_green_vm_id: row for row in db.query(EventIntegration).join(
+        IntegrationDestination,
+    ).filter(EventIntegration.event_id == event_id,
+             IntegrationDestination.owner_green_vm_id.is_not(None)).all()}
     modules_by_vm: dict[int, list[VMModule]] = {}
     goals_by_vm: dict[int, list[VMGoal]] = {}
     for module in modules:
@@ -225,6 +235,7 @@ async def event_dashboard_data(
         assigned = [m for m in modules_by_vm.get(vm.id, []) if m.stage == "preapplied"]
         completed = sum(1 for m in assigned if m.completed)
         agent = agents_by_ip.get(vm.ip_address) if vm.ip_address else None
+        is_green = vm.role == "green_service"
         agent_alive = _agent_alive(agent) if caldera_available else False
         vm_status = (vm.status or "registered").lower()
         stored_agent_status = (vm.agent_status or "").lower()
@@ -236,14 +247,16 @@ async def event_dashboard_data(
 
         if vm_status == "failed" or stored_agent_status == "failed" or str((agent or {}).get("status", "")).lower() == "failed":
             health = "failed"
-        elif stalled or (vm_status == "active" and not agent_alive):
+        elif stalled or (vm_status == "active" and not is_green and not agent_alive):
             health = "degraded"
-        elif vm_status == "active" and agent_alive:
+        elif vm_status == "active" and (is_green or agent_alive):
             health = "healthy"
         else:
             health = "pending"
 
-        team_name = team_map[vm.team_id].name if vm.team_id in team_map else str(vm.team_id)
+        team_name = "Shared green infrastructure" if is_green else (
+            team_map[vm.team_id].name if vm.team_id in team_map else str(vm.team_id)
+        )
         if health == "failed":
             alerts.append({
                 "type": "vm_failed", "severity": "critical", "vm_id": vm.id,
@@ -257,13 +270,15 @@ async def event_dashboard_data(
                 "message": f"{vm.hostname or 'VM ' + str(vm.id)} provisioning has stalled for more than 10 minutes.",
                 "detail": vm.provision_step,
             })
-        elif vm_status == "active" and caldera_available and not agent:
+        elif vm_status == "active" and not is_green and caldera_available and not agent:
             alerts.append({
                 "type": "agent_missing", "severity": "warning", "vm_id": vm.id,
                 "team_name": team_name,
                 "message": f"{vm.hostname or 'VM ' + str(vm.id)} has no Caldera agent.",
             })
 
+        green_state = green_states.get(vm.id)
+        green_binding = green_bindings.get(vm.id)
         vm_results.append({
             "id": vm.id,
             "hostname": vm.hostname,
@@ -274,6 +289,14 @@ async def event_dashboard_data(
             "health": health,
             "provision_step": vm.provision_step,
             "provision_error": vm.provision_error,
+            "ownership": "event" if is_green else "team",
+            "green_key": vm.green_key,
+            "resolved_commit": green_state.resolved_commit if green_state else None,
+            "service_url": green_state.service_url if green_state else None,
+            "service_health": green_state.health_status if green_state else None,
+            "integration_status": green_binding.last_status if green_binding and green_binding.last_status else (
+                "configured" if green_binding and green_binding.enabled else None
+            ),
             "module_progress": {
                 "assigned": len(assigned), "completed": completed,
                 "percentage": round(completed * 100 / len(assigned), 1) if assigned else 0,

@@ -9,7 +9,7 @@
   <header class="planner-toolbar">
     <div class="planner-context-row">
       <a class="planner-brand" href="/admin">&gt;_ CTF Platform</a>
-      <div class="planner-identity"><div><h1>{{ event_name }}</h1><p>Canonical network repeated for every team</p></div><span class="planner-event-status">{{ event_status }}</span></div>
+      <div class="planner-identity"><div><h1>{{ event_name }}</h1><p>Team sites repeat per team; green infrastructure is shared</p></div><span class="planner-event-status">{{ event_status }}</span></div>
       <div class="planner-account">
         <span>{{ user.username }}</span>
         <form method="post" action="/auth/logout"><button class="btn" type="submit">Logout</button></form>
@@ -40,6 +40,7 @@
         <button data-add="site">+ Add site</button>
         <button data-add="zone">+ Add zone</button>
         <button data-add="vm">+ Add VM</button>
+        <button data-add="green_vm">+ Add green VM</button>
       </div>
       <nav id="planner-outline" aria-label="Planned infrastructure"></nav>
     </aside>

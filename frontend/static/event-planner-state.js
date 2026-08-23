@@ -18,7 +18,10 @@ export function normalizeClientInfrastructure(value) {
       listen_port: 51820,
     },
     sites: [],
+    green_infrastructure: {vms: []},
   });
+  result.green_infrastructure ??= {vms: []};
+  result.green_infrastructure.vms ??= [];
   for (const site of result.sites || []) site.firewall_team ??= 'blue';
   for (const site of result.sites || []) for (const zone of site.zones || []) {
     const reserved = new Set((zone.endpoints || []).filter(row => row.count == null).map(row => row.key));
@@ -40,6 +43,10 @@ export function normalizeClientInfrastructure(value) {
 
 export function nodeIndex(infrastructure) {
   const map = new Map([['gateway', {type: 'gateway', value: infrastructure.vpn_gateway, parent: null, path: 'vpn_gateway'}]]);
+  (infrastructure.green_infrastructure?.vms || []).forEach((vm, vi) => map.set(`green:${vm.key}`, {
+    type: 'green_vm', value: vm, parent: null,
+    path: `green_infrastructure.vms[${vi}]`, shared: true,
+  }));
   (infrastructure.sites || []).forEach((site, si) => {
     const sid = `site:${site.key}`;
     const firewallZoneId = `firewall-zone:${site.key}`;
@@ -114,9 +121,15 @@ export function effectiveNodeColor(index, layout, nodeId) {
 
 export function renameStructuralKey(state, nodeId, rawKey) {
   const index = nodeIndex(state.infrastructure), node = index.get(nodeId);
-  if (!node || !['site', 'zone', 'vm'].includes(node.type)) return {state, nodeId};
+  if (!node || !['site', 'zone', 'vm', 'green_vm'].includes(node.type)) return {state, nodeId};
   const key = slugify(rawKey), parts = nodeId.substring(nodeId.indexOf(':') + 1).split('/');
   node.value.key = key;
+  if (node.type === 'green_vm') {
+    const remap = entries => Object.fromEntries(Object.entries(entries || {}).map(([id, value]) =>
+      [id === `green:${parts[0]}` ? `green:${key}` : id, value]));
+    state.layout = {version: 1, nodes: remap(state.layout?.nodes), themes: remap(state.layout?.themes)};
+    return {state, nodeId: `green:${key}`};
+  }
   const oldToken = node.type === 'site' ? parts[0] : node.type === 'zone' ? `${parts[0]}/${parts[1]}` : parts.join('/');
   const newToken = node.type === 'site' ? key : node.type === 'zone' ? `${parts[0]}/${key}` : `${parts[0]}/${parts[1]}/${key}`;
   const remapEntries = entries => {
@@ -169,6 +182,14 @@ export function validateClientInfrastructure(value, catalogues = {}) {
     if (!String(gateway.region || '').trim()) add('vpn_gateway.region', 'gateway', 'Region is required');
     if (!Number.isInteger(Number(gateway.listen_port)) || Number(gateway.listen_port) < 1 || Number(gateway.listen_port) > 65535) add('vpn_gateway.listen_port', 'gateway', 'Listen port must be from 1 to 65535');
   }
+  const greenKeys = new Set();
+  (value?.green_infrastructure?.vms || []).forEach((vm, vi) => {
+    const path = `green_infrastructure.vms[${vi}]`, id = `green:${vm.key}`;
+    key(vm.key, `${path}.key`, id, greenKeys);
+    if (!String(vm.name || '').trim()) add(`${path}.name`, id, 'VM name is required');
+    machine(vm, path, id);
+    if (!String(vm.region || '').trim()) add(`${path}.region`, id, 'Region is required');
+  });
   if (!(value?.sites || []).length) add('sites', 'gateway', 'Add at least one site');
   const siteKeys = new Set();
   (value?.sites || []).forEach((site, si) => {

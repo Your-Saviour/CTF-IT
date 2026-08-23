@@ -108,6 +108,9 @@ def test_dashboard_page_auth_redirects_and_browser_contract():
             assert "window.setInterval(poll, 10000)" in response.text
             assert "Stale · " in response.text
             assert 'href="/admin/infrastructure/vms/' in response.text
+            assert "Integration synchronization" in response.text
+            assert "Sync now" in response.text
+            assert "Expo-IT UST synchronization" not in response.text
             missing = client.get("/admin/events/99999/dashboard", follow_redirects=False)
             assert missing.status_code == 303
             assert missing.headers["location"] == "/admin"
